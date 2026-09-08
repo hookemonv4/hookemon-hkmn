@@ -13,6 +13,7 @@ import { openLedger, addTask, claimTask, completeTask, projectTasks } from '../l
 import { projectState } from '../lib/state.mjs';
 import { taskEvidenceContext, traceCheck } from '../lib/reqs.mjs';
 import { writeJson } from '../lib/util.mjs';
+import { validateGateEvidenceReceipt } from '../lib/gates.mjs';
 import {
   approvalSubjectHashes, overrideSubjectInputs,
   writeOwnerApproval as writeBoundOwnerApproval,
@@ -399,7 +400,7 @@ test('the exact Phase 1 baseline owner token authorizes init I2', () => {
   assert.equal(receipt.type, 'owner-cleanroom-baseline-approved');
 });
 
-test('the recorded init I2 approval binds the current policy', () => {
+test('the historical init I2 approval preserves its recorded policy and cannot authorize the current policy', () => {
   const run = JSON.parse(readFileSync(join(templateRoot, 'gates', 'runs', 'init.json'), 'utf8'));
   const receipt = JSON.parse(readFileSync(
     join(templateRoot, 'receipts', `${run.items.I2.receipt}.json`),
@@ -415,8 +416,13 @@ test('the recorded init I2 approval binds the current policy', () => {
 
   assert.equal(approval.schema, 'v4-owner-approval-v2');
   assert.deepEqual(Object.keys(approval.subjectHashes), subjectInputs);
-  assert.equal(approval.subjectHashes['policy/policy.json'], currentHashes['policy/policy.json']);
+  assert.equal(approval.subjectHashes['policy/policy.json'], receipt.inputHashes['policy/policy.json']);
+  assert.notEqual(approval.subjectHashes['policy/policy.json'], currentHashes['policy/policy.json']);
   assert.equal(Object.keys(approval.subjectHashes).some(input => input.startsWith('future/')), false);
+  assert.match(
+    validateGateEvidenceReceipt(templateRoot, 'init', 'I2', receipt),
+    /owner approval invalid: owner approval subject hash for (?:gates\/init\.json|policy\/policy\.json) does not match current content/,
+  );
 });
 
 test('current Phase 3 interface evidence remains non-authoritative', () => {

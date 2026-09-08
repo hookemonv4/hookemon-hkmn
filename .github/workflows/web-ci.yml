@@ -1,14 +1,6 @@
 name: Hookemon CI
 on:
-  pull_request:
-    paths:
-      - 'apps/web/**'
-      - '.github/workflows/web-ci.yml'
-  push:
-    branches: [main]
-    paths:
-      - 'apps/web/**'
-      - '.github/workflows/web-ci.yml'
+  workflow_dispatch:
 permissions:
   contents: read
 concurrency:

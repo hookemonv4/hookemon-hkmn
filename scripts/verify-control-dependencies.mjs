@@ -46,14 +46,16 @@ const RELEASE_CLOSURE_BUILDER_MANIFEST_PATH = 'scripts/programmable/vendor/progr
 const FORK_PIN_VERIFIER_IMPORT_PATH = 'scripts/programmable/lib/keccak.mjs';
 const CONTROL_DEPENDENCY_VERIFIER_PATH = 'scripts/verify-control-dependencies.mjs';
 const CONTROL_DEPENDENCY_VERIFIER_IMPORT_PATH = 'scripts/lib/util.mjs';
+const CI_CHANGE_CLASSIFIER_PATH = 'scripts/ci-change-scope.mjs';
+const SUPPORTED_CI_CHANGE_CLASSIFIER_SHA256 = '32c67ba0f0c7740f841dbcb3f2a45950bc82bba30385f2435f0ca111a5ebb0df';
 const ARCHIVE_FORK_PROOF_TEST_PATH = 'packages/contracts/test/integration/RobinhoodV4ArchiveFork.t.sol';
-const SUPPORTED_V4_GATES_WORKFLOW_SHA256 = '41d59fb12a421ef0ef4ea7833be2dde68ee01fdff134f41a6dfc139849812740';
-const SUPPORTED_FORK_PROOF_WORKFLOW_SHA256 = 'b732c6906c1bcd79a5577db3dcd21bf3ecd4a95d59a9b04d13de6f7d56a1a975';
+const SUPPORTED_V4_GATES_WORKFLOW_SHA256 = '39aff509012d478a69f9e28268e289d422a4197d9225ba5137cb8ad01a9b0fa5';
+const SUPPORTED_FORK_PROOF_WORKFLOW_SHA256 = '487e589ae7e7af7a82317b200ed109f135591a37bb428736f0500a0f01c41d79';
 const SUPPORTED_FORK_PIN_CANARY_WORKFLOW_SHA256 = 'd96801f9885587e84ffc390acbee7f2b973aff1ad42e4b98b5d25d31aa5cca2a';
 const SUPPORTED_IDENTITY_GATE_WORKFLOW_SHA256 = '65a80e8c0ac8cc4430b12e7aaf61c640e38a398fe40f4f604fd742f56a8defeb';
 const SUPPORTED_CONTROL_GATE_WORKFLOW_SHA256 = 'cfacbe4a87600a4aa3d7fbe3708d7f709aaf419c1eb565c1f223ac55dc8c4f74';
 const SUPPORTED_LAUNCH_GATE_WORKFLOW_SHA256 = 'fdd1504ca96f46fb69de1575c771b03c065588c0756d2cfc729f126308d504e4';
-const SUPPORTED_WEB_CI_WORKFLOW_SHA256 = '49d83a3c5e41e6a18ec36a70b3fd1983320281dc32bae0d3b27a22503eff07cc';
+const SUPPORTED_WEB_CI_WORKFLOW_SHA256 = '4ae0304b37799e4d05409a2fb79b2b03511a7dc64c41ff1fc6993b32181fc4c7';
 const SUPPORTED_DEPLOY_WEB_WORKFLOW_SHA256 = 'b36cee8a361e491879fc18d33f9008c77e803106626588260e63ce10bc450864';
 const SUPPORTED_COMMIT_IDENTITY_ALLOWLIST_SHA256 = '9b89ef928d69676f07bea9052d0c5bb2e4c1c151de5dc590d9c7685711316cba';
 const SUPPORTED_FORK_PIN_VERIFIER_SHA256 = '09249c50f08b092305e497b6a9430d3acab0131c689ce58862f1f700668ef94a';
@@ -410,6 +412,10 @@ function canonicalFoundryInstallBlock(pins) {
 }
 
 function verifyInstallerDataFlow(pins, workflow, forkProofWorkflow, errors) {
+  for (const [source, label] of [[workflow, 'Install pinned Node (classification)'], [forkProofWorkflow, 'Install pinned Node (classification)'], [workflow, 'Install pinned Node (financial)']]) {
+    const block = workflowInstallRunBlock(source, label, errors);
+    if (block !== null && block !== canonicalNodeInstallBlock(pins)) errors.push('Node install block must match the canonical verified data flow (' + label + ')');
+  }
   const nodeBlock = workflowInstallRunBlock(workflow, 'Install pinned Node', errors);
   if (nodeBlock !== null && nodeBlock !== canonicalNodeInstallBlock(pins)) {
     errors.push('Node install block must match the canonical verified data flow');
@@ -788,6 +794,9 @@ const REQUIRED_WEB_CI_COMMANDS = Object.freeze([
 ]);
 
 function verifyWebCiSemantics(workflow, errors) {
+  if (!/^on:\n  workflow_dispatch:\npermissions:/m.test(workflow)) {
+    errors.push('standalone web-ci must be dispatch-only; automatic web checks belong to v4-gates');
+  }
   if (!/^name:\s*Hookemon CI\s*$/m.test(workflow)) {
     errors.push('web-ci workflow must be named Hookemon CI');
   }
@@ -1131,6 +1140,24 @@ function regularRepositoryFileHash(root, relativePath, label, errors) {
   }
 }
 
+function verifyCiChangeClassifierIntegrity(root, pins, errors) {
+  const pin = pins.controlScripts?.ciChangeClassifier ?? {};
+  if (!sameKeys(pin, ['path', 'sha256']) || pin.path !== CI_CHANGE_CLASSIFIER_PATH) {
+    errors.push(`CI change classifier must pin only path and sha256 for ${CI_CHANGE_CLASSIFIER_PATH}`);
+  }
+  if (pin.sha256 !== SUPPORTED_CI_CHANGE_CLASSIFIER_SHA256) {
+    errors.push('CI change classifier digest must match the supported release');
+  }
+  const actualSha256 = regularRepositoryFileHash(root, CI_CHANGE_CLASSIFIER_PATH, 'CI change classifier', errors);
+  if (actualSha256 !== null && actualSha256 !== pin.sha256) {
+    errors.push('CI change classifier digest does not match its candidate pin');
+  }
+  const sources = new Map();
+  if (actualSha256 !== null) sources.set(CI_CHANGE_CLASSIFIER_PATH, readFileSync(join(root, CI_CHANGE_CLASSIFIER_PATH), 'utf8'));
+  verifyPinnedImportClosure([{ path: CI_CHANGE_CLASSIFIER_PATH }], sources, 'CI change classifier import closure', errors);
+  return { path: CI_CHANGE_CLASSIFIER_PATH, expectedSha256: pin.sha256 ?? null, actualSha256 };
+}
+
 function verifyForkPinVerifierIntegrity(root, pins, errors) {
   const pin = pins.controlScripts?.forkPinVerifier ?? {};
 
@@ -1459,6 +1486,103 @@ export function verifyForkPinVerifierWorkflow(workflow, label, pin, errors) {
   }
 }
 
+
+const SUPPORTED_CI_SCOPE_STEPS = Object.freeze({
+  'Classify changes with the protected base': '30361e297d7531abaa98c8aa7b0fbd204b83c4b7e4cb150d731aafc0bb6702c5',
+  'Require every applicable check to succeed': 'fa0b4bd522312b743eb1d6f15382478fb04978856b59ac677eb6f436e2a537a3',
+  'Require the applicable archive proof': '4ac43fdc5e3931e7c73c90bb612c6bb5022b50f525ba0512d3c29a8e9e91aa86',
+});
+
+function verifyCiScopeStep(job, name, errors) {
+  const steps = job.split(/(?=^      - )/m).filter(step => /^      - /m.test(step));
+  const matches = steps.filter(step => step.startsWith('      - name: ' + name + '\n'));
+  // Bind the complete step, including event/result environment expressions, not merely
+  // command presence. An altered producer, swallowed failure or unconditional success fails.
+  if (matches.length !== 1 || sha256(matches[0].trimEnd()) !== SUPPORTED_CI_SCOPE_STEPS[name]) {
+    errors.push(name + ' must retain the supported fail-closed scope and result binding');
+  }
+}
+
+function requireCiLines(source, lines, label, errors) {
+  for (const line of lines) {
+    if (!source.split('\n').includes(line)) errors.push(label + ' must retain: ' + line.trim());
+  }
+}
+
+function ciJobMap(workflow, ids, label, errors) {
+  const jobs = splitWorkflowJobs(workflow);
+  if (!sameStringArray(jobs.map(job => job.id), ids)) errors.push(label + ' must retain the supported CI job graph');
+  return new Map(jobs.map(job => [job.id, job.text.trimEnd()]));
+}
+
+function requireUnconditionalCiJob(job, label, errors) {
+  if (/^\s+(?:if|needs|continue-on-error):/m.test(job)) {
+    errors.push(label + ' must run unconditionally without dependency skips or tolerated failures');
+  }
+}
+
+export function verifyCiLaneWorkflowSemantics(workflow, forkProofWorkflow, errors) {
+  const expression = value => '$' + '{{ ' + value + ' }}';
+  const jobs = ciJobMap(workflow, ['classify', 'universal', 'phase3-bytecode', 'financial', 'web-ci', 'gates'], 'v4-gates', errors);
+  const forkJobs = ciJobMap(forkProofWorkflow, ['classify', 'main-proof', 'pull-request-proof', 'fork-proof'], 'fork-proof', errors);
+  const get = (map, id) => map.get(id) ?? '';
+  const classify = get(jobs, 'classify');
+  if (classify !== get(forkJobs, 'classify')) errors.push('CI workflows must use identical protected-base classification jobs');
+  requireUnconditionalCiJob(classify, 'CI classification', errors);
+  requireCiLines(classify, [
+    ...['scope', 'web-required', 'base', 'head'].map(key => '      ' + key + ': ' + expression('steps.scope.outputs.' + key)),
+    '          ref: ' + expression('github.event.pull_request.base.sha || github.event.before || github.sha'),
+    '          fetch-depth: 0',
+    '          persist-credentials: false',
+  ], 'CI classification', errors);
+  verifyCiScopeStep(classify, 'Classify changes with the protected base', errors);
+  for (const id of ['universal', 'web-ci']) requireUnconditionalCiJob(get(jobs, id), id, errors);
+  requireCiLines(get(jobs, 'universal'), [
+    '        run: node scripts/verify-control-dependencies.mjs',
+    '        run: node scripts/test-manifest.mjs check',
+    '      - run: node scripts/check-cleanroom.mjs .',
+    '          node scripts/check-append-only.mjs "$range_base" "$range_head" "$' + '{append_only_options[@]}"',
+    '          node "$RUNNER_TEMP/check-commit-identity.mjs" "$range_base" "$range_head"',
+  ], 'universal CI', errors);
+  requireCiLines(get(jobs, 'web-ci'), [
+    '    name: web-ci',
+    '        working-directory: apps/web',
+    '        run: npm ci',
+    '        run: npm test',
+    '        run: npm run lint',
+  ], 'web CI', errors);
+  for (const id of ['universal', 'phase3-bytecode', 'financial', 'web-ci']) {
+    requireCiLines(get(jobs, id), ['          ref: ' + expression('github.event.pull_request.head.sha || github.sha')], id, errors);
+  }
+  for (const [map, id, condition] of [
+    [jobs, 'phase3-bytecode', "needs.classify.outputs.scope == 'full'"],
+    [jobs, 'financial', "needs.classify.outputs.scope == 'full'"],
+    [forkJobs, 'main-proof', "needs.classify.outputs.scope == 'full' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')"],
+    [forkJobs, 'pull-request-proof', "needs.classify.outputs.scope == 'full' && github.event_name == 'pull_request'"],
+  ]) {
+    const job = get(map, id);
+    requireCiLines(job, ['    needs: [classify]', '    if: ' + expression(condition)], id, errors);
+    if (/^ {6,}(?:if|continue-on-error):/m.test(job) || /^    continue-on-error:/m.test(job)) {
+      errors.push(id + ' must not skip or tolerate failures inside the full lane');
+    }
+    if (map === forkJobs) requireCiLines(job, ['    environment: fork-proof'], id, errors);
+  }
+  verifyLocalPhase2Gates(get(jobs, 'financial'), errors);
+  for (const [map, id, dependencies, step] of [
+    [jobs, 'gates', 'classify, universal, phase3-bytecode, financial, web-ci', 'Require every applicable check to succeed'],
+    [forkJobs, 'fork-proof', 'classify, main-proof, pull-request-proof', 'Require the applicable archive proof'],
+  ]) {
+    const job = get(map, id);
+    requireCiLines(job, ['    needs: [' + dependencies + ']', '    if: ' + expression('!cancelled()')], id, errors);
+    if ((job.match(/^      - /gm) ?? []).length !== 1
+        || /^ {6,}(?:if|continue-on-error):/m.test(job)
+        || /^    (?:environment|continue-on-error):/m.test(job)) {
+      errors.push(id + ' must remain an unconditional terminal result check outside protected environments');
+    }
+    verifyCiScopeStep(job, step, errors);
+  }
+}
+
 const CONTROL_PIN_BUMP_SCHEMA = 'hookemon.control-gate-pin-bump.v1';
 // v1 binds candidateTree, but the approval record itself changes that commit's tree and therefore
 // its SHA. v2 instead binds only deterministic content available before the record is written.
@@ -1475,7 +1599,7 @@ function sameKeys(object, expectedKeys) {
   return actualKeys.every(key => expected.has(key));
 }
 
-function controlSurfaceDescriptors(pins, errors, source) {
+function controlSurfaceDescriptors(pins, errors, source, { legacyClassifierBase = false } = {}) {
   const descriptors = [];
   const add = (label, path, pin) => {
     if (pin?.path !== path) {
@@ -1514,6 +1638,9 @@ function controlSurfaceDescriptors(pins, errors, source) {
   add('control dependency verifier', CONTROL_DEPENDENCY_VERIFIER_PATH, controlClosure[0]);
   add('control dependency verifier import', CONTROL_DEPENDENCY_VERIFIER_IMPORT_PATH, controlClosure[1]);
   add('archive fork proof test', ARCHIVE_FORK_PROOF_TEST_PATH, pins.contentAddresses?.archiveForkProofTest);
+  if (!legacyClassifierBase) {
+    add('CI change classifier', CI_CHANGE_CLASSIFIER_PATH, pins.controlScripts?.ciChangeClassifier);
+  }
   return descriptors;
 }
 
@@ -1624,9 +1751,27 @@ export function verifyBaseControlSurface({
   baseCheckerBlob,
   candidateBlobs,
   candidateVerification,
+  baseClassifierBlob,
 }) {
   const errors = [];
-  const baseDescriptors = controlSurfaceDescriptors(basePins ?? {}, errors, 'protected base');
+  const legacyClassifierBase = !Object.hasOwn(basePins?.controlScripts ?? {}, 'ciChangeClassifier');
+  if (legacyClassifierBase) {
+    if (baseClassifierBlob !== null) {
+      errors.push('legacy classifier bootstrap requires verified absence of the classifier in the protected base tree');
+    }
+    if (candidatePins?.controlScripts?.ciChangeClassifier?.sha256 !== SUPPORTED_CI_CHANGE_CLASSIFIER_SHA256) {
+      errors.push('legacy classifier bootstrap must introduce the supported CI change classifier');
+    }
+    if (basePins?.controlScripts?.controlDependencyVerifier?.sha256
+        === candidatePins?.controlScripts?.controlDependencyVerifier?.sha256) {
+      errors.push('legacy classifier bootstrap requires an owner-approved control dependency verifier pin change');
+    }
+  } else if (baseClassifierBlob?.mode !== '100644' || baseClassifierBlob?.type !== 'blob'
+      || !/^[0-9a-f]{40,64}$/.test(baseClassifierBlob?.blobId ?? '')
+      || baseClassifierBlob?.sha256 !== basePins.controlScripts.ciChangeClassifier?.sha256) {
+    errors.push('protected base CI change classifier must be a regular Git blob matching its base pin');
+  }
+  const baseDescriptors = controlSurfaceDescriptors(basePins ?? {}, errors, 'protected base', { legacyClassifierBase });
   const candidateDescriptors = controlSurfaceDescriptors(candidatePins ?? {}, errors, 'candidate');
   const changes = descriptorChanges(baseDescriptors, candidateDescriptors);
 
@@ -1655,6 +1800,10 @@ export function verifyBaseControlSurface({
   verifyCandidateClosure(
     controlDependencyVerifierClosureEntries(candidatePins?.controlScripts?.controlDependencyVerifier ?? {}, errors),
     'candidate control dependency verifier import closure',
+  );
+  verifyCandidateClosure(
+    [{ path: CI_CHANGE_CLASSIFIER_PATH, sha256: candidatePins?.controlScripts?.ciChangeClassifier?.sha256 }],
+    'candidate CI change classifier import closure',
   );
 
   if (!SHA256_PATTERN.test(basePinsSha256 ?? '') || !SHA256_PATTERN.test(candidatePinsSha256 ?? '')) {
@@ -1729,6 +1878,7 @@ function controlSurfacePaths() {
     CONTROL_DEPENDENCY_VERIFIER_PATH,
     CONTROL_DEPENDENCY_VERIFIER_IMPORT_PATH,
     ARCHIVE_FORK_PROOF_TEST_PATH,
+    CI_CHANGE_CLASSIFIER_PATH,
   ];
 }
 
@@ -1738,6 +1888,7 @@ export function verifyBaseControlDependencies(rootPath, baseTree, candidateTree)
   let basePins;
   let basePinsSha256 = null;
   let baseCheckerBlob = null;
+  let baseClassifierBlob;
   let candidatePins;
   let candidatePinsSha256 = null;
   let candidateVerification;
@@ -1748,6 +1899,8 @@ export function verifyBaseControlDependencies(rootPath, baseTree, candidateTree)
     basePins = JSON.parse(bytes.toString('utf8'));
     basePinsSha256 = sha256(bytes);
     baseCheckerBlob = gitBlobAtTree(baseTree, CONTROL_DEPENDENCY_VERIFIER_PATH).blobId;
+    const classifierEntries = gitData(['ls-tree', '-z', baseTree, '--', CI_CHANGE_CLASSIFIER_PATH]);
+    baseClassifierBlob = classifierEntries.length === 0 ? null : gitBlobAtTree(baseTree, CI_CHANGE_CLASSIFIER_PATH);
     const candidatePinsBlob = gitBlobAtTree(candidateTree, 'product/dependency-pins.json');
     candidatePins = parseCandidateJson(candidatePinsBlob, 'product/dependency-pins.json');
     candidatePinsSha256 = candidatePinsBlob.sha256;
@@ -1770,6 +1923,7 @@ export function verifyBaseControlDependencies(rootPath, baseTree, candidateTree)
     baseCheckerBlob,
     candidateBlobs,
     candidateVerification,
+    baseClassifierBlob,
   });
   return {
     ...report,
@@ -2135,6 +2289,7 @@ export function verifyControlDependencies(rootPath, options = {}) {
   const forkPinVerifier = verifyForkPinVerifierIntegrity(root, pins, errors);
   const releaseClosureBuilder = verifyReleaseClosureBuilderIntegrity(root, pins, errors);
   const controlDependencyVerifier = verifyControlDependencyVerifierIntegrity(root, pins, errors);
+  const ciChangeClassifier = verifyCiChangeClassifierIntegrity(root, pins, errors);
   const archiveForkProofTest = verifyArchiveForkProofTestIntegrity(root, pins, errors);
   verifyForkPinVerifierWorkflow(forkProofWorkflow, FORK_PROOF_WORKFLOW_PATH, {
     ...pins.controlScripts?.forkPinVerifier,
@@ -2145,6 +2300,7 @@ export function verifyControlDependencies(rootPath, options = {}) {
   }, errors);
   verifyForkPinVerifierWorkflow(forkPinCanaryWorkflow, FORK_PIN_CANARY_WORKFLOW_PATH, pins.controlScripts?.forkPinVerifier ?? {}, errors);
   verifyInstallerDataFlow(pins, workflow, forkProofWorkflow, errors);
+  verifyCiLaneWorkflowSemantics(workflow, forkProofWorkflow, errors);
   verifyLocalPhase2Gates(workflow, errors);
   const nodeWorkflow = verifyNodeManifestAndWorkflow(pins, workflow, errors);
   const foundry = verifyFoundryManifestAndWorkflow(pins, workflow, errors);
@@ -2243,6 +2399,7 @@ export function verifyControlDependencies(rootPath, options = {}) {
       forkPinVerifier,
       releaseClosureBuilder,
       controlDependencyVerifier,
+      ciChangeClassifier,
     },
     controlInputs: {
       archiveForkProofTest,

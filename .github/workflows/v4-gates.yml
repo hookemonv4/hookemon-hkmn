@@ -9,12 +9,248 @@ concurrency:
   group: v4-gates-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 jobs:
+  classify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      scope: ${{ steps.scope.outputs.scope }}
+      web-required: ${{ steps.scope.outputs.web-required }}
+      base: ${{ steps.scope.outputs.base }}
+      head: ${{ steps.scope.outputs.head }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ github.event.pull_request.base.sha || github.event.before || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install pinned Node (classification)
+        shell: bash
+        run: |
+          set -euo pipefail
+          node_version='24.19.0'
+          node_url='https://nodejs.org/download/release/v24.19.0/node-v24.19.0-linux-x64.tar.xz'
+          node_archive_sha256='14b342e71204f811bde6153be8e04b62aef63c236fef92b55f9c83154b409647'
+          node_executable_sha256='bc17c508ffeed0ec622934f9b7fa72f8e78da65350e63c3eceb56fa688aa5e12'
+          node_archive="${RUNNER_TEMP}/node-v${node_version}-linux-x64.tar.xz"
+          node_root="${RUNNER_TEMP}/node-v${node_version}-linux-x64"
+          node_executable="${node_root}/bin/node"
+          curl --fail --location --proto '=https' --tlsv1.2 --silent --show-error --output "$node_archive" "$node_url"
+          printf '%s  %s\n' "$node_archive_sha256" "$node_archive" | sha256sum --check
+          tar -xJf "$node_archive" -C "$RUNNER_TEMP"
+          printf '%s  %s\n' "$node_executable_sha256" "$node_executable" | sha256sum --check
+          echo "${node_root}/bin" >> "$GITHUB_PATH"
+          [[ "$("$node_executable" --version)" == "v${node_version}" ]]
+      - name: Classify changes with the protected base
+        id: scope
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PUSH_BASE_SHA: ${{ github.event.before }}
+          PUSH_HEAD_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          export GIT_NO_REPLACE_OBJECTS=1
+          case "$EVENT_NAME" in
+            pull_request) range_base="$PR_BASE_SHA"; range_head="$PR_HEAD_SHA" ;;
+            push) range_base="$PUSH_BASE_SHA"; range_head="$PUSH_HEAD_SHA" ;;
+            workflow_dispatch)
+              [[ "$GITHUB_REF" == 'refs/heads/main' ]] || exit 1
+              range_base="$PUSH_HEAD_SHA"; range_head="$PUSH_HEAD_SHA" ;;
+            *) echo 'Unsupported CI classification event' >&2; exit 1 ;;
+          esac
+          [[ "$range_base" =~ ^[0-9a-f]{40}$ && "$range_head" =~ ^[0-9a-f]{40}$ ]] || exit 1
+          git cat-file -e "${range_base}^{commit}"
+          if ! git cat-file -e "${range_head}^{commit}" 2>/dev/null; then
+            git fetch --no-tags origin "$range_head"
+          fi
+          git cat-file -e "${range_head}^{commit}"
+          git merge-base --is-ancestor "$range_base" "$range_head"
+          node --input-type=module - "$range_base" "$RUNNER_TEMP" <<'NODE'
+          import { execFileSync } from 'node:child_process';
+          import { writeFileSync } from 'node:fs';
+          import { createHash } from 'node:crypto';
+          import { join } from 'node:path';
+          const [base, temp] = process.argv.slice(2);
+          const git = (...args) => execFileSync('git', args);
+          function blob(path) {
+            const entry = git('ls-tree', '-z', base, '--', path).toString();
+            if (!entry) return null;
+            const records = entry.split('\x00');
+            const [metadata, ...names] = records[0].split('\t');
+            const [mode, type, oid, ...extra] = metadata.split(' ');
+            if (records.length !== 2 || records[1] !== '' || names.length !== 1 || names[0] !== path || mode !== '100644' || type !== 'blob' || !/^[0-9a-f]{40}$/.test(oid ?? '') || extra.length) throw new Error('Invalid protected CI blob');
+            return git('show', `${base}:${path}`);
+          }
+          const pinsBytes = blob('product/dependency-pins.json');
+          if (!pinsBytes) throw new Error('Missing protected dependency pins');
+          const pins = JSON.parse(pinsBytes);
+          const pin = pins.controlScripts?.ciChangeClassifier;
+          const path = 'scripts/ci-change-scope.mjs';
+          const bytes = blob(path);
+          if (pin === undefined && bytes === null) {
+            writeFileSync(join(temp, 'ci-helper-mode'), 'bootstrap');
+          } else {
+            if (pin?.path !== path || !/^[0-9a-f]{64}$/.test(pin.sha256 ?? '') || bytes === null) throw new Error('Incomplete protected classifier binding');
+            if (createHash('sha256').update(bytes).digest('hex') !== pin.sha256) throw new Error('Protected classifier digest mismatch');
+            writeFileSync(join(temp, 'ci-change-scope.mjs'), bytes);
+            writeFileSync(join(temp, 'ci-helper-mode'), 'verified');
+          }
+          NODE
+          if [[ "$(cat "$RUNNER_TEMP/ci-helper-mode")" == 'bootstrap' ]]; then
+            printf 'scope=full\nweb-required=true\nbase=%s\nhead=%s\n' "$range_base" "$range_head" >> "$GITHUB_OUTPUT"
+            echo 'Protected base predates the classifier: complete financial and web checks are required.'
+          else
+            node "$RUNNER_TEMP/ci-change-scope.mjs" --base "$range_base" --head "$range_head" --event "$EVENT_NAME" --github-output "$GITHUB_OUTPUT"
+          fi
+  universal:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install pinned Node
+        shell: bash
+        run: |
+          set -euo pipefail
+          node_version='24.19.0'
+          node_url='https://nodejs.org/download/release/v24.19.0/node-v24.19.0-linux-x64.tar.xz'
+          node_archive_sha256='14b342e71204f811bde6153be8e04b62aef63c236fef92b55f9c83154b409647'
+          node_executable_sha256='bc17c508ffeed0ec622934f9b7fa72f8e78da65350e63c3eceb56fa688aa5e12'
+          node_archive="${RUNNER_TEMP}/node-v${node_version}-linux-x64.tar.xz"
+          node_root="${RUNNER_TEMP}/node-v${node_version}-linux-x64"
+          node_executable="${node_root}/bin/node"
+          curl --fail --location --proto '=https' --tlsv1.2 --silent --show-error --output "$node_archive" "$node_url"
+          printf '%s  %s\n' "$node_archive_sha256" "$node_archive" | sha256sum --check
+          tar -xJf "$node_archive" -C "$RUNNER_TEMP"
+          printf '%s  %s\n' "$node_executable_sha256" "$node_executable" | sha256sum --check
+          echo "${node_root}/bin" >> "$GITHUB_PATH"
+          [[ "$("$node_executable" --version)" == "v${node_version}" ]]
+      - name: Transitional base commit identity check
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PUSH_BASE_SHA: ${{ github.event.before }}
+          PUSH_HEAD_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          export GIT_NO_REPLACE_OBJECTS=1
+          # Remove this step only after the owner registers identity-gate and control-gate as required statuses on main.
+          if [[ "$EVENT_NAME" == "pull_request" ]]; then
+            range_base="$PR_BASE_SHA"
+            range_head="$PR_HEAD_SHA"
+          elif [[ "$EVENT_NAME" == "push" ]]; then
+            range_base="$PUSH_BASE_SHA"
+            range_head="$PUSH_HEAD_SHA"
+          else
+            echo "unsupported event: $EVENT_NAME" >&2
+            exit 1
+          fi
+          git cat-file -e "${range_base}^{commit}"
+          git cat-file -e "${range_head}^{commit}"
+          git show "${range_base}:scripts/check-commit-identity.mjs" > "$RUNNER_TEMP/check-commit-identity.mjs"
+          node "$RUNNER_TEMP/check-commit-identity.mjs" "$range_base" "$range_head"
+      - name: Verify control dependency pins
+        run: node scripts/verify-control-dependencies.mjs
+      - name: Verify the test manifest covers every test file
+        run: node scripts/test-manifest.mjs check
+      - run: node scripts/check-cleanroom.mjs .
+      - name: Install pinned Gitleaks
+        shell: bash
+        run: |
+          set -euo pipefail
+          gitleaks_version='8.30.1'
+          gitleaks_url='https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz'
+          gitleaks_archive_sha256='551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb'
+          gitleaks_executable_sha256='88f91962aa2f93ac6ab281d553b9e125f5197bbbce38f9f2437f7299c32e5509'
+          gitleaks_config_sha256='959396e7c7b35ee3c62b39e544fd758ceab5d9f5ea7f5f74f05df6fa5c1e24e2'
+          gitleaks_archive="${RUNNER_TEMP}/gitleaks_${gitleaks_version}_linux_x64.tar.gz"
+          gitleaks_root="${RUNNER_TEMP}/gitleaks-${gitleaks_version}"
+          gitleaks_executable="${gitleaks_root}/gitleaks"
+          curl --fail --location --proto '=https' --tlsv1.2 --silent --show-error --output "$gitleaks_archive" "$gitleaks_url"
+          printf '%s  %s\n' "$gitleaks_archive_sha256" "$gitleaks_archive" | sha256sum --check
+          mkdir -p "$gitleaks_root"
+          tar -xzf "$gitleaks_archive" -C "$gitleaks_root"
+          printf '%s  %s\n' "$gitleaks_executable_sha256" "$gitleaks_executable" | sha256sum --check
+          printf '%s  %s\n' "$gitleaks_config_sha256" '.gitleaks.toml' | sha256sum --check
+          echo "$gitleaks_root" >> "$GITHUB_PATH"
+          [[ "$("$gitleaks_executable" version)" == "$gitleaks_version" ]]
+      - name: Check commit range and secrets
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PUSH_BASE_SHA: ${{ github.event.before }}
+          PUSH_HEAD_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          append_only_options=()
+          if [[ "$EVENT_NAME" == "pull_request" ]]; then
+            range_base="$PR_BASE_SHA"
+            range_head="$PR_HEAD_SHA"
+          elif [[ "$EVENT_NAME" == "push" ]]; then
+            range_base="$PUSH_BASE_SHA"
+            range_head="$PUSH_HEAD_SHA"
+            append_only_options=(--require-ancestor)
+          else
+            echo "unsupported event: $EVENT_NAME" >&2
+            exit 1
+          fi
+
+          git cat-file -e "${range_base}^{commit}"
+          git cat-file -e "${range_head}^{commit}"
+          node scripts/check-append-only.mjs "$range_base" "$range_head" "${append_only_options[@]}"
+
+          empty_ignore="${RUNNER_TEMP}/gitleaks-empty-ignore"
+          : > "$empty_ignore"
+
+          # Synthetic negative control includes an inline allow marker; hardened scanning must still find it.
+          negative_dir="$(mktemp -d "${RUNNER_TEMP}/gitleaks-negative.XXXXXX")"
+          negative_report="${RUNNER_TEMP}/gitleaks-negative.json"
+          printf 'github_token = "%s%s" # gitleaks:allow\n' \
+            'ghp_' '1a2B3c4D5e6F7g8H9i0J1k2L3m4N5o6P7q8R' \
+            > "${negative_dir}/control.txt"
+          mkdir -p "${negative_dir}/receipts"
+          printf '{\n  "service_token": "%s%s",\n  "docs/modules/token-core.md": "%s%s"\n}\n' \
+            'dH7mQ2vR9xK4pT8c' 'N6wB1yL5fJ0sA3zE' \
+            'cb857a0bfcb6322cd73f4959a3905d23' '3762f1dada3b7ca31e17df08fecb516c' \
+            > "${negative_dir}/receipts/r-99999.json"
+          set +e
+          gitleaks dir --no-banner --redact --ignore-gitleaks-allow \
+            --config .gitleaks.toml --gitleaks-ignore-path "$empty_ignore" \
+            --report-format json --report-path "$negative_report" "$negative_dir"
+          negative_status=$?
+          set -e
+          if [[ "$negative_status" -ne 1 || ! -s "$negative_report" ]]; then
+            echo "Gitleaks synthetic negative control failed" >&2
+            exit 1
+          fi
+          node -e 'const fs = require("node:fs"); const findings = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); const tokenCoreFinding = findings.some(finding => finding.RuleID === "generic-api-key" && finding.File.endsWith("/receipts/r-99999.json") && finding.StartLine === 3); if (!findings.some(finding => finding.RuleID === "github-pat") || !tokenCoreFinding) process.exit(1)' "$negative_report"
+
+          tracked_tree="$(mktemp -d "${RUNNER_TEMP}/gitleaks-tree.XXXXXX")"
+          git archive HEAD | tar -x -C "$tracked_tree"
+          gitleaks dir --no-banner --redact --ignore-gitleaks-allow \
+            --config .gitleaks.toml --gitleaks-ignore-path "$empty_ignore" \
+            "$tracked_tree"
+          gitleaks git --no-banner --redact --ignore-gitleaks-allow \
+            --config .gitleaks.toml --gitleaks-ignore-path "$empty_ignore" \
+            --log-opts="--full-history -m --text --no-textconv $range_base..$range_head" .
   phase3-bytecode:
+    needs: [classify]
+    if: ${{ needs.classify.outputs.scope == 'full' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
           persist-credentials: false
       - name: Install pinned Node (phase3-bytecode)
@@ -135,24 +371,18 @@ jobs:
           process_snapshot "post-exit" || true
           memory_events "post-exit" || true
           exit "$child_status"
-  gates:
-    needs: [phase3-bytecode]
-    if: ${{ always() }}
+  financial:
+    needs: [classify]
+    if: ${{ needs.classify.outputs.scope == 'full' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
-      - name: Require the isolated Phase 3 bytecode job to succeed
-        shell: bash
-        env:
-          PHASE3_BYTECODE_RESULT: ${{ needs.phase3-bytecode.result }}
-        run: |
-          echo "phase3-bytecode job result: $PHASE3_BYTECODE_RESULT"
-          [ "$PHASE3_BYTECODE_RESULT" = "success" ]
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
           persist-credentials: false
-      - name: Install pinned Node
+      - name: Install pinned Node (financial)
         shell: bash
         run: |
           set -euo pipefail
@@ -169,32 +399,6 @@ jobs:
           printf '%s  %s\n' "$node_executable_sha256" "$node_executable" | sha256sum --check
           echo "${node_root}/bin" >> "$GITHUB_PATH"
           [[ "$("$node_executable" --version)" == "v${node_version}" ]]
-      - name: Transitional base commit identity check
-        shell: bash
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          PUSH_BASE_SHA: ${{ github.event.before }}
-          PUSH_HEAD_SHA: ${{ github.sha }}
-        run: |
-          set -euo pipefail
-          export GIT_NO_REPLACE_OBJECTS=1
-          # Remove this step only after the owner registers identity-gate and control-gate as required statuses on main.
-          if [[ "$EVENT_NAME" == "pull_request" ]]; then
-            range_base="$PR_BASE_SHA"
-            range_head="$PR_HEAD_SHA"
-          elif [[ "$EVENT_NAME" == "push" ]]; then
-            range_base="$PUSH_BASE_SHA"
-            range_head="$PUSH_HEAD_SHA"
-          else
-            echo "unsupported event: $EVENT_NAME" >&2
-            exit 1
-          fi
-          git cat-file -e "${range_base}^{commit}"
-          git cat-file -e "${range_head}^{commit}"
-          git show "${range_base}:scripts/check-commit-identity.mjs" > "$RUNNER_TEMP/check-commit-identity.mjs"
-          node "$RUNNER_TEMP/check-commit-identity.mjs" "$range_base" "$range_head"
       - name: Install pinned Foundry
         shell: bash
         run: |
@@ -216,92 +420,8 @@ jobs:
           [[ "$foundry_version_output" == *"Version: ${foundry_version}"* ]]
           [[ "$foundry_version_output" == *"Commit SHA: ${foundry_commit}"* ]]
           echo "$foundry_root" >> "$GITHUB_PATH"
-      - name: Verify control dependency pins
+      - name: Verify control dependency pins (financial)
         run: node scripts/verify-control-dependencies.mjs
-      - name: Verify the test manifest covers every test file
-        run: node scripts/test-manifest.mjs check
-      - run: node scripts/check-cleanroom.mjs .
-      - name: Install pinned Gitleaks
-        shell: bash
-        run: |
-          set -euo pipefail
-          gitleaks_version='8.30.1'
-          gitleaks_url='https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz'
-          gitleaks_archive_sha256='551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb'
-          gitleaks_executable_sha256='88f91962aa2f93ac6ab281d553b9e125f5197bbbce38f9f2437f7299c32e5509'
-          gitleaks_config_sha256='959396e7c7b35ee3c62b39e544fd758ceab5d9f5ea7f5f74f05df6fa5c1e24e2'
-          gitleaks_archive="${RUNNER_TEMP}/gitleaks_${gitleaks_version}_linux_x64.tar.gz"
-          gitleaks_root="${RUNNER_TEMP}/gitleaks-${gitleaks_version}"
-          gitleaks_executable="${gitleaks_root}/gitleaks"
-          curl --fail --location --proto '=https' --tlsv1.2 --silent --show-error --output "$gitleaks_archive" "$gitleaks_url"
-          printf '%s  %s\n' "$gitleaks_archive_sha256" "$gitleaks_archive" | sha256sum --check
-          mkdir -p "$gitleaks_root"
-          tar -xzf "$gitleaks_archive" -C "$gitleaks_root"
-          printf '%s  %s\n' "$gitleaks_executable_sha256" "$gitleaks_executable" | sha256sum --check
-          printf '%s  %s\n' "$gitleaks_config_sha256" '.gitleaks.toml' | sha256sum --check
-          echo "$gitleaks_root" >> "$GITHUB_PATH"
-          [[ "$("$gitleaks_executable" version)" == "$gitleaks_version" ]]
-      - name: Check commit range and secrets
-        shell: bash
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          PUSH_BASE_SHA: ${{ github.event.before }}
-          PUSH_HEAD_SHA: ${{ github.sha }}
-        run: |
-          set -euo pipefail
-          append_only_options=()
-          if [[ "$EVENT_NAME" == "pull_request" ]]; then
-            range_base="$PR_BASE_SHA"
-            range_head="$PR_HEAD_SHA"
-          elif [[ "$EVENT_NAME" == "push" ]]; then
-            range_base="$PUSH_BASE_SHA"
-            range_head="$PUSH_HEAD_SHA"
-            append_only_options=(--require-ancestor)
-          else
-            echo "unsupported event: $EVENT_NAME" >&2
-            exit 1
-          fi
-
-          git cat-file -e "${range_base}^{commit}"
-          git cat-file -e "${range_head}^{commit}"
-          node scripts/check-append-only.mjs "$range_base" "$range_head" "${append_only_options[@]}"
-
-          empty_ignore="${RUNNER_TEMP}/gitleaks-empty-ignore"
-          : > "$empty_ignore"
-
-          # Synthetic negative control includes an inline allow marker; hardened scanning must still find it.
-          negative_dir="$(mktemp -d "${RUNNER_TEMP}/gitleaks-negative.XXXXXX")"
-          negative_report="${RUNNER_TEMP}/gitleaks-negative.json"
-          printf 'github_token = "%s%s" # gitleaks:allow\n' \
-            'ghp_' '1a2B3c4D5e6F7g8H9i0J1k2L3m4N5o6P7q8R' \
-            > "${negative_dir}/control.txt"
-          mkdir -p "${negative_dir}/receipts"
-          printf '{\n  "service_token": "%s%s",\n  "docs/modules/token-core.md": "%s%s"\n}\n' \
-            'dH7mQ2vR9xK4pT8c' 'N6wB1yL5fJ0sA3zE' \
-            'cb857a0bfcb6322cd73f4959a3905d23' '3762f1dada3b7ca31e17df08fecb516c' \
-            > "${negative_dir}/receipts/r-99999.json"
-          set +e
-          gitleaks dir --no-banner --redact --ignore-gitleaks-allow \
-            --config .gitleaks.toml --gitleaks-ignore-path "$empty_ignore" \
-            --report-format json --report-path "$negative_report" "$negative_dir"
-          negative_status=$?
-          set -e
-          if [[ "$negative_status" -ne 1 || ! -s "$negative_report" ]]; then
-            echo "Gitleaks synthetic negative control failed" >&2
-            exit 1
-          fi
-          node -e 'const fs = require("node:fs"); const findings = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); const tokenCoreFinding = findings.some(finding => finding.RuleID === "generic-api-key" && finding.File.endsWith("/receipts/r-99999.json") && finding.StartLine === 3); if (!findings.some(finding => finding.RuleID === "github-pat") || !tokenCoreFinding) process.exit(1)' "$negative_report"
-
-          tracked_tree="$(mktemp -d "${RUNNER_TEMP}/gitleaks-tree.XXXXXX")"
-          git archive HEAD | tar -x -C "$tracked_tree"
-          gitleaks dir --no-banner --redact --ignore-gitleaks-allow \
-            --config .gitleaks.toml --gitleaks-ignore-path "$empty_ignore" \
-            "$tracked_tree"
-          gitleaks git --no-banner --redact --ignore-gitleaks-allow \
-            --config .gitleaks.toml --gitleaks-ignore-path "$empty_ignore" \
-            --log-opts="--full-history -m --text --no-textconv $range_base..$range_head" .
       - name: Install adapters dependencies
         shell: bash
         run: |
@@ -380,3 +500,58 @@ jobs:
             node --test --test-timeout=120000 "$heavy"
           done
           node --test --test-timeout=120000 $remaining_files
+  web-ci:
+    name: web-ci
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 22.13.0
+      - name: Install dependencies
+        run: npm ci
+      - name: Test
+        run: npm test
+      - name: Lint
+        run: npm run lint
+  gates:
+    needs: [classify, universal, phase3-bytecode, financial, web-ci]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require every applicable check to succeed
+        shell: bash
+        env:
+          CLASSIFICATION_RESULT: ${{ needs.classify.result }}
+          SCOPE: ${{ needs.classify.outputs.scope }}
+          WEB_REQUIRED: ${{ needs.classify.outputs.web-required }}
+          CLASSIFIED_BASE: ${{ needs.classify.outputs.base }}
+          CLASSIFIED_HEAD: ${{ needs.classify.outputs.head }}
+          EXPECTED_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+          UNIVERSAL_RESULT: ${{ needs.universal.result }}
+          WEB_RESULT: ${{ needs.web-ci.result }}
+          PHASE3_BYTECODE_RESULT: ${{ needs.phase3-bytecode.result }}
+          FINANCIAL_RESULT: ${{ needs.financial.result }}
+        run: |
+          set -euo pipefail
+          [[ "$CLASSIFICATION_RESULT" == 'success' ]] || exit 1
+          [[ "$CLASSIFIED_BASE" == "$EXPECTED_BASE" && "$CLASSIFIED_HEAD" == "$EXPECTED_HEAD" ]] || exit 1
+          [[ "$WEB_REQUIRED" == 'true' && "$UNIVERSAL_RESULT" == 'success' && "$WEB_RESULT" == 'success' ]] || exit 1
+          case "$SCOPE" in
+            full)
+              [[ "$PHASE3_BYTECODE_RESULT" == 'success' && "$FINANCIAL_RESULT" == 'success' ]] || exit 1
+              echo 'Full scope: universal, web, bytecode and financial checks passed.' >> "$GITHUB_STEP_SUMMARY" ;;
+            presentation)
+              [[ "$PHASE3_BYTECODE_RESULT" == 'skipped' && "$FINANCIAL_RESULT" == 'skipped' ]] || exit 1
+              echo 'Presentation scope: universal and web checks passed. Financial and bytecode tests: NOT RUN (protected path classification).' >> "$GITHUB_STEP_SUMMARY" ;;
+            *) echo 'Missing or invalid CI scope' >&2; exit 1 ;;
+          esac

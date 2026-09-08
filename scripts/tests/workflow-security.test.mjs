@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -14,6 +14,13 @@ const gitleaksPolicyConsumers = [
   'scripts/verify-control-dependencies.mjs',
   'scripts/tests/control-dependencies.test.mjs',
 ].map(path => ({ path, text: readFileSync(join(repoRoot, path), 'utf8') }));
+
+function workflowJob(source, id) {
+  const matches = [...source.matchAll(/^  ([a-z0-9-]+):$/gm)];
+  const start = matches.findIndex(match => match[1] === id && match.index > source.indexOf('jobs:\n'));
+  assert.ok(start >= 0, 'missing workflow job: ' + id);
+  return source.slice(matches[start].index, matches[start + 1]?.index ?? source.length).trimEnd();
+}
 
 function workflowTriggerKeys(source) {
   const start = source.indexOf('on:\n');
@@ -50,7 +57,9 @@ test('CI targets pull requests and main pushes with bounded runner settings', ()
 });
 
 test('CI installs and verifies the pinned official Node distribution without setup-node', () => {
-  assert.doesNotMatch(workflow, /actions\/setup-node@/);
+  for (const id of ['classify', 'universal', 'phase3-bytecode', 'financial']) {
+    assert.doesNotMatch(workflowJob(workflow, id), /actions\/setup-node@/);
+  }
   assert.match(workflow, /https:\/\/nodejs\.org\/download\/release\/v24\.19\.0\/node-v24\.19\.0-linux-x64\.tar\.xz/);
   assert.match(workflow, /14b342e71204f811bde6153be8e04b62aef63c236fef92b55f9c83154b409647/);
   assert.match(workflow, /bc17c508ffeed0ec622934f9b7fa72f8e78da65350e63c3eceb56fa688aa5e12/);
@@ -132,33 +141,9 @@ test('CI runs the manifest-driven dashboard and contracts-js suites', () => {
   assert.match(workflow, /name: Verify the test manifest covers every test file\n\s+run: node scripts\/test-manifest\.mjs check/);
 });
 
-test('CI isolates the Phase 3 bytecode-binding test in its own required job with a fail-closed dependency from gates', () => {
-  assert.match(workflow, /^ {2}phase3-bytecode:\n {4}runs-on: ubuntu-24\.04\n {4}timeout-minutes: 45\n/m);
-  assert.match(
-    workflow,
-    /^ {2}gates:\n {4}needs: \[phase3-bytecode\]\n {4}if: \$\{\{ always\(\) \}\}\n {4}runs-on: ubuntu-24\.04\n {4}timeout-minutes: 45\n/m,
-  );
-  const requireStep = [
-    '      - name: Require the isolated Phase 3 bytecode job to succeed',
-    '        shell: bash',
-    '        env:',
-    '          PHASE3_BYTECODE_RESULT: ${{ needs.phase3-bytecode.result }}',
-    '        run: |',
-    '          echo "phase3-bytecode job result: $PHASE3_BYTECODE_RESULT"',
-    '          [ "$PHASE3_BYTECODE_RESULT" = "success" ]',
-  ].join('\n');
-  assert.ok(
-    workflow.includes(requireStep),
-    'gates must fail closed on its very first step unless the isolated phase3-bytecode job result is exactly success',
-  );
-  const gatesIndex = workflow.indexOf('\n  gates:\n');
-  const requireIndex = workflow.indexOf(requireStep);
-  const firstCheckoutInGates = workflow.indexOf('actions/checkout', gatesIndex);
-  assert.ok(gatesIndex !== -1 && requireIndex > gatesIndex, 'the fail-closed step must belong to the gates job');
-  assert.ok(
-    requireIndex < firstCheckoutInGates,
-    'the fail-closed dependency check must be the earliest step in gates, before any checkout',
-  );
+test('CI isolates the complete Phase 3 bytecode proof and requires its result for the full lane', () => {
+  assert.match(workflowJob(workflow, 'phase3-bytecode'), /^ {2}phase3-bytecode:\n {4}needs: \[classify\]\n {4}if: \$\{\{ needs\.classify\.outputs\.scope == 'full' \}\}\n {4}runs-on: ubuntu-24\.04\n {4}timeout-minutes: 45\n/m);
+  assert.match(workflowJob(workflow, 'gates'), /^ {2}gates:\n {4}needs: \[classify, universal, phase3-bytecode, financial, web-ci\]\n {4}if: \$\{\{ !cancelled\(\) \}\}/m);
   // The step is a fail-closed bash wrapper that emits process-metadata evidence around the
   // command, but must still launch the same test selection and timeout exactly once, as a
   // tracked child (time-wrapped for resource/termination metadata, tap-reported for
@@ -171,7 +156,9 @@ test('CI isolates the Phase 3 bytecode-binding test in its own required job with
   // The isolated job must reuse the identical pinned checkout action, Node, and Foundry
   // versions as gates, not a drifted or unpinned copy.
   const checkoutPin = 'uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803';
-  assert.equal(workflow.split(checkoutPin).length - 1, 2, 'both jobs must use the identical pinned checkout action');
+  for (const id of ['classify', 'universal', 'phase3-bytecode', 'financial', 'web-ci']) {
+    assert.equal(workflowJob(workflow, id).split(checkoutPin).length - 1, 1, id + ' must use the pinned checkout once');
+  }
   assert.match(workflow, /name: Install pinned Node \(phase3-bytecode\)/);
   assert.match(workflow, /name: Install pinned Foundry \(phase3-bytecode\)/);
   assert.match(workflow, /node_version='24\.19\.0'[\s\S]*?node_version='24\.19\.0'/);
@@ -191,18 +178,18 @@ test('fork-proof runs the same read-only archive proof for a main push, a manual
   assert.doesNotMatch(workflow, /^ {2}fork-proof:$/m);
   assert.match(forkProof, /^permissions:\n  contents: read$/m);
 
-  assert.match(forkProof, /^  main:\n    name: fork-proof\n    if: github\.event_name == 'push' \|\| github\.event_name == 'workflow_dispatch'\n    environment: fork-proof$/m);
+  assert.match(workflowJob(forkProof, 'main-proof'), /^  main-proof:\n    needs: \[classify\]\n    if: \$\{\{ needs\.classify\.outputs\.scope == 'full' && \(github\.event_name == 'push' \|\| github\.event_name == 'workflow_dispatch'\) \}\}\n    environment: fork-proof$/m);
   assert.match(forkProof, /name: Require main branch/);
   assert.match(forkProof, /\[\[ "\$GITHUB_REF" == 'refs\/heads\/main' \]\]/);
 
-  assert.match(forkProof, /^  pull-request:\n    name: fork-proof\n    if: github\.event_name == 'pull_request'\n    environment: fork-proof$/m);
+  assert.match(workflowJob(forkProof, 'pull-request-proof'), /^  pull-request-proof:\n    needs: \[classify\]\n    if: \$\{\{ needs\.classify\.outputs\.scope == 'full' && github\.event_name == 'pull_request' \}\}\n    environment: fork-proof$/m);
   assert.match(forkProof, /name: Require an exact PR head SHA/);
   assert.match(forkProof, /PR_HEAD_SHA: \$\{\{ github\.event\.pull_request\.head\.sha \}\}/);
   assert.match(forkProof, /\[\[ "\$PR_HEAD_SHA" =~ \^\[0-9a-f\]\{40\}\$ \]\]/);
   assert.match(forkProof, /ref: \$\{\{ github\.event\.pull_request\.head\.sha \}\}/, 'the PR job must prove the exact head, not a synthetic merge ref');
 
-  const jobBodies = forkProof.split(/^  (?=main:|pull-request:)/m).filter(body => /^(?:main|pull-request):/.test(body));
-  assert.equal(jobBodies.length, 2, 'fork-proof must define exactly the main and pull-request jobs');
+  const jobBodies = ['main-proof', 'pull-request-proof'].map(id => workflowJob(forkProof, id));
+  assert.equal(jobBodies.length, 2, 'fork-proof retains complete main and pull-request proof jobs');
   for (const body of jobBodies) {
     assert.match(body, /name: Run the mandatory archive fork proof/);
     assert.match(body, /ROBINHOOD_FORK_RPC_URL: \$\{\{ secrets\.ROBINHOOD_FORK_RPC_URL \}\}/);
@@ -219,7 +206,63 @@ test('fork-proof runs the same read-only archive proof for a main push, a manual
       'the archive pin must validate before Forge contacts the fork endpoint',
     );
   }
-  assert.doesNotMatch(forkProof, /--ffi|EVENT_NAME|skipping the archive fork proof|continue-on-error/);
+  for (const body of jobBodies) assert.doesNotMatch(body, /--ffi|EVENT_NAME|skipping the archive fork proof|continue-on-error/);
+  assert.doesNotMatch(forkProof, /continue-on-error/);
+});
+
+
+test('required CI aggregates reject missing, failed and wrongly skipped applicable job results', () => {
+  const forkProof = readFileSync(join(repoRoot, '.github', 'workflows', 'fork-proof.yml'), 'utf8');
+  const root = mkdtempSync(join(tmpdir(), 'ci-aggregate-'));
+  const summary = join(root, 'summary.txt');
+  const execute = (source, id, overrides, expectedSuccess) => {
+    const parts = workflowJob(source, id).split('\n        run: |\n');
+    assert.equal(parts.length, 2, 'terminal aggregate must have exactly one literal run block');
+    const script = parts[1].split('\n').map(line => line.slice(10)).join('\n');
+    writeFileSync(summary, '');
+    const result = spawnSync('/bin/bash', ['-c', script], {
+      encoding: 'utf8',
+      env: {
+        PATH: '/usr/bin:/bin',
+        GITHUB_STEP_SUMMARY: summary,
+        CLASSIFICATION_RESULT: 'success',
+        SCOPE: 'full',
+        WEB_REQUIRED: 'true',
+        CLASSIFIED_BASE: 'a'.repeat(40), EXPECTED_BASE: 'a'.repeat(40),
+        CLASSIFIED_HEAD: 'b'.repeat(40), EXPECTED_HEAD: 'b'.repeat(40),
+        UNIVERSAL_RESULT: 'success', WEB_RESULT: 'success',
+        PHASE3_BYTECODE_RESULT: 'success', FINANCIAL_RESULT: 'success',
+        EVENT_NAME: 'pull_request', MAIN_PROOF_RESULT: 'skipped', PR_PROOF_RESULT: 'success',
+        ...overrides,
+      },
+    });
+    assert.equal(result.status === 0, expectedSuccess, JSON.stringify({ id, overrides, status: result.status, stderr: result.stderr }));
+    return readFileSync(summary, 'utf8');
+  };
+  try {
+    execute(workflow, 'gates', {}, true);
+    for (const name of ['CLASSIFICATION_RESULT', 'UNIVERSAL_RESULT', 'WEB_RESULT', 'PHASE3_BYTECODE_RESULT', 'FINANCIAL_RESULT']) {
+      for (const value of ['', 'failure', 'cancelled', 'skipped']) execute(workflow, 'gates', { [name]: value }, false);
+    }
+    for (const overrides of [{ SCOPE: '' }, { SCOPE: 'unknown' }, { WEB_REQUIRED: 'false' }, { CLASSIFIED_HEAD: 'c'.repeat(40) }]) {
+      execute(workflow, 'gates', overrides, false);
+    }
+    const presentation = { SCOPE: 'presentation', PHASE3_BYTECODE_RESULT: 'skipped', FINANCIAL_RESULT: 'skipped' };
+    assert.match(execute(workflow, 'gates', presentation, true), /Financial and bytecode tests: NOT RUN/);
+    for (const overrides of [{ CLASSIFICATION_RESULT: '' }, { FINANCIAL_RESULT: 'failure' }, { PHASE3_BYTECODE_RESULT: 'success' }, { WEB_RESULT: 'skipped' }]) {
+      execute(workflow, 'gates', { ...presentation, ...overrides }, false);
+    }
+    execute(forkProof, 'fork-proof', {}, true);
+    execute(forkProof, 'fork-proof', { EVENT_NAME: 'workflow_dispatch', MAIN_PROOF_RESULT: 'success', PR_PROOF_RESULT: 'skipped' }, true);
+    for (const value of ['', 'failure', 'cancelled', 'skipped']) execute(forkProof, 'fork-proof', { PR_PROOF_RESULT: value }, false);
+    const presentationProof = { SCOPE: 'presentation', MAIN_PROOF_RESULT: 'skipped', PR_PROOF_RESULT: 'skipped' };
+    assert.match(execute(forkProof, 'fork-proof', presentationProof, true), /NOT RUN.*No financial proof is issued/);
+    for (const overrides of [{ EVENT_NAME: 'workflow_dispatch' }, { CLASSIFICATION_RESULT: '' }, { PR_PROOF_RESULT: 'failure' }, { MAIN_PROOF_RESULT: 'success' }, { CLASSIFIED_BASE: 'c'.repeat(40) }]) {
+      execute(forkProof, 'fork-proof', { ...presentationProof, ...overrides }, false);
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test('fork jobs verify the supported fork-pin verifier digest before execution', () => {
@@ -564,10 +607,13 @@ test('Gitleaks policy constants do not reproduce the permitted token-order match
   }
 });
 
-test('CI permits only the pinned checkout remote action, once per job', () => {
-  const actions = [...workflow.matchAll(/^\s*(?:-\s+)?uses:\s+([^\s#]+)/gm)].map(match => match[1]);
-  assert.ok(actions.length >= 1);
-  assert.ok(actions.every(action => action === 'actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803'));
+test('CI permits pinned checkout for control jobs and the existing pinned web Node setup only', () => {
+  const checkout = 'actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803';
+  for (const id of ['classify', 'universal', 'phase3-bytecode', 'financial', 'web-ci']) {
+    const actions = [...workflowJob(workflow, id).matchAll(/^\s*(?:-\s+)?uses:\s+([^\s#]+)/gm)].map(match => match[1]);
+    assert.deepEqual(actions, id === 'web-ci'
+      ? [checkout, 'actions/setup-node@820762786026740c76f36085b0efc47a31fe5020'] : [checkout]);
+  }
   assert.match(workflow, /fetch-depth:\s*0/);
   assert.match(workflow, /persist-credentials:\s*false/);
   assert.doesNotMatch(workflow, /actions\/cache|api\.github\.com/i);
@@ -660,7 +706,7 @@ test('fork-proof recovery and the control-supply-chain card document the protect
   assert.match(runbook, /GitHub Environment `fork-proof`/);
   assert.match(runbook, /ROBINHOOD_FORK_RPC_URL/);
   assert.match(runbook, /Selected branches and tags/);
-  assert.match(runbook, /Pull requests require `control-gate`, `identity-gate`, and `gates`\./);
+  assert.match(runbook, /Pull requests require `control-gate`, `identity-gate`, `gates`, and `fork-proof`\./);
   assert.match(runbook, /Main requires `control-gate`, `identity-gate`, `gates`, and `fork-proof`\./);
   assert.match(runbook, /ROBINHOOD_FORK_PINNED=true node scripts\/verify-fork-pin\.mjs/);
   assert.match(runbook, /ROBINHOOD_FORK_PINNED=true FOUNDRY_LIBS=/);
@@ -669,7 +715,7 @@ test('fork-proof recovery and the control-supply-chain card document the protect
   assert.match(card, /\.github\/workflows\/fork-proof\.yml/);
   assert.match(card, /\.github\/workflows\/fork-pin-canary\.yml/);
   assert.match(card, /\.github\/workflows\/identity-gate\.yml/);
-  assert.match(card, /Pull requests require `control-gate`, `identity-gate`, and `gates`\./);
+  assert.match(card, /Pull requests require `control-gate`, `identity-gate`, `gates`, and `fork-proof`\./);
   assert.match(card, /Main requires `control-gate`, `identity-gate`, `gates`, and `fork-proof`\./);
   assert.match(card, /ROBINHOOD_FORK_PINNED=true node scripts\/verify-fork-pin\.mjs/);
   assert.doesNotMatch(card, /required reviewer/i);

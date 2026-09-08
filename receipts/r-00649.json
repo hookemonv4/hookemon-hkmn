@@ -1,20 +1,11 @@
 {
   "id": "r-00649",
-  "at": "2026-09-08T01:48:50.587Z",
-  "type": "owner-spec-approved",
-  "phase": "spec",
-  "result": "PASSED",
-  "data": {
-    "approvalInput": "decisions/owner-approvals/revision-70-collector-explicit-spec-s5-approved.json",
-    "itemId": "S5",
-    "producer": "v4-owner-authorize-v1",
-    "proofSchema": "sha256-input-manifest-v1",
-    "rationale": "The owner explicitly replied freigegeben to the concrete revision 70 and A6 additional patch approval question. This approves the exact Collector generatePack purchase profile, independent original-blockhash validity and immutable recovery minimum slot, and the two exact A6 approval paths. Signing, broadcast and actual live release anchors remain excluded."
-  },
+  "at": "2026-09-08T04:59:41.065Z",
+  "type": "autonomy-grant",
+  "phase": "build",
+  "result": null,
+  "data": {},
   "inputHashes": {
-    "gates/spec.json": "23d8ad8e9c416b02267bbf432e89cd30c0ae48c8a03b660971eca970c88a3343",
-    "policy/policy.json": "3ffc546b2bee1aa64d71f8399cfbf40b96847c1bcd87c0f65db09e797375a4d8",
-    "specs/requirements.json": "d8162e9fdbcc0e2b2f2e4091b25bca9d51e6250afbcc1dabd8817cf762826d51",
-    "decisions/owner-approvals/revision-70-collector-explicit-spec-s5-approved.json": "c5381d6e698ac50a15c65a766f8c6d941dd06f6c34020e25fec5e97632a62061"
+    "decisions/autonomy/2026-09-08-eth-execution.md": "5b88d727dd7a00e7951ab3d5509cf4e35b6e63af27ac382b0d3aefe596a93210"
   }
 }

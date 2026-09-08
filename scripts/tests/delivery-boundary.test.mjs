@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { checkDeliveryBoundary } from '../check-delivery-boundary.mjs';
 import { hashFile, sha256 } from '../lib/util.mjs';
 import { writeOwnerApproval } from './helpers/owner-approval.mjs';
+import { readOwnerApproval } from '../lib/gates.mjs';
 
 const here = join(import.meta.dirname, '..', '..');
 const futurePath = 'future/PHASE_2_OWNER_DECISIONS.md';
@@ -468,7 +469,7 @@ test('classifies every machine-effective Phase 1 pin including the frozen build 
   assert.equal(expectedRecords.some(record => record.pointer === '/phase1Toolchain'), true);
 });
 
-test('the current tree exposes a revision-bound unsigned P1-011 renewal and rejects it as authority', () => {
+test('the historical unsigned P1-011 renewal has a stale policy binding and remains non-authoritative', () => {
   const descriptorPath = 'decisions/task-deferrals/P1-011-revision-65-rebind-DRAFT.json';
   const approvalPath = 'decisions/owner-approvals/phase-3-revision-65-dashboard-deferral-DRAFT_UNSIGNED.json';
   const descriptor = JSON.parse(readFileSync(join(here, descriptorPath), 'utf8'));
@@ -482,8 +483,13 @@ test('the current tree exposes a revision-bound unsigned P1-011 renewal and reje
   assert.match(descriptor.rationale, /owner signature is necessary but not sufficient/);
   assert.deepEqual(approval.subjectHashes, {
     [descriptorPath]: hashFile(join(here, descriptorPath)),
-    'policy/policy.json': hashFile(join(here, 'policy/policy.json')),
+    'policy/policy.json': '3ffc546b2bee1aa64d71f8399cfbf40b96847c1bcd87c0f65db09e797375a4d8',
   });
+  assert.notEqual(approval.subjectHashes['policy/policy.json'], hashFile(join(here, 'policy/policy.json')));
+  assert.throws(() => readOwnerApproval(here, approvalPath, {
+    action: 'TASK_DEFER', phase: 'build', itemId: 'P1-011', rationale: approval.rationale,
+    subjectInputs: [descriptorPath, 'policy/policy.json'],
+  }), /owner approval must be a JSON artifact under decisions\/owner-approvals\//);
 
   // The task projection still points at the revision-58 signed authority. The unsigned draft
   // records the required owner action but cannot authorize the deferred state.
