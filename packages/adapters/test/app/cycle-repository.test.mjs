@@ -5349,290 +5349,178 @@ test('replay rejects an ordinal-2 reservation that skips a recorded ordinal-1 ti
   );
 });
 
-// --- BOT-HELD-CUSTODY: held-position writes land on the canonical EVM USDG custody identity ----
-
+// Native held purchase costs remain USD records; historical asset rows remain unchanged.
 const HELD_CANONICAL_CHAIN_ID = 'eip155:4663';
 const HELD_CANONICAL_ASSET_ID = `${HELD_CANONICAL_CHAIN_ID}/erc20:${SETTLEMENT_SOURCE_ASSET}`;
 const HELD_CANONICAL_ASSET = { chainId: HELD_CANONICAL_CHAIN_ID, assetId: HELD_CANONICAL_ASSET_ID, decimals: 6 };
 const HELD_CANONICAL_KEY = `${HELD_CANONICAL_CHAIN_ID}\u0000${HELD_CANONICAL_ASSET_ID}`;
 const HELD_RAW_ASSET = { chainId: '4663', assetId: SETTLEMENT_SOURCE_ASSET, decimals: 6 };
-const HELD_RAW_KEY = `4663\u0000${SETTLEMENT_SOURCE_ASSET}`;
 
 function heldPositionFixture(overrides = {}) {
-  return {
-    packId: 'pack-1',
-    memo: 'memo-1',
-    mint: 'mint-1',
-    cardRef: 'mint-1',
-    costMicroUsdg: '25000000',
-    valueMicroUsdg: '25000000',
-    ledgerAsset: HELD_CANONICAL_ASSET,
-    insuredValue: null,
-    reason: 'EPIC_THRESHOLD',
-    terminalState: 'HELD_OWNER_DECISION',
-    evidence: { stage: 'epic-gate', decision: 'hold' },
-    ...overrides,
-  };
+  return { packId: 'pack-1', memo: 'memo-1', mint: 'mint-1', cardRef: 'mint-1',
+    costMicroUsd: '25000000', valueMicroUsd: '25000000', insuredValue: null,
+    reason: 'EPIC_THRESHOLD', terminalState: 'HELD_OWNER_DECISION',
+    evidence: { stage: 'epic-gate', decision: 'hold' }, ...overrides };
 }
 
-test('recordHeldPosition on an existing canonical v2 row preserves verifiedCurrentBalance and expectedCycleAsset and only increments heldPositions', async t => {
+async function nativeHeldRepository(t, cost = '25000000') {
   const directory = await tempDirectory(t);
-  const repository = await CycleRepository.open(directory);
-  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  const reopen = () => CycleRepository.open(directory, () => 1_700_000_000_000,
+    { testAuthority: createTestProfileMutationAuthority() });
+  const repository = await reopen();
+  const { cycleId } = await createNativeHeldCycle(repository, cost, 'pack-1');
+  return { directory, repository, cycleId, reopen };
+}
 
-  // Seed the exact row claim/payout would already maintain for this canonical identity, through
-  // the one dedicated writer that may populate a non-null expectedCycleAsset (ADR-0026), with a
-  // non-null verifiedCurrentBalance alongside it -- both must survive the held write untouched.
-  const leg = returnRelayLeg(cycleId);
-  const identity = canonicalEvmUsdgIdentity(leg);
-  assert.deepEqual(identity, HELD_CANONICAL_ASSET);
-  const observation = custodyBalanceObservation(identity);
-  const seededLedger = {
-    ...expectationLedgerFor(leg, cycleId, identity),
-    claimed: '500',
-    returnReceived: '500',
-    verifiedCurrentBalance: observation,
-  };
-  await repository.recordReturnRelayLegExpectation(cycleId, leg, seededLedger);
-
-  const position = await repository.recordHeldPosition(cycleId, heldPositionFixture());
-
-  const reopened = await CycleRepository.open(directory);
-  const state = await reopened.describeCycle(cycleId);
-  const row = state.custodyLedgers.get(HELD_CANONICAL_KEY);
-  assert.equal(row.schema, 'hookemon.custody-ledger.v2');
-  assert.equal(row.heldPositions, '25000000');
-  assert.equal(row.claimed, '500');
-  assert.equal(row.returnReceived, '500');
-  assert.deepEqual(row.verifiedCurrentBalance, observation);
-  assert.deepEqual(row.expectedCycleAsset, seededLedger.expectedCycleAsset);
-  assert.deepEqual(await reopened.readHeldPosition(position.positionId), position);
-});
-
-test('recordHeldPosition against an absent canonical row creates a v2 row with honest null observation fields', async t => {
-  const repository = await CycleRepository.open(await tempDirectory(t));
-  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
-
-  const position = await repository.recordHeldPosition(cycleId, heldPositionFixture());
-
-  const state = await repository.describeCycle(cycleId);
-  const row = state.custodyLedgers.get(HELD_CANONICAL_KEY);
-  assert.equal(row.schema, 'hookemon.custody-ledger.v2');
-  assert.equal(row.heldPositions, position.valueMicroUsdg);
-  assert.equal(row.claimed, '0');
-  assert.equal(row.verifiedCurrentBalance, null);
-  assert.equal(row.expectedCycleAsset, null);
-});
-
-test('recordHeldPosition upgrades a canonical v1 predecessor to v2 with honest null observation fields on a live write', async t => {
-  const directory = await tempDirectory(t);
-  const repository = await CycleRepository.open(directory);
-  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
-  await injectRawJournalEntry(directory, cycleId, 'custody-ledger-recorded', {
-    ledger: custodyLedger(cycleId, { chainId: HELD_CANONICAL_CHAIN_ID, assetId: HELD_CANONICAL_ASSET_ID, claimed: '9' }),
+for (const history of ['absent', 'canonical-v1', 'canonical-v2', 'raw-v1', 'coexisting']) {
+  test(`native held USD cost preserves ${history} custody without creating principal`, async t => {
+    const { directory, cycleId, reopen, repository: initialRepository } = await nativeHeldRepository(t);
+    const rows = [];
+    if (['canonical-v1', 'coexisting'].includes(history)) rows.push(custodyLedger(cycleId, { ...HELD_CANONICAL_ASSET, claimed: '9' }));
+    if (history === 'canonical-v2') {
+      const leg = returnRelayLeg(cycleId);
+      const identity = canonicalEvmUsdgIdentity(leg);
+      await initialRepository.recordReturnRelayLegExpectation(cycleId, leg, { ...expectationLedgerFor(leg, cycleId, identity), claimed: '500', returnReceived: '500',
+        verifiedCurrentBalance: custodyBalanceObservation(identity) });
+    }
+    if (['raw-v1', 'coexisting'].includes(history)) rows.push(custodyLedger(cycleId, { ...HELD_RAW_ASSET, claimed: '7' }));
+    // Synthetic pre-existing ledger events exercise read-only history alongside native writes.
+    for (const ledger of rows) await injectRawJournalEntry(directory, cycleId, 'custody-ledger-recorded', { ledger });
+    const repository = await reopen();
+    const before = await repository.describeCycle(cycleId);
+    const position = await repository.recordHeldPosition(cycleId, heldPositionFixture());
+    const reopened = await reopen();
+    const after = await reopened.describeCycle(cycleId);
+    assert.deepEqual(after.custodyLedgers, before.custodyLedgers);
+    assert.equal(after.heldPositions.size, 1);
+    assert.equal(position.costMicroUsd, '25000000');
+    assert.deepEqual(await reopened.readHeldPosition(position.positionId), position);
+    for (const ledgerAsset of [HELD_CANONICAL_ASSET, HELD_RAW_ASSET]) {
+      const beforeStored = (await DurableCycleStore.open(directory)).readCycle(cycleId);
+      await assert.rejects(() => reopened.recordHeldPosition(cycleId, heldPositionFixture({ ledgerAsset })),
+        /native held USD cost cannot be written into an asset principal ledger/);
+      const afterStored = (await DurableCycleStore.open(directory)).readCycle(cycleId);
+      assert.equal(afterStored.journalHead, beforeStored.journalHead);
+      assert.equal(afterStored.version, beforeStored.version);
+    }
   });
+}
 
-  const reopened = await CycleRepository.open(directory);
-  await reopened.recordHeldPosition(cycleId, heldPositionFixture({ memo: 'memo-upgrade', mint: 'mint-upgrade', cardRef: 'mint-upgrade' }));
-
-  const state = await (await CycleRepository.open(directory)).describeCycle(cycleId);
-  const row = state.custodyLedgers.get(HELD_CANONICAL_KEY);
-  assert.equal(row.schema, 'hookemon.custody-ledger.v2');
-  assert.equal(row.claimed, '9');
-  assert.equal(row.heldPositions, '25000000');
-  assert.equal(row.verifiedCurrentBalance, null);
-  assert.equal(row.expectedCycleAsset, null);
+test('native held retry after reopen counts the committed USD basis once without ledger attribution', async t => {
+  const { repository, cycleId, reopen, directory } = await nativeHeldRepository(t);
+  const input = heldPositionFixture();
+  const position = await repository.recordHeldPosition(cycleId, input);
+  const before = (await DurableCycleStore.open(directory)).readCycle(cycleId);
+  const reopened = await reopen();
+  assert.deepEqual(await reopened.recordHeldPosition(cycleId, input), position);
+  const after = (await DurableCycleStore.open(directory)).readCycle(cycleId);
+  assert.equal(after.journalHead, before.journalHead);
+  assert.equal((await reopened.describeCycle(cycleId)).heldPositions.size, 1);
+  assert.equal((await reopened.describeCycle(cycleId)).custodyLedgers.size, 0);
 });
 
-test('recordHeldPosition refuses a canonical write while a legacy raw-identity row exists for the same asset, without journal growth', async t => {
-  const repository = await CycleRepository.open(await tempDirectory(t));
-  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
-  await repository.recordHeldPosition(cycleId, heldPositionFixture({
-    memo: 'memo-raw', mint: 'mint-raw', cardRef: 'mint-raw', ledgerAsset: HELD_RAW_ASSET,
-  }));
-
-  await assert.rejects(
-    () => repository.recordHeldPosition(cycleId, heldPositionFixture({
-      memo: 'memo-canonical', mint: 'mint-canonical', cardRef: 'mint-canonical', terminalState: 'HELD_UNAVAILABLE', reason: 'BUYBACK_UNAVAILABLE',
-    })),
-    /legacy raw-identity custody row exists/,
-  );
-
-  const state = await repository.describeCycle(cycleId);
-  assert.equal(state.heldPositions.size, 1);
-  assert.equal(state.custodyLedgers.size, 1);
-  assert.equal(state.custodyLedgers.get(HELD_RAW_KEY).heldPositions, '25000000');
-});
-
-test('recordHeldPosition still refuses a canonical write once a raw row and a canonical row already coexist for the same asset', async t => {
-  const directory = await tempDirectory(t);
-  const repository = await CycleRepository.open(directory);
-  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
-  await repository.recordHeldPosition(cycleId, heldPositionFixture({
-    memo: 'memo-raw', mint: 'mint-raw', cardRef: 'mint-raw', ledgerAsset: HELD_RAW_ASSET,
-  }));
-  // A canonical row now also durably exists -- a coexistence this repository never produces on its
-  // own, injected only to prove the raw-predecessor refusal holds even once both rows are present,
-  // not merely while the canonical row is still absent.
-  await injectRawJournalEntry(directory, cycleId, 'custody-ledger-recorded', {
-    ledger: custodyLedgerV2(cycleId, { chainId: HELD_CANONICAL_CHAIN_ID, assetId: HELD_CANONICAL_ASSET_ID }),
-  });
-
-  const reopened = await CycleRepository.open(directory);
-  await assert.rejects(
-    () => reopened.recordHeldPosition(cycleId, heldPositionFixture({
-      memo: 'memo-canonical', mint: 'mint-canonical', cardRef: 'mint-canonical', terminalState: 'HELD_UNAVAILABLE', reason: 'BUYBACK_UNAVAILABLE',
-    })),
-    /legacy raw-identity custody row exists/,
-  );
-
-  const state = await reopened.describeCycle(cycleId);
-  assert.equal(state.heldPositions.size, 1);
-  assert.deepEqual([...state.heldPositions.values()].map(position => position.memo), ['memo-raw']);
-});
-
-test('recordHeldPosition retry after reopen with the same canonical ledger identity counts once', async t => {
-  const directory = await tempDirectory(t);
-  const repository = await CycleRepository.open(directory);
-  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
-  const input = heldPositionFixture({ terminalState: 'HELD_UNAVAILABLE', reason: 'BUYBACK_UNAVAILABLE' });
-  const first = await repository.recordHeldPosition(cycleId, input);
-
-  const reopened = await CycleRepository.open(directory);
-  const retry = await reopened.recordHeldPosition(cycleId, input);
-  assert.deepEqual(retry, first);
-
-  const state = await reopened.describeCycle(cycleId);
-  assert.equal(state.heldPositions.size, 1);
-  assert.equal(state.custodyLedgers.get(HELD_CANONICAL_KEY).heldPositions, '25000000');
-});
-
-test('recordHeldPosition retry refuses when it names a different custody ledger identity than the position already recorded', async t => {
-  const repository = await CycleRepository.open(await tempDirectory(t));
-  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
-  const input = heldPositionFixture({ terminalState: 'HELD_UNAVAILABLE', reason: 'BUYBACK_UNAVAILABLE' });
+test('native held retry refuses introduced attribution or changed committed cost without journal growth', async t => {
+  const { repository, cycleId, directory } = await nativeHeldRepository(t);
+  const input = heldPositionFixture();
   await repository.recordHeldPosition(cycleId, input);
-
-  const driftedAsset = { ...HELD_CANONICAL_ASSET, assetId: `${HELD_CANONICAL_CHAIN_ID}/erc20:0x${'7'.repeat(40)}` };
-  await assert.rejects(
-    () => repository.recordHeldPosition(cycleId, { ...input, ledgerAsset: driftedAsset }),
-    /retry supplies a custody ledger identity that does not match/,
-  );
+  const before = (await DurableCycleStore.open(directory)).readCycle(cycleId);
+  for (const ledgerAsset of [HELD_CANONICAL_ASSET, HELD_RAW_ASSET, null]) {
+    await assert.rejects(() => repository.recordHeldPosition(cycleId, { ...input, ledgerAsset }),
+      /native held USD cost cannot be written into an asset principal ledger/);
+  }
+  await assert.rejects(() => repository.recordHeldPosition(cycleId, { ...input, costMicroUsd: '1', valueMicroUsd: '1' }),
+    /held USD cost is not the committed admission basis/);
+  const after = (await DurableCycleStore.open(directory)).readCycle(cycleId);
+  assert.equal(after.journalHead, before.journalHead);
+  assert.equal(after.entries.length, before.entries.length);
 });
 
-test('recordHeldPosition retry refuses when it omits the custody ledger identity the position was actually recorded with, without journal growth', async t => {
-  const directory = await tempDirectory(t);
-  const repository = await CycleRepository.open(directory);
-  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
-  const input = heldPositionFixture({ terminalState: 'HELD_UNAVAILABLE', reason: 'BUYBACK_UNAVAILABLE' });
-  await repository.recordHeldPosition(cycleId, input);
-  const { ledgerAsset: _omitted, ...retryWithoutLedgerAsset } = input;
-
-  const beforeStore = await DurableCycleStore.open(directory);
-  const beforeStored = beforeStore.readCycle(cycleId);
-  await assert.rejects(
-    () => repository.recordHeldPosition(cycleId, retryWithoutLedgerAsset),
-    /retry omits the custody ledger identity/,
-  );
-  const afterFirstStore = await DurableCycleStore.open(directory);
-  const afterFirstStored = afterFirstStore.readCycle(cycleId);
-  assert.equal(afterFirstStored.version, beforeStored.version, 'refusal must not advance the journal version');
-  assert.equal(afterFirstStored.journalHead, beforeStored.journalHead, 'refusal must not append a new journal entry');
-  assert.equal(afterFirstStored.entries.length, beforeStored.entries.length);
-
-  // Same refusal holds even once a legacy raw-identity row also coexists for this asset: the
-  // omitted-attribution check fires before any raw-coexistence check ever runs.
-  await injectRawJournalEntry(directory, cycleId, 'custody-ledger-recorded', {
-    ledger: custodyLedger(cycleId, { chainId: HELD_RAW_ASSET.chainId, assetId: HELD_RAW_ASSET.assetId }),
-  });
-  const reopened = await CycleRepository.open(directory);
-  const beforeSecondStore = await DurableCycleStore.open(directory);
-  const beforeSecondStored = beforeSecondStore.readCycle(cycleId);
-  await assert.rejects(
-    () => reopened.recordHeldPosition(cycleId, retryWithoutLedgerAsset),
-    /retry omits the custody ledger identity/,
-  );
-  const afterSecondStore = await DurableCycleStore.open(directory);
-  const afterSecondStored = afterSecondStore.readCycle(cycleId);
-  assert.equal(afterSecondStored.version, beforeSecondStored.version, 'refusal must not advance the journal version');
-  assert.equal(afterSecondStored.journalHead, beforeSecondStored.journalHead, 'refusal must not append a new journal entry');
-  assert.equal(afterSecondStored.entries.length, beforeSecondStored.entries.length);
-
-  const state = await reopened.describeCycle(cycleId);
-  assert.equal(state.heldPositions.size, 1);
-  assert.equal(state.custodyLedgers.get(HELD_CANONICAL_KEY).heldPositions, '25000000');
-});
-
-test('recordHeldPosition retry for a position genuinely recorded without any ledger attribution still counts once', async t => {
-  const repository = await CycleRepository.open(await tempDirectory(t));
-  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
-  const { ledgerAsset: _omitted, ...input } = heldPositionFixture({ terminalState: 'HELD_UNAVAILABLE', reason: 'BUYBACK_UNAVAILABLE' });
-
-  const first = await repository.recordHeldPosition(cycleId, input);
-  const retry = await repository.recordHeldPosition(cycleId, input);
-  assert.deepEqual(retry, first);
-
+test('two native held cards each retain conservative aggregate purchase cost without fungible credit', async t => {
+  const { repository, cycleId } = await nativeHeldRepository(t);
+  for (const suffix of ['a', 'b']) await repository.recordHeldPosition(cycleId, heldPositionFixture({
+    memo: `memo-${suffix}`, mint: `mint-${suffix}`, cardRef: `mint-${suffix}` }));
   const state = await repository.describeCycle(cycleId);
-  assert.equal(state.heldPositions.size, 1);
+  assert.equal(state.heldPositions.size, 2);
+  assert.equal([...state.heldPositions.values()].reduce((sum, position) => sum + BigInt(position.costMicroUsd), 0n), 50000000n);
   assert.equal(state.custodyLedgers.size, 0);
 });
 
-test('two distinct held positions attributing to the same canonical row each count their own value exactly once', async t => {
-  const repository = await CycleRepository.open(await tempDirectory(t));
-  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
-
-  await repository.recordHeldPosition(cycleId, heldPositionFixture({
-    memo: 'memo-a', mint: 'mint-a', cardRef: 'mint-a', costMicroUsdg: '10', valueMicroUsdg: '10',
-  }));
-  await repository.recordHeldPosition(cycleId, heldPositionFixture({
-    memo: 'memo-b', mint: 'mint-b', cardRef: 'mint-b', costMicroUsdg: '20', valueMicroUsdg: '20',
-  }));
-
-  const state = await repository.describeCycle(cycleId);
-  assert.equal(state.heldPositions.size, 2);
-  assert.equal(state.custodyLedgers.get(HELD_CANONICAL_KEY).heldPositions, '30');
-});
-
-test('resolveHeldPosition after reopen removes its value from the same canonical custody row it opened', async t => {
-  const directory = await tempDirectory(t);
-  const repository = await CycleRepository.open(directory, () => 1_700_000_000_000);
-  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
-  const position = await repository.recordHeldPosition(cycleId, heldPositionFixture({
-    costMicroUsdg: '17', valueMicroUsdg: '17', reason: 'SENT_UNKNOWN_DEADLINE', terminalState: 'HELD_UNRESOLVED',
-    evidence: { stage: 'buyback', status: 'sent-unknown' },
-  }));
-  const before = await repository.describeCycle(cycleId);
-  assert.equal(before.custodyLedgers.get(HELD_CANONICAL_KEY).heldPositions, '17');
-
-  const reopened = await CycleRepository.open(directory, () => 1_700_000_000_001);
-  await reopened.resolveHeldPosition(position.positionId, {
-    heldEvidenceDigest: position.evidenceDigest,
-    expectedRevision: 0,
-    terminalState: 'REFUNDED',
-    evidence: { source: 'collector-status', status: 'refunded' },
-  });
-
+test('resolving a native held position after reopen creates no fungible principal', async t => {
+  const { repository, cycleId, reopen } = await nativeHeldRepository(t, '17');
+  const position = await repository.recordHeldPosition(cycleId, heldPositionFixture({ costMicroUsd: '17', valueMicroUsd: '17',
+    reason: 'SENT_UNKNOWN_DEADLINE', terminalState: 'HELD_UNRESOLVED', evidence: { stage: 'buyback', status: 'sent-unknown' } }));
+  const reopened = await reopen();
+  await reopened.resolveHeldPosition(position.positionId, { heldEvidenceDigest: position.evidenceDigest,
+    expectedRevision: 0, terminalState: 'REFUNDED', evidence: { source: 'collector-status', status: 'refunded' } });
   const after = await reopened.describeCycle(cycleId);
-  assert.equal(after.custodyLedgers.get(HELD_CANONICAL_KEY).heldPositions, '0');
-  assert.equal(after.custodyLedgers.size, 1);
+  assert.equal(after.custodyLedgers.size, 0);
+  assert.equal((await reopened.readHeldPosition(position.positionId)).resolution.terminalState, 'REFUNDED');
 });
 
-test('a raw-identity held position and its v1 custody row replay byte-identically after reopen', async t => {
+// Exact raw-identity API event captured from d5bd6a3ebb645228cfbd38e83372b9c3de903e58.
+// Reproduce with that commit's packages/{adapters,runner}/src, contracts/tooling, architecture,
+// and bindings: open the repository at clock 1700000000000; create this explicit cycleId with
+// releaseAmount '1' and production mode; call recordHeldPosition with the position's input
+// fields plus ledgerAsset matching the ledger below. Read the held-position-recorded payload
+// from DurableCycleStore. This is original historical writer output, not a current legacy write.
+const HELD_POSITION_RAW_V1_FIXTURE = {
+  "evidence": {
+    "stage": "buyback",
+    "status": "sent-unknown"
+  },
+  "ledger": {
+    "assetId": "0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+    "bridgeIn": "0",
+    "bridgeOut": "0",
+    "buybackProceeds": "0",
+    "chainId": "4663",
+    "claimed": "0",
+    "cycleId": "fixture-held-raw-v1-d5bd6a3e",
+    "decimals": 6,
+    "dust": "0",
+    "heldAssets": "0",
+    "heldPositions": "17",
+    "packCost": "0",
+    "payoutLiability": "0",
+    "refunds": "0",
+    "residual": "0",
+    "returnInput": "0",
+    "returnReceived": "0",
+    "schema": "hookemon.custody-ledger.v1",
+    "unattributed": "0"
+  },
+  "position": {
+    "cardRef": "mint-1",
+    "costMicroUsdg": "17",
+    "cycleId": "fixture-held-raw-v1-d5bd6a3e",
+    "evidenceDigest": "sha256:6ff5447aa6646d8e90cc9e9689375902dcc72ac27b07a6f1876f2d737e79abf0",
+    "insuredValue": null,
+    "memo": "memo-1",
+    "mint": "mint-1",
+    "openedAtMs": 1700000000000,
+    "ownerDecision": null,
+    "packId": "pack-1",
+    "positionId": "held:8930169eb3f7b6e429e9adddc08a3a4ce96a6d92d5bf3554a5d649530bf31d5f",
+    "positionRevision": 0,
+    "reason": "SENT_UNKNOWN_DEADLINE",
+    "resolution": null,
+    "terminalState": "HELD_UNRESOLVED",
+    "valueMicroUsdg": "17"
+  }
+};
+
+test('a pinned historical raw-identity held event and its v1 custody replay byte-identically', async t => {
+  const fixture = HELD_POSITION_RAW_V1_FIXTURE;
   const directory = await tempDirectory(t);
   const repository = await CycleRepository.open(directory, () => 1_700_000_000_000);
-  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
-  const position = await repository.recordHeldPosition(cycleId, heldPositionFixture({
-    costMicroUsdg: '17', valueMicroUsdg: '17', ledgerAsset: HELD_RAW_ASSET,
-    reason: 'SENT_UNKNOWN_DEADLINE', terminalState: 'HELD_UNRESOLVED', evidence: { stage: 'buyback', status: 'sent-unknown' },
-  }));
-  const before = await repository.describeCycle(cycleId);
-  const beforeRow = before.custodyLedgers.get(HELD_RAW_KEY);
-  assert.equal(beforeRow.schema, 'hookemon.custody-ledger.v1');
-
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production', cycleId: fixture.position.cycleId });
+  await injectRawJournalEntry(directory, cycleId, 'held-position-recorded', fixture);
   const reopened = await CycleRepository.open(directory, () => 1_700_000_000_000);
   const after = await reopened.describeCycle(cycleId);
-  assert.deepEqual(after.custodyLedgers.get(HELD_RAW_KEY), beforeRow);
-  assert.deepEqual(await reopened.readHeldPosition(position.positionId), position);
+  assert.equal(fixture.ledger.schema, 'hookemon.custody-ledger.v1');
+  assert.deepEqual(after.custodyLedgers.get(`4663\u0000${SETTLEMENT_SOURCE_ASSET}`), fixture.ledger);
+  assert.equal(after.custodyLedgers.size, 1);
+  assert.deepEqual(await reopened.readHeldPosition(fixture.position.positionId), fixture.position);
 });
 
 test('a stored historical canonical-v1 held event (the real pinned-base d5bd6a3e API output, committed as a fixture) replays byte-identically under the current fix', async t => {
