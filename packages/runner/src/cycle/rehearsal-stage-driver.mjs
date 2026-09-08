@@ -17,10 +17,7 @@ export class RehearsalRestartInjectedError extends Error {
 function assertConfig(config) {
   if (!config || typeof config !== 'object' || Array.isArray(config)) throw new Error('rehearsal stage driver config is invalid');
   if (!Number.isSafeInteger(config.chainId) || config.chainId <= 0) throw new Error('rehearsal stage driver chainId is invalid');
-  if (!evmAddressPattern.test(config.contracts?.usdg ?? '')) throw new Error('rehearsal stage driver USDG asset is invalid');
-  if (!Number.isInteger(config.contracts?.usdgDecimals) || config.contracts.usdgDecimals < 0 || config.contracts.usdgDecimals > 255) {
-    throw new Error('rehearsal stage driver USDG decimals are invalid');
-  }
+  if (config.chainId !== 4663 || config.moneyConfiguration?.assets?.eth?.assetId !== 'native' || config.moneyConfiguration.assets.eth.decimals !== 18) throw new Error('rehearsal stage driver requires native ETH identity');
   if (!solanaAddressPattern.test(config.relay?.solanaMint ?? '')) throw new Error('rehearsal stage driver Solana settlement asset is invalid');
   if (!solanaAddressPattern.test(config.rehearsal?.proceedsAccount ?? '')) {
     throw new Error('rehearsal stage driver dedicated proceeds account is invalid');
@@ -29,9 +26,9 @@ function assertConfig(config) {
     throw new Error('rehearsal stage driver profile is invalid');
   }
   if (config.rehearsal.mode === 'relay-roundtrip'
-    && (typeof config.execution?.rehearsalCapUsdg !== 'string'
-      || !decimalPattern.test(config.execution.rehearsalCapUsdg)
-      || config.execution.rehearsalCapUsdg === '0')) {
+    && (typeof config.execution?.rehearsalCapMicroUsd !== 'string'
+      || !decimalPattern.test(config.execution.rehearsalCapMicroUsd)
+      || config.execution.rehearsalCapMicroUsd === '0')) {
     throw new Error('relay-roundtrip rehearsal requires a positive explicit rehearsal cap');
   }
   return config;
@@ -77,7 +74,7 @@ function assertContext(context) {
   if (!context || typeof context !== 'object' || Array.isArray(context)) throw new Error('rehearsal stage context is invalid');
   if (typeof context.cycleId !== 'string' || context.cycleId.length === 0) throw new Error('rehearsal stage cycleId is invalid');
   if (typeof context.stage !== 'string' || context.stage.length === 0) throw new Error('rehearsal stage is invalid');
-  if (typeof context.releaseAmountMicroUsdg !== 'string' || !decimalPattern.test(context.releaseAmountMicroUsdg)) {
+  if (typeof context.releaseAmountWei !== 'string' || !decimalPattern.test(context.releaseAmountWei)) {
     throw new Error('rehearsal stage release amount is invalid');
   }
   return context;
@@ -89,26 +86,28 @@ function effectId(cycleId, stage) {
 
 function stageRequestDigest(context) {
   return digest({
-    schema: 'hookemon.rehearsal-stage-request.v1',
+    schema: 'hookemon.rehearsal-stage-request.v2',
     cycleId: context.cycleId,
     stage: context.stage,
-    releaseAmountMicroUsdg: context.releaseAmountMicroUsdg,
+    releaseAmountWei: context.releaseAmountWei,
     effectId: effectId(context.cycleId, context.stage),
   });
 }
 
 function evidenceFor({ context, config, requestDigest, skipped }) {
   const sourceAmount = Object.freeze({
-    chainId: `eip155:${config.chainId}`,
-    assetId: `eip155:${config.chainId}/erc20:${config.contracts.usdg.toLowerCase()}`,
-    decimals: config.contracts.usdgDecimals,
-    amountAtomic: context.releaseAmountMicroUsdg,
+    chainId: String(config.chainId),
+    assetId: 'native',
+    decimals: 18,
+    amountAtomic: context.releaseAmountWei,
   });
+  const settlementAtoms = context.admission?.aggregatePurchase?.amountAtomic ?? config.rehearsal.settlementAmountAtomic;
+  if (typeof settlementAtoms !== 'string' || !decimalPattern.test(settlementAtoms)) throw new Error('fake rehearsal requires an explicit Solana settlement amount in atoms');
   const settlementAmount = Object.freeze({
-    chainId: 'solana-mainnet',
+    chainId: '792703809',
     assetId: config.relay.solanaMint,
     decimals: 6,
-    amountAtomic: context.releaseAmountMicroUsdg,
+    amountAtomic: settlementAtoms,
   });
   const zeroResidue = Object.freeze({
     ...settlementAmount,
@@ -116,7 +115,7 @@ function evidenceFor({ context, config, requestDigest, skipped }) {
     classification: 'none',
   });
   return Object.freeze({
-    schema: 'hookemon.rehearsal-stage-evidence.v1',
+    schema: 'hookemon.rehearsal-stage-evidence.v2',
     cycleId: context.cycleId,
     stage: context.stage,
     requestDigest,
@@ -167,7 +166,7 @@ export function createRehearsalStageDriver({
       throw new Error(`rehearsal stage ${context.stage} has no recorded provider response to reconcile`);
     }
     const evidence = current.responseEvidence;
-    if (!evidence || evidence.schema !== 'hookemon.rehearsal-stage-evidence.v1') {
+    if (!evidence || evidence.schema !== 'hookemon.rehearsal-stage-evidence.v2') {
       throw new Error(`rehearsal stage ${context.stage} recorded provider evidence is invalid`);
     }
     await repository.reconcileStageAttempt(context.cycleId, context.stage, evidence);
@@ -217,7 +216,7 @@ export function createRehearsalStageDriver({
     reconcile,
     execute,
     async commit({ evidence }) {
-      if (!evidence || evidence.schema !== 'hookemon.rehearsal-stage-evidence.v1') {
+      if (!evidence || evidence.schema !== 'hookemon.rehearsal-stage-evidence.v2') {
         throw new Error('rehearsal stage commit evidence is invalid');
       }
     },

@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { collectorOnlyPackUsdCost } from '../src/app/compose.mjs';
 // Production entrypoint: one command that starts (or single-steps) the autonomous cycle loop against
 // real configuration read from the environment (never from a file inside this repository — see
 // environment.mjs). Subcommands:
@@ -75,7 +76,7 @@ import { runCollectorOnlyPreflight as runCollectorOnlyPreflightPlan } from '../r
 
 export { applySyntheticIsolatedChildSetup, chainBroadcastTransports, compositionInput, createProcessExec, parseArgv };
 
-const USAGE = `Usage: hookemon-runner run --mode rehearsal --cycles <positive-integer> --cap-usdg <atomic-amount> (--collector-only|--relay-roundtrip) [--restart-inject]
+const USAGE = `Usage: hookemon-runner run --mode rehearsal --cycles <positive-integer> --cap-micro-usd <atomic-amount> (--collector-only|--relay-roundtrip) [--restart-inject]
    or: hookemon-runner preflight [--state <absolute-path-to-operator-state.json>]
    or: hookemon-runner run --mode production [--state <absolute-path-to-operator-state.json>] [--no-dashboard]
    or: hookemon-runner dry-run [--mode inspection|production] [--state <absolute-path-to-operator-state.json>]
@@ -111,7 +112,7 @@ function parseOperatorArgv(rest) {
 const COMMANDS = new Set(['run', 'preflight', 'tick', 'dry-run', 'status', 'resume', 'abort-cycle', 'operator']);
 const BOOLEAN_FLAGS = new Set(['no-dashboard', 'collector-only', 'relay-roundtrip', 'restart-inject']);
 const FLAG_ALLOWLIST = Object.freeze({
-  run: new Set(['state', 'no-dashboard', 'mode', 'cycles', 'cap-usdg', 'collector-only', 'relay-roundtrip', 'restart-inject']),
+  run: new Set(['state', 'no-dashboard', 'mode', 'cycles', 'cap-micro-usd', 'collector-only', 'relay-roundtrip', 'restart-inject']),
   preflight: new Set(['state']),
   tick: new Set(['state']),
   'dry-run': new Set(['state', 'mode']),
@@ -177,11 +178,11 @@ function parseArgv(argv) {
     if (mode === null) throw usageError('run requires --mode production or rehearsal');
     if (mode !== 'production' && mode !== 'rehearsal') throw usageError('--mode must be production or rehearsal');
     if (mode === 'rehearsal') {
-      if (!Object.hasOwn(flags, 'cycles') || !Object.hasOwn(flags, 'cap-usdg')) {
-        throw usageError('rehearsal run requires --cycles and --cap-usdg');
+      if (!Object.hasOwn(flags, 'cycles') || !Object.hasOwn(flags, 'cap-micro-usd')) {
+        throw usageError('rehearsal run requires --cycles and --cap-micro-usd');
       }
-      if (flags['cap-usdg'] === '0' || !decimalPattern.test(flags['cap-usdg'])) {
-        throw usageError('--cap-usdg must be a positive atomic amount');
+      if (flags['cap-micro-usd'] === '0' || !decimalPattern.test(flags['cap-micro-usd'])) {
+        throw usageError('--cap-micro-usd must be a positive atomic amount');
       }
       if (flags['collector-only'] && flags['relay-roundtrip']) {
         throw usageError('cannot combine --collector-only and --relay-roundtrip');
@@ -189,8 +190,8 @@ function parseArgv(argv) {
       if (!flags['collector-only'] && !flags['relay-roundtrip']) {
         throw usageError('rehearsal requires --collector-only or --relay-roundtrip');
       }
-    } else if (Object.hasOwn(flags, 'cycles') || Object.hasOwn(flags, 'cap-usdg') || flags['collector-only'] || flags['relay-roundtrip'] || flags['restart-inject']) {
-      throw usageError('--cycles, --cap-usdg, --collector-only, --relay-roundtrip, and --restart-inject require --mode rehearsal');
+    } else if (Object.hasOwn(flags, 'cycles') || Object.hasOwn(flags, 'cap-micro-usd') || flags['collector-only'] || flags['relay-roundtrip'] || flags['restart-inject']) {
+      throw usageError('--cycles, --cap-micro-usd, --collector-only, --relay-roundtrip, and --restart-inject require --mode rehearsal');
     }
     return Object.freeze({
       command,
@@ -198,7 +199,7 @@ function parseArgv(argv) {
       noDashboard: flags['no-dashboard'] === true,
       mode,
       cycles: mode === 'rehearsal' ? parsePositiveInteger(flags.cycles, '--cycles') : null,
-      capUsdg: mode === 'rehearsal' ? flags['cap-usdg'] : null,
+      capMicroUsd: mode === 'rehearsal' ? flags['cap-micro-usd'] : null,
       collectorOnly: flags['collector-only'] === true,
       relayRoundtrip: flags['relay-roundtrip'] === true,
       restartInject: flags['restart-inject'] === true,
@@ -312,7 +313,7 @@ function compositionInput({
   dashboard,
   signerClient,
   signerReadiness,
-  rehearsalCapUsdg,
+  rehearsalCapMicroUsd,
   rehearsalSessionId,
   restartInjector,
   operatorAuditLogPath,
@@ -350,7 +351,7 @@ function compositionInput({
     rehearsal: env.rehearsal,
     execution: {
       ...env.execution,
-      rehearsalCapUsdg,
+      rehearsalCapMicroUsd,
       ...(rehearsalSessionId === null ? {} : { rehearsalSessionId }),
       enforceProfile: true,
     },
@@ -444,7 +445,7 @@ async function buildComposition({
   withDashboard = false,
   logTicks = false,
   profile = 'inspection',
-  rehearsalCapUsdg = null,
+  rehearsalCapMicroUsd = null,
   rehearsalSessionId = null,
   restartInjector = null,
   operatorAuditLogPath = undefined,
@@ -465,7 +466,7 @@ async function buildComposition({
       dashboard,
       signerClient: null,
       signerReadiness: null,
-      rehearsalCapUsdg,
+      rehearsalCapMicroUsd,
       rehearsalSessionId,
       restartInjector,
       operatorAuditLogPath,
@@ -484,7 +485,7 @@ async function buildComposition({
     dashboard: null,
     signerClient: null,
     signerReadiness: keychainReadinessSigners(readiness),
-    rehearsalCapUsdg,
+    rehearsalCapMicroUsd,
     rehearsalSessionId,
     restartInjector,
     operatorAuditLogPath,
@@ -515,7 +516,7 @@ async function buildComposition({
     dashboard,
     signerClient,
     signerReadiness: keychainReadinessSigners(readiness),
-    rehearsalCapUsdg,
+    rehearsalCapMicroUsd,
     rehearsalSessionId,
     restartInjector,
     operatorAuditLogPath,
@@ -603,10 +604,11 @@ export async function initializeCollectorOnlyPolicy({
   const env = readEnvironmentFn(environment, { profile: 'rehearsal' });
   assertRehearsalProfile({ env, collectorOnly: true, relayRoundtrip: false });
   const packPriceAtomic = env.collectorCrypt?.packPrice?.amountAtomic;
+  const packCostMicroUsd = collectorOnlyPackUsdCost(env);
   assertLiveCollectorOnlyRunOptions({
     env,
     cycles: 1,
-    capUsdg: packPriceAtomic,
+    capMicroUsd: packCostMicroUsd,
     restartInject: false,
   });
   const statePath = resolveStatePath(env, statePathOverride);
@@ -614,13 +616,13 @@ export async function initializeCollectorOnlyPolicy({
     allowedPackIds: Object.freeze([env.pack.code]),
     requestedOrders: 1,
     maxBoostersPerCycle: 1,
-    maxUnitPriceMicroUsdg: packPriceAtomic,
-    maxCycleBudgetMicroUsdg: packPriceAtomic,
-    max24HourBudgetMicroUsdg: packPriceAtomic,
+    maxUnitPriceMicroUsd: packCostMicroUsd,
+    maxCycleBudgetMicroUsd: packCostMicroUsd,
+    max24HourBudgetMicroUsd: packCostMicroUsd,
     maxCyclesPerDay: 1,
-    perCycleCapMicroUsdg: packPriceAtomic,
-    lossCapMicroUsdg: packPriceAtomic,
-    maxOutstandingCustodyMicroUsdg: packPriceAtomic,
+    perCycleCapMicroUsd: packCostMicroUsd,
+    lossCapMicroUsd: packCostMicroUsd,
+    maxOutstandingCustodyMicroUsd: packCostMicroUsd,
     manualApprovalCycles: 1,
     liveMode: true,
   });
@@ -630,6 +632,7 @@ export async function initializeCollectorOnlyPolicy({
     assertCollectorOnlyRehearsalPolicy(configuration, {
       packCode: env.pack.code,
       packPriceAtomic,
+      packCostMicroUsd,
     });
     return { ...createEmptyOperatorState(), configuration };
   });
@@ -740,7 +743,7 @@ export function assertRehearsalProfile({ env, collectorOnly, relayRoundtrip }) {
   throw new Error(`${requested} rehearsal requires HOOKEMON_PROVIDER_MODE=fake`);
 }
 
-export function assertLiveCollectorOnlyRunOptions({ env, cycles, capUsdg, restartInject }) {
+export function assertLiveCollectorOnlyRunOptions({ env, cycles, capMicroUsd, restartInject }) {
   const liveCollectorOnly = env?.execution?.providerMode === 'live' && env?.rehearsal?.mode === 'collector-only';
   if (!liveCollectorOnly) return false;
   if (cycles !== 1) throw new Error('live collector-only rehearsal requires exactly one cycle');
@@ -749,12 +752,12 @@ export function assertLiveCollectorOnlyRunOptions({ env, cycles, capUsdg, restar
   if (typeof packPrice !== 'string' || !/^(0|[1-9][0-9]*)$/.test(packPrice)) {
     throw new Error('live collector-only rehearsal requires a typed configured pack price');
   }
-  if (capUsdg !== packPrice) throw new Error('live collector-only rehearsal requires the exact configured pack price cap');
+  if (capMicroUsd !== collectorOnlyPackUsdCost(env)) throw new Error('live collector-only rehearsal requires the exact authenticated USD purchase cost cap');
   return true;
 }
 
-function assertRehearsalSessionMatches(session, { cycles, capUsdg, collectorOnly }) {
-  if (session.cycles !== cycles || session.capUsdg !== capUsdg || session.collectorOnly !== collectorOnly) {
+function assertRehearsalSessionMatches(session, { cycles, capMicroUsd, collectorOnly }) {
+  if (session.cycles !== cycles || session.capMicroUsd !== capMicroUsd || session.collectorOnly !== collectorOnly) {
     throw new Error('rehearsal restart session does not match the requested run');
   }
 }
@@ -789,7 +792,9 @@ export async function buildManualApprovalHandoff({ composition, env, statePath }
   const cycleDigest = deriveCyclePolicyDigest({
     configuration: state.configuration,
     cycleId: active.cycleId,
-    releaseAmountMicroUsdg: active.releaseAmount,
+    releaseAmountWei: active.releaseAmount,
+    releaseCostMicroUsd: active.admission?.aggregateFundingUsd?.amountMicroUsd ?? collectorOnlyPackUsdCost(env),
+    ...(active.admission ? { admission: active.admission } : {}),
     packId: env.pack.code,
     liveMode: liveCollectorOnly,
     mode: 'rehearsal',
@@ -797,7 +802,7 @@ export async function buildManualApprovalHandoff({ composition, env, statePath }
   return Object.freeze({ status: 'AWAITING_MANUAL_APPROVAL', cycleId: active.cycleId, cycleDigest });
 }
 
-export async function runRehearsal({ statePathOverride, cycles, capUsdg, collectorOnly, relayRoundtrip, restartInject }, {
+export async function runRehearsal({ statePathOverride, cycles, capMicroUsd, collectorOnly, relayRoundtrip, restartInject }, {
   environment = process.env,
   readEnvironmentFn = readEnvironment,
   runCollectorOnlyPreflightFn = runCollectorOnlyPreflight,
@@ -805,7 +810,7 @@ export async function runRehearsal({ statePathOverride, cycles, capUsdg, collect
 } = {}) {
   const env = readEnvironmentFn(environment, { profile: 'rehearsal' });
   assertRehearsalProfile({ env, collectorOnly, relayRoundtrip });
-  const liveCollectorOnly = assertLiveCollectorOnlyRunOptions({ env, cycles, capUsdg, restartInject });
+  const liveCollectorOnly = assertLiveCollectorOnlyRunOptions({ env, cycles, capMicroUsd, restartInject });
   if (liveCollectorOnly) {
     await runCollectorOnlyPreflightFn({ statePathOverride, environment });
   }
@@ -813,7 +818,7 @@ export async function runRehearsal({ statePathOverride, cycles, capUsdg, collect
   const sessionPath = restartInject ? environment[REHEARSAL_SESSION_PATH_ENV] ?? null : null;
   let session = sessionPath === null ? null : await readRehearsalSession({ path: sessionPath });
   const localCompleted = [];
-  if (session !== null) assertRehearsalSessionMatches(session, { cycles, capUsdg, collectorOnly });
+  if (session !== null) assertRehearsalSessionMatches(session, { cycles, capMicroUsd, collectorOnly });
   const completed = () => session === null ? localCompleted : session.completed;
 
   while (completed().length < cycles) {
@@ -824,7 +829,7 @@ export async function runRehearsal({ statePathOverride, cycles, capUsdg, collect
       statePathOverride,
       withDashboard: false,
       profile: 'rehearsal',
-      rehearsalCapUsdg: capUsdg,
+      rehearsalCapMicroUsd: capMicroUsd,
       rehearsalSessionId: session?.sessionId ?? null,
       restartInjector,
     });
@@ -858,12 +863,12 @@ export async function runRehearsal({ statePathOverride, cycles, capUsdg, collect
       await composition.shutdown();
     }
   }
-  writeJson({ mode: 'rehearsal', capUsdg, restartCount: session?.restartCount ?? 0, cycles: completed() });
+  writeJson({ mode: 'rehearsal', capMicroUsd, restartCount: session?.restartCount ?? 0, cycles: completed() });
 }
 
-function rehearsalWorkerArgs({ statePathOverride, cycles, capUsdg, collectorOnly, relayRoundtrip }) {
+function rehearsalWorkerArgs({ statePathOverride, cycles, capMicroUsd, collectorOnly, relayRoundtrip }) {
   return [
-    'run', '--mode', 'rehearsal', '--cycles', String(cycles), '--cap-usdg', capUsdg,
+    'run', '--mode', 'rehearsal', '--cycles', String(cycles), '--cap-micro-usd', capMicroUsd,
     ...(collectorOnly ? ['--collector-only'] : relayRoundtrip ? ['--relay-roundtrip'] : []),
     '--restart-inject',
     ...(statePathOverride === null ? [] : ['--state', statePathOverride]),
@@ -907,13 +912,13 @@ export async function runRehearsalSupervisor(parsed, {
   assertLiveCollectorOnlyRunOptions({
     env,
     cycles: parsed.cycles,
-    capUsdg: parsed.capUsdg,
+    capMicroUsd: parsed.capMicroUsd,
     restartInject: true,
   });
   const session = await openSessionFn({
     stateDir: env.stateDir,
     cycles: parsed.cycles,
-    capUsdg: parsed.capUsdg,
+    capMicroUsd: parsed.capMicroUsd,
     collectorOnly: parsed.collectorOnly,
   });
   const argv = rehearsalWorkerArgs(parsed);

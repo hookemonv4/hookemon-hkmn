@@ -187,7 +187,7 @@ function collectLiveCollectorOnlyEvidence(cycle) {
 
 function requireEvidence(value, cycleId, stage) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`rehearsal evidence stage ${stage} is invalid`);
-  if (value.schema !== 'hookemon.rehearsal-stage-evidence.v1' || value.cycleId !== cycleId || value.stage !== stage) {
+  if (!['hookemon.rehearsal-stage-evidence.v1', 'hookemon.rehearsal-stage-evidence.v2'].includes(value.schema) || value.cycleId !== cycleId || value.stage !== stage) {
     throw new Error(`rehearsal evidence stage ${stage} identity is invalid`);
   }
   if (typeof value.effectId !== 'string' || value.effectId.length === 0) throw new Error(`rehearsal evidence stage ${stage} effectId is invalid`);
@@ -213,9 +213,11 @@ export function collectRehearsalEvidence(description, { allowReadyToComplete = f
   if (typeof allowReadyToComplete !== 'boolean') throw new Error('rehearsal evidence readiness option is invalid');
   const cycle = requireDescription(description, { allowReadyToComplete });
   if (cycle.providerMode === 'live') return collectLiveCollectorOnlyEvidence(cycle);
+  const native = [...cycle.stages.values()].some(record => record.evidence?.schema === 'hookemon.rehearsal-stage-evidence.v2');
   for (const stage of OPERATIONAL_CYCLE_STAGES) {
     const record = cycle.stages.get(stage);
     if (record?.status !== 'COMPLETE') throw new Error(`rehearsal evidence stage ${stage} is incomplete`);
+    if (native && record.evidence?.schema !== 'hookemon.rehearsal-stage-evidence.v2') throw new Error('native rehearsal evidence cannot mix historical stage units');
     const operational = cycle.operationalAttempts.get(stage);
     if (operational?.attempt?.state !== 'RECONCILED') {
       throw new Error(`rehearsal evidence stage ${stage} provider attempt is not reconciled`);
@@ -264,7 +266,7 @@ export function collectRehearsalEvidence(description, { allowReadyToComplete = f
   if (payout === null) throw new Error('rehearsal evidence requires payout evidence');
   if (releaseAmount === null) throw new Error('rehearsal evidence requires an attributable release amount');
   return Object.freeze({
-    schema: 'hookemon.rehearsal-evidence.v1',
+    schema: native ? 'hookemon.rehearsal-evidence.v2' : 'hookemon.rehearsal-evidence.v1',
     cycleId: cycle.cycleId,
     mode: cycle.mode,
     providerMode: cycle.providerMode,
@@ -279,7 +281,7 @@ export function collectRehearsalEvidence(description, { allowReadyToComplete = f
 /** Writes one immutable evidence JSON file below the operator state directory. */
 export async function writeRehearsalEvidence({ stateDir, evidence }) {
   if (typeof stateDir !== 'string' || !stateDir.startsWith('/')) throw new Error('rehearsal evidence stateDir must be absolute');
-  if (!evidence || evidence.schema !== 'hookemon.rehearsal-evidence.v1' || typeof evidence.cycleId !== 'string') {
+  if (!evidence || !['hookemon.rehearsal-evidence.v1', 'hookemon.rehearsal-evidence.v2'].includes(evidence.schema) || typeof evidence.cycleId !== 'string') {
     throw new Error('rehearsal evidence document is invalid');
   }
   const directory = join(stateDir, 'rehearsal-evidence');

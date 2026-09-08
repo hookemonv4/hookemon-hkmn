@@ -66,7 +66,7 @@ async function productionEnv(t, overrides = {}) {
     HOOKEMON_SOLANA_PRIORITY_FEE_CAP: '2',
     HOOKEMON_SOLANA_LAMPORT_RESERVE: '2',
     HOOKEMON_BUDGET_AVAILABLE_PROCESS_WEI: '0',
-    HOOKEMON_BUDGET_PACK_PRICE_USDG: '0',
+    HOOKEMON_COLLECTOR_PACK_PRICE_ATOMS: '0',
     HOOKEMON_BUDGET_OUTBOUND_CAP_WEI: '0',
     HOOKEMON_BUDGET_RETURN_CAP_WEI: '0',
     HOOKEMON_BUDGET_OPERATING_MARGIN_WEI: '0',
@@ -102,7 +102,7 @@ test('readEnvironment applies documented defaults when nothing else is set', asy
   assert.equal(config.contracts.quoteCurrency, `0x${'00'.repeat(20)}`);
   assert.equal(config.contracts.quoteDecimals, 18);
   assert.equal(config.budget.availableProcessWei, '0');
-  assert.equal(config.budget.packPriceUsdg, '0');
+  assert.equal(config.budget.collectorPackPriceAtoms, '0');
   assert.equal(config.signerModulePath, null);
   assert.equal(config.rehearsal, null);
 });
