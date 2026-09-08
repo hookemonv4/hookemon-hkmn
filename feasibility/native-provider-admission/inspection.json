@@ -1,0 +1,245 @@
+{
+  "schema": "hookemon.native-provider-admission-inspection.v1",
+  "requestSha256": "cd2813906aabd63d9ba7d5540fb30f75c032e3679468ee2ebad8232d1beab26b",
+  "requestBytes": 425379,
+  "schemaSha256": "c4d23b0f3bd232b209d6566ac804348720b81432a2978728a10cc4317895c404",
+  "scope": "Direct required/type/const checks only; no full schema, cryptographic, economics or server validation.",
+  "preflightSent": false,
+  "apiKeyRead": false,
+  "verdict": "incomplete-request",
+  "directViolations": [
+    {
+      "path": "$.chainDeployment",
+      "reason": "type",
+      "expected": "object",
+      "actual": "null"
+    },
+    {
+      "path": "$.chainDeploymentDescriptorDigest",
+      "reason": "type",
+      "expected": "string",
+      "actual": "null"
+    },
+    {
+      "path": "$.nonce",
+      "reason": "type",
+      "expected": "string",
+      "actual": "null"
+    },
+    {
+      "path": "$.permitWindow.validAfter",
+      "reason": "type",
+      "expected": "string",
+      "actual": "null"
+    },
+    {
+      "path": "$.permitWindow.deadline",
+      "reason": "type",
+      "expected": "string",
+      "actual": "null"
+    },
+    {
+      "path": "$.sourceDescriptor",
+      "reason": "type",
+      "expected": "object",
+      "actual": "null"
+    },
+    {
+      "path": "$.sourceBundleManifest",
+      "reason": "type",
+      "expected": "object",
+      "actual": "null"
+    },
+    {
+      "path": "$.externalContracts",
+      "reason": "type",
+      "expected": "array",
+      "actual": "null"
+    },
+    {
+      "path": "$.graphBundle.sourceBundleSha256",
+      "reason": "type",
+      "expected": "string",
+      "actual": "null"
+    },
+    {
+      "path": "$.graphBundle.targets[0].applicantSalt",
+      "reason": "type",
+      "expected": "string",
+      "actual": "null"
+    },
+    {
+      "path": "$.graphBundle.targets[0].constructorArguments",
+      "reason": "type",
+      "expected": "string",
+      "actual": "null"
+    },
+    {
+      "path": "$.graphBundle.targets[0].initializerCalldata",
+      "reason": "type",
+      "expected": "string",
+      "actual": "null"
+    },
+    {
+      "path": "$.graphBundle.targets[0].constructorAddressLocators",
+      "reason": "type",
+      "expected": "array",
+      "actual": "null"
+    },
+    {
+      "path": "$.graphBundle.targets[0].initializerAddressLocators",
+      "reason": "type",
+      "expected": "array",
+      "actual": "null"
+    },
+    {
+      "path": "$.graphBundle.targets[0].expectedRuntimeCodeHash",
+      "reason": "type",
+      "expected": "string",
+      "actual": "null"
+    },
+    {
+      "path": "$.graphBundle.targets[1].applicantSalt",
+      "reason": "type",
+      "expected": "string",
+      "actual": "null"
+    },
+    {
+      "path": "$.graphBundle.targets[1].initializerCalldata",
+      "reason": "type",
+      "expected": "string",
+      "actual": "null"
+    },
+    {
+      "path": "$.graphBundle.targets[1].initializerAddressLocators",
+      "reason": "type",
+      "expected": "array",
+      "actual": "null"
+    },
+    {
+      "path": "$.graphBundle.targets[1].expectedRuntimeCodeHash",
+      "reason": "type",
+      "expected": "string",
+      "actual": "null"
+    },
+    {
+      "path": "$.graphBundle.targets[2].applicantSalt",
+      "reason": "type",
+      "expected": "string",
+      "actual": "null"
+    },
+    {
+      "path": "$.graphBundle.targets[2].constructorArguments",
+      "reason": "type",
+      "expected": "string",
+      "actual": "null"
+    },
+    {
+      "path": "$.graphBundle.targets[2].initializerCalldata",
+      "reason": "type",
+      "expected": "string",
+      "actual": "null"
+    },
+    {
+      "path": "$.graphBundle.targets[2].constructorAddressLocators",
+      "reason": "type",
+      "expected": "array",
+      "actual": "null"
+    },
+    {
+      "path": "$.graphBundle.targets[2].initializerAddressLocators",
+      "reason": "type",
+      "expected": "array",
+      "actual": "null"
+    },
+    {
+      "path": "$.graphBundle.targets[2].expectedRuntimeCodeHash",
+      "reason": "type",
+      "expected": "string",
+      "actual": "null"
+    },
+    {
+      "path": "$.projectMetadata",
+      "reason": "type",
+      "expected": "object",
+      "actual": "null"
+    },
+    {
+      "path": "$.projectMetadataHash",
+      "reason": "type",
+      "expected": "string",
+      "actual": "null"
+    },
+    {
+      "path": "$.projectMetadataImageArtifact",
+      "reason": "type",
+      "expected": "object",
+      "actual": "null"
+    },
+    {
+      "path": "$.verificationBundle.components[0].constructorArguments",
+      "reason": "type",
+      "expected": "string",
+      "actual": "null"
+    },
+    {
+      "path": "$.verificationBundle.components[0].runtimeMaterialization",
+      "reason": "type",
+      "expected": "object",
+      "actual": "null"
+    },
+    {
+      "path": "$.verificationBundle.components[1].runtimeMaterialization",
+      "reason": "type",
+      "expected": "object",
+      "actual": "null"
+    },
+    {
+      "path": "$.verificationBundle.components[2].constructorArguments",
+      "reason": "type",
+      "expected": "string",
+      "actual": "null"
+    },
+    {
+      "path": "$.verificationBundle.components[2].runtimeMaterialization",
+      "reason": "type",
+      "expected": "object",
+      "actual": "null"
+    },
+    {
+      "path": "$.launchIntentHash",
+      "reason": "type",
+      "expected": "string",
+      "actual": "null"
+    },
+    {
+      "path": "$.agentAttestation",
+      "reason": "type",
+      "expected": "object",
+      "actual": "null"
+    },
+    {
+      "path": "$.fundingPlan",
+      "reason": "type",
+      "expected": "object",
+      "actual": "null"
+    }
+  ],
+  "targets": [
+    {
+      "targetId": "token",
+      "creationBytecodeBytes": 3955,
+      "creationBytecodeSha256": "bbf944f1ef76e76a86a4a6bb892bdfe76867768366248b8cc17bbe1319d5c216"
+    },
+    {
+      "targetId": "custody",
+      "creationBytecodeBytes": 3274,
+      "creationBytecodeSha256": "ef2ca07d8b9184fcbe5f93ccd5f5272b1835799c96c7ba54cdfb420475881662"
+    },
+    {
+      "targetId": "hook",
+      "creationBytecodeBytes": 33793,
+      "creationBytecodeSha256": "c6d7e209322f300dac3639cd317c6d2d43ffa7a4a603681beb0f7c583e61ccab"
+    }
+  ]
+}

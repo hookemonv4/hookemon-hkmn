@@ -1,0 +1,37 @@
+[
+  {
+    "file": "discovery.json",
+    "url": "https://programmable.market/.well-known/programmable.json",
+    "error": "<urlopen error [SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: unable to get local issuer certificate (_ssl.c:1081)>"
+  },
+  {
+    "file": "capabilities.json",
+    "url": "https://api.programmable.market/v4/chains/4663/capabilities",
+    "error": "<urlopen error [SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: unable to get local issuer certificate (_ssl.c:1081)>"
+  },
+  {
+    "file": "openapi.json",
+    "url": "https://programmable.market/openapi/custom-launch-v4.1.json",
+    "error": "<urlopen error [SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: unable to get local issuer certificate (_ssl.c:1081)>"
+  },
+  {
+    "file": "create-schema.json",
+    "url": "https://programmable.market/schemas/custom-launch/v4.1/create-request.json",
+    "error": "<urlopen error [SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: unable to get local issuer certificate (_ssl.c:1081)>"
+  },
+  {
+    "file": "guide.md",
+    "url": "https://programmable.market/developers/custom-launch-api-v1.md",
+    "error": "<urlopen error [SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: unable to get local issuer certificate (_ssl.c:1081)>"
+  },
+  {
+    "file": "coverage.json",
+    "url": "https://api.programmable.market/v4/chains/4663/launch-coverage",
+    "error": "<urlopen error [SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: unable to get local issuer certificate (_ssl.c:1081)>"
+  },
+  {
+    "file": "readiness.json",
+    "url": "https://api.programmable.market/v4/chains/4663/readiness",
+    "error": "<urlopen error [SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: unable to get local issuer certificate (_ssl.c:1081)>"
+  }
+]
