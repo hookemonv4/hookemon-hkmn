@@ -1,0 +1,111 @@
+{
+  "schema": "hookemon.native-test-capital-evidence.v1",
+  "allInBudgetProven": false,
+  "scope": "Captured scenario arithmetic; no selected funding plan or current valuation authority",
+  "budgetMicroUsd": "250000000",
+  "sourceFundingResultsSha256": "2c83a5b0a18a1aaaa4ea7c00efd0be82284d511e0a72f6c5a3f34bb2a86de268",
+  "catalog": {
+    "lowestOpenPublicSingleCardCode": "pokemon_25",
+    "priceUsdcAtoms": "25000000",
+    "catalogPrice": {
+      "amount": 25
+    },
+    "publicUnarchivedCount": 28,
+    "openSingleCardCount": 27
+  },
+  "valuation": {
+    "nativeSource": "relay-outbound-response.json details.currencyIn",
+    "nativeInputWei": "10214270236945073",
+    "nativeInputMicroUsd": "25326883",
+    "impliedUsdPerEthNumerator": "25326883000000000000",
+    "impliedUsdPerEthDenominator": "10214270236945073",
+    "usdc25DisplayedMicroUsd": "24997350",
+    "solSource": "relay-return-scenario-response.json fees.gas (provider estimate ratio only)",
+    "solLamports": "200000",
+    "solMicroUsd": "20659",
+    "executionValidity": "not established; no configured quoteValidityMs or authenticated process capability; protocol order deadlines are not quote TTL"
+  },
+  "backwards": {
+    "newProcessPrincipalWei": "10214270236945073",
+    "minimumGrossWei": "408570809477802920",
+    "minimumFeesWei": {
+      "process": "10214270236945073",
+      "treasury": "1634283237911211",
+      "programmable": "408570809477802"
+    },
+    "minimumTotalFeeDiversionWei": "12257124284334086",
+    "measuredGrossWei": "415128299471828390",
+    "measuredProcessWei": "10378207486795709",
+    "measuredProcessHeadroomWei": "163937249850636",
+    "historicalClaimOverNewQuoteWei": "29308764385297",
+    "modelFreshClaimExecuted": false
+  },
+  "capital": {
+    "initialWei": "60000000000000000",
+    "initialMicroUsdCeil": "148773525",
+    "lockedSeedWei": "39999999999999657",
+    "lockedSeedMicroUsdCeil": "99182350",
+    "reusableFloatWei": "20000000000000000",
+    "reusableFloatMicroUsdCeil": "49591175",
+    "grossTurnoverIsNotFreshCapital": true,
+    "measuredFeeDiversionWei": "12453848984154850",
+    "feeDiversionInsideInitialCapital": true,
+    "packPrincipalInsideInitialCapital": true,
+    "minimumTraderAfterBuyWei": "0",
+    "headroomBeforeAdditionalCostsMicroUsd": "101226475"
+  },
+  "gasSensitivity": {
+    "observedGasPriceWei": "249274000",
+    "localExecutionGasByStage": {
+      "tokenDeploymentGasLocal": 725263,
+      "hookDeploymentGasLocal": 6412849,
+      "custodyDeploymentGasLocal": 666212,
+      "graphWiringGasLocal": 188756,
+      "seedGasLocal": 582652,
+      "swapExecutionGasLocal": 5892831,
+      "claimGasLocal": 150559
+    },
+    "localExecutionGasTotal": "14619122",
+    "localExecutionFeeAtSnapshotWei": "3644167017428000",
+    "localExecutionFeeAtSnapshotMicroUsdCeil": "9035927",
+    "swapIntrinsicOnlyGas": "672000",
+    "swapIntrinsicOnlyFeeWei": "167512128000000",
+    "swapIntrinsicOnlyFeeMicroUsdCeil": "415357",
+    "outboundProviderGas": "32713",
+    "outboundProviderMaxFeePerGas": "346640000",
+    "outboundProviderMaxFeeProductWei": "11339634320000",
+    "outboundProviderMaxFeeProductMicroUsdCeil": "28118",
+    "notCompleteTransactionGas": true
+  },
+  "balances": {
+    "evmBlockNumber": "57640799",
+    "evmBlockHash": "0x9183e847b7bbc37d0359beeb3f91ce544aa31f4d1b4b2e370da1b2f015bd8884",
+    "launchWei": "0",
+    "launchNonce": "0",
+    "operationsWei": "0",
+    "operationsNonce": "0",
+    "solanaLamports": "19920066",
+    "solanaSlot": 445322550,
+    "solanaUsdcTokenAccountCount": 0,
+    "solanaUsdcAtoms": "0",
+    "rentFor165BytesLamports": "1855569",
+    "observedSolFootprintScenarioMicroUsdCeil": "2057644",
+    "existingSolOriginalAcquisitionCostMicroUsd": null
+  },
+  "returnScenario": {
+    "inputUsdcAtoms": "25000000",
+    "quotedOutputWei": "10037839882384134",
+    "minimumOutputWei": "9837083084736451",
+    "gasEstimateLamports": "200000",
+    "relayerFeeUsdcAtoms": "65126",
+    "actualFutureBuybackUsdcAtoms": null,
+    "incomeCreditedToBudget": "0"
+  },
+  "conditionalSubtotal": {
+    "description": "Initial0.06ETH + local execution-gas pricing + swap intrinsic floor + outbound quoted max-fee product + entire existingSOL mark; NOT full bound. No double-counted pack/provider-fee principal.",
+    "microUsdCeil": "160310569",
+    "unmeasuredRemainingAllowanceMicroUsd": "89689431",
+    "unknownAdditionalCostMicroUsd": null,
+    "passesBudget": false
+  }
+}
