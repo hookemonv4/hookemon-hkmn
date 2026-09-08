@@ -11,6 +11,7 @@ import {
   validateTaskDeferralApproval,
 } from './gates.mjs';
 import { resolveReceiptInput } from './receipts.mjs';
+import { validateTaskBindingRecovery } from './task-binding-recovery.mjs';
 
 const LEDGER_ROOTS = new WeakMap();
 const FULL_COMMIT = /^[0-9a-f]{40}$/;
@@ -60,6 +61,10 @@ export function openLedger(root) {
       candidate_sha TEXT NOT NULL, integration_sha TEXT NOT NULL,
       status TEXT NOT NULL DEFAULT 'queued', merged_sha TEXT
     );
+    CREATE TABLE IF NOT EXISTS task_binding_recoveries(
+      seq INTEGER PRIMARY KEY AUTOINCREMENT, task_id TEXT NOT NULL,
+      recorded_at TEXT NOT NULL, provenance TEXT NOT NULL
+    );
   `);
   const taskColumns = new Set(db.prepare('PRAGMA table_info(tasks)').all().map(column => column.name));
   for (const [name, type] of [
@@ -85,6 +90,26 @@ export function addTask(db, t) {
 export function listTasks(db) {
   return db.prepare('SELECT * FROM tasks ORDER BY id').all()
     .map(t => ({ ...t, deps: JSON.parse(t.deps), reqs: JSON.parse(t.reqs) }));
+}
+
+export function recoverTaskRequirements(db, taskId, options) {
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const root = LEDGER_ROOTS.get(db);
+    if (!root) throw new Error('ledger has no repository root');
+    const recovery = validateTaskBindingRecovery(root, db, taskId, options);
+    if (recovery.descriptor.prestate.status === 'done') {
+      validateCompletionCommit(root, recovery.descriptor.prestate.completion?.commitSha);
+    }
+    db.prepare('UPDATE tasks SET reqs=? WHERE id=?').run(JSON.stringify(recovery.reqs), taskId);
+    db.prepare('INSERT INTO task_binding_recoveries(task_id,recorded_at,provenance) VALUES(?,?,?)')
+      .run(taskId, nowIso(), JSON.stringify(recovery));
+    db.exec('COMMIT');
+    return { taskId, reqs: recovery.reqs, prestateFingerprint: recovery.prestateFingerprint };
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
 }
 
 function assertAcyclicTaskGraph(tasks) {

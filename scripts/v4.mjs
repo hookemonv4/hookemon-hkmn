@@ -17,7 +17,9 @@ import {
   setTaskDeps, prepareTaskDeferral, deferTask, rebindCompletionCommit,
   prepareCompositeProvenanceRebind, validateCompositeProvenanceRebindApproval,
   rebindCompletionCompositeProvenance,
+  recoverTaskRequirements,
 } from './lib/ledger.mjs';
+import { prepareTaskBindingRecovery } from './lib/task-binding-recovery.mjs';
 
 const root = process.cwd();
 const [cmd, sub, ...rest] = process.argv.slice(2);
@@ -128,6 +130,14 @@ try {
       rebindCompletionCommit(db, id, values.from, values.commit);
       projectTasks(db, root);
       out({ ok: true, id, commitSha: values.commit });
+    }
+    else if (sub === 'prepare-bindings') out(prepareTaskBindingRecovery(db, id));
+    else if (sub === 'recover-bindings') {
+      // Refuse existing global projection failures before changing a binding.
+      projectTasks(db, root);
+      const recovery = recoverTaskRequirements(db, id, { record: values.record, approval: values.approval });
+      projectTasks(db, root);
+      out({ ok: true, ...recovery });
     }
     else if (sub === 'rebind-completion-composite-provenance') {
       const current = prepareCompositeProvenanceRebind(db, id);
