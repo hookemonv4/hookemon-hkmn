@@ -12,6 +12,7 @@ import { createRelayClient, RelayIntentAuthenticationError } from '../../src/rel
 import { CycleRepository } from '../../src/app/cycle-repository.mjs';
 import { ERC20_TRANSFER_TOPIC } from '../../src/robinhood-rpc.mjs';
 import { TOKEN_PROGRAM_ID, createSolanaRpcClient, signedSolanaTransactionSignature } from '../../src/solana-rpc.mjs';
+import { nativeProducedAdmissionFixture } from '../native/admission-fixture.mjs';
 import { createTestProfileMutationAuthority } from '../../../runner/src/cycle/preflight.mjs';
 import {
   ReturnRecoveryRequiredError,
@@ -39,6 +40,8 @@ function fixture(name) {
 
 const chains = fixture('chains.json');
 const quoteFixture = fixture('quote-return.json');
+const nativeQuoteFixture = JSON.parse(readFileSync(new URL('../../../../docs/evidence/native-relay-source-instruction-20260908/relay-return-scenario-response.json', import.meta.url), 'utf8'));
+const NATIVE_QUOTE_NOW = nativeQuoteFixture.protocol.v2.orderData.output.deadline * 1000 - 1000;
 
 function response(body) {
   return { ok: true, status: 200, text: async () => JSON.stringify(body) };
@@ -46,15 +49,16 @@ function response(body) {
 
 function relayClient() {
   return createRelayClient({
+    now: () => NATIVE_QUOTE_NOW, quoteValidityMs: 60000,
     fetchImpl: async (url, options) => {
       if (options.method === 'GET' && url.pathname === '/chains') return response(chains);
-      if (options.method === 'POST' && url.pathname === '/quote/v2') return response(quoteFixture);
+      if (options.method === 'POST' && url.pathname === '/quote/v2') return response(nativeQuoteFixture);
       throw new Error(`unexpected Relay request ${options.method} ${url.pathname}`);
     },
   });
 }
 
-function custodyLedger({ proceeds = '24000000', committed = '0' } = {}) {
+function custodyLedger({ proceeds = '25000000', committed = '0' } = {}) {
   return {
     chainId: 'solana-mainnet',
     assetId: SOLANA_MINT,
@@ -76,8 +80,9 @@ function nativeSolanaSettlementFields() {
 
 function repository(ledger = custodyLedger(), { heldPositions = [] } = {}) {
   return {
-    async describeCycle() {
+    async describeCycle(cycleId = 'cycle-return-fixture') {
       return {
+        admission: await nativeProducedAdmissionFixture(cycleId),
         custodyLedgers: ledger === null ? new Map() : new Map([[`${ledger.chainId}\u0000${ledger.assetId}`, ledger]]),
         heldPositions: new Map(heldPositions),
       };
@@ -89,12 +94,13 @@ function repository(ledger = custodyLedger(), { heldPositions = [] } = {}) {
 }
 
 test('prepareReturnRequest bridges only the custody-ledger-attributed proceeds delta and preserves the recorded Relay Solana instruction shape', async () => {
-  const nowMs = (quoteFixture.protocol.v2.orderData.output.deadline * 1000) - 1;
+  const nowMs = NATIVE_QUOTE_NOW;
   const request = await prepareReturnRequest({
     adapters: { relay: relayClient() },
     config: {
       chainId: 4663,
-      accounts: { evm: EVM_ACCOUNT, solana: SOLANA_ACCOUNT },
+      accounts: { evm: nativeQuoteFixture.details.recipient, solana: nativeQuoteFixture.details.sender },
+      now: () => NATIVE_QUOTE_NOW,
       relay: { solanaMint: SOLANA_MINT, maxSettlementWindowSeconds: '600' },
       moneyConfiguration: moneyConfiguration(),
       ...nativeSolanaSettlementFields(),
@@ -103,19 +109,22 @@ test('prepareReturnRequest bridges only the custody-ledger-attributed proceeds d
     context: { cycleId: 'cycle-return-1' },
     nowMs,
   });
-  assert.equal(request.schema, 'hookemon.return-relay-request.v1');
+  assert.equal(request.schema, 'hookemon.return-relay-request.v2');
   assert.deepEqual(request.inputAmount, {
-    chainId: '792703809', assetId: SOLANA_MINT, decimals: 6, amountAtomic: '24000000',
+    chainId: '792703809', assetId: SOLANA_MINT, decimals: 6, amountAtomic: '25000000',
   });
   assert.deepEqual(request.destinationAmount, {
-    chainId: '4663', assetId: '0x5fc5360d0400a0fd4f2af552add042d716f1d168', decimals: 6, amountAtomic: '23843750',
+    chainId: '4663', assetId: 'native', decimals: 18, amountAtomic: nativeQuoteFixture.details.currencyOut.amount,
   });
-  assert.equal(request.intent.requestId, quoteFixture.requestId);
+  assert.equal(request.intent.requestId, nativeQuoteFixture.requestId);
+  assert.equal(request.destinationUsd.amountMicroUsd, '24896658');
+  assert.equal(request.destinationUsd.rounding, 'down');
+  assert.deepEqual(request.destinationUsd.amount, request.destinationAmount);
   assert.equal(request.requestCreatedAtUnixSeconds, String(Math.floor(nowMs / 1000)));
   assert.equal(request.maxSettlementWindowSeconds, '600');
   assert.deepEqual(request.solanaInstructionPlan, {
-    instructions: quoteFixture.steps[0].items[0].data.instructions,
-    addressLookupTableAddresses: quoteFixture.steps[0].items[0].data.addressLookupTableAddresses,
+    instructions: nativeQuoteFixture.steps[0].items[0].data.instructions,
+    addressLookupTableAddresses: nativeQuoteFixture.steps[0].items[0].data.addressLookupTableAddresses,
   });
 });
 
@@ -125,14 +134,15 @@ test('prepareReturnRequest refuses a fresh return when every cycle-attributed pr
       adapters: { relay: relayClient() },
       config: {
         chainId: 4663,
-        accounts: { evm: EVM_ACCOUNT, solana: SOLANA_ACCOUNT },
+        accounts: { evm: nativeQuoteFixture.details.recipient, solana: nativeQuoteFixture.details.sender },
+      now: () => NATIVE_QUOTE_NOW,
         relay: { solanaMint: SOLANA_MINT, maxSettlementWindowSeconds: '600' },
         moneyConfiguration: moneyConfiguration(),
         ...nativeSolanaSettlementFields(),
       },
-      cycleRepository: repository(custodyLedger({ proceeds: '24000000', committed: '24000000' })),
+      cycleRepository: repository(custodyLedger({ proceeds: '25000000', committed: '25000000' })),
       context: { cycleId: 'cycle-return-2' },
-      nowMs: (quoteFixture.protocol.v2.orderData.output.deadline * 1000) - 1,
+      nowMs: NATIVE_QUOTE_NOW,
     }),
     /no uncommitted cycle-attributed proceeds/,
   );
@@ -151,23 +161,24 @@ test('prepareReturnRequest records a zero-proceeds cycle return without quoting 
     },
     config: {
       chainId: 4663,
-      accounts: { evm: EVM_ACCOUNT, solana: SOLANA_ACCOUNT },
+      accounts: { evm: nativeQuoteFixture.details.recipient, solana: nativeQuoteFixture.details.sender },
+      now: () => NATIVE_QUOTE_NOW,
       relay: { solanaMint: SOLANA_MINT, maxSettlementWindowSeconds: '600' },
       moneyConfiguration: moneyConfiguration(),
       ...nativeSolanaSettlementFields(),
     },
     cycleRepository: repository(custodyLedger({ proceeds: '0', committed: '0' })),
     context: { cycleId: 'cycle-return-all-held' },
-    nowMs: (quoteFixture.protocol.v2.orderData.output.deadline * 1000) - 1,
+    nowMs: NATIVE_QUOTE_NOW,
   });
 
-  assert.equal(request.schema, 'hookemon.return-zero-proceeds-request.v1');
+  assert.equal(request.schema, 'hookemon.return-zero-proceeds-request.v2');
   assert.equal(request.cycleId, 'cycle-return-all-held');
   assert.deepEqual(request.inputAmount, {
     chainId: '792703809', assetId: SOLANA_MINT, decimals: 6, amountAtomic: '0',
   });
   assert.deepEqual(request.destinationAmount, {
-    chainId: '4663', assetId: '0x5fc5360d0400a0fd4f2af552add042d716f1d168', decimals: 6, amountAtomic: '0',
+    chainId: '4663', assetId: 'native', decimals: 18, amountAtomic: '0',
   });
   assert.equal(quoteCalls, 0);
 });
@@ -185,7 +196,8 @@ test('prepareReturnRequest records a zero-proceeds return when every card is hel
     },
     config: {
       chainId: 4663,
-      accounts: { evm: EVM_ACCOUNT, solana: SOLANA_ACCOUNT },
+      accounts: { evm: nativeQuoteFixture.details.recipient, solana: nativeQuoteFixture.details.sender },
+      now: () => NATIVE_QUOTE_NOW,
       relay: { solanaMint: SOLANA_MINT, maxSettlementWindowSeconds: '600' },
       moneyConfiguration: moneyConfiguration(),
       ...nativeSolanaSettlementFields(),
@@ -194,10 +206,10 @@ test('prepareReturnRequest records a zero-proceeds return when every card is hel
       heldPositions: [['position-return-all-held', { positionId: 'position-return-all-held' }]],
     }),
     context: { cycleId: 'cycle-return-all-held-before-buyback' },
-    nowMs: (quoteFixture.protocol.v2.orderData.output.deadline * 1000) - 1,
+    nowMs: NATIVE_QUOTE_NOW,
   });
 
-  assert.equal(request.schema, 'hookemon.return-zero-proceeds-request.v1');
+  assert.equal(request.schema, 'hookemon.return-zero-proceeds-request.v2');
   assert.equal(request.inputAmount.amountAtomic, '0');
   assert.equal(request.destinationAmount.amountAtomic, '0');
   assert.equal(quoteCalls, 0);
@@ -208,20 +220,21 @@ test('a zero-proceeds return persists final evidence without a signer or bridge 
     adapters: { relay: { async quoteReturnBridge() { throw new Error('bridge must not be quoted'); } } },
     config: {
       chainId: 4663,
-      accounts: { evm: EVM_ACCOUNT, solana: SOLANA_ACCOUNT },
+      accounts: { evm: nativeQuoteFixture.details.recipient, solana: nativeQuoteFixture.details.sender },
+      now: () => NATIVE_QUOTE_NOW,
       relay: { solanaMint: SOLANA_MINT, maxSettlementWindowSeconds: '600' },
       moneyConfiguration: moneyConfiguration(),
       ...nativeSolanaSettlementFields(),
     },
     cycleRepository: repository(custodyLedger({ proceeds: '0', committed: '0' })),
     context: { cycleId: 'cycle-return-all-held' },
-    nowMs: (quoteFixture.protocol.v2.orderData.output.deadline * 1000) - 1,
+    nowMs: NATIVE_QUOTE_NOW,
   });
   let stored = null;
   let signerCalls = 0;
   const cycleRepository = {
     async describeCycle() {
-      return { custodyLedgers: new Map([['solana-mainnet ' + SOLANA_MINT, custodyLedger({ proceeds: '0', committed: '0' })]]), heldPositions: new Map() };
+      return { admission: await nativeProducedAdmissionFixture('cycle-return-all-held'), custodyLedgers: new Map([['solana-mainnet ' + SOLANA_MINT, custodyLedger({ proceeds: '0', committed: '0' })]]), heldPositions: new Map() };
     },
     async recordStageAttempt(cycleId, stage, evidence) {
       stored = { cycleId, stage, evidence };
@@ -234,7 +247,8 @@ test('a zero-proceeds return persists final evidence without a signer or bridge 
   };
   const config = {
     chainId: 4663,
-    accounts: { evm: EVM_ACCOUNT, solana: SOLANA_ACCOUNT },
+    accounts: { evm: nativeQuoteFixture.details.recipient, solana: nativeQuoteFixture.details.sender },
+      now: () => NATIVE_QUOTE_NOW,
     relay: { solanaMint: SOLANA_MINT, maxSettlementWindowSeconds: '600' },
     moneyConfiguration: moneyConfiguration(),
     ...nativeSolanaSettlementFields(),
@@ -253,12 +267,12 @@ test('a zero-proceeds return persists final evidence without a signer or bridge 
 
   assert.equal(signerCalls, 0);
   assert.deepEqual(mutation, {
-    schema: 'hookemon.return-zero-proceeds-evidence.v1',
+    schema: 'hookemon.return-zero-proceeds-evidence.v2',
     cycleId: 'cycle-return-all-held',
     finalized: true,
     noBridge: true,
-    destinationAccount: EVM_ACCOUNT,
-    destinationAsset: '0x5fc5360d0400a0fd4f2af552add042d716f1d168',
+    destinationAccount: nativeQuoteFixture.details.recipient,
+    destinationAsset: 'native',
     destinationCreditAmount: '0',
   });
   assert.deepEqual(await reconcileLiveReturn({ adapters: null, config, cycleRepository, context: { cycleId: 'cycle-return-all-held' } }), mutation);
@@ -271,21 +285,22 @@ test('prepareReturnRequest refuses every nonzero return minimum before requestin
       adapters: { relay: relayClient() },
       config: {
         chainId: 4663,
-        accounts: { evm: EVM_ACCOUNT, solana: SOLANA_ACCOUNT },
+        accounts: { evm: nativeQuoteFixture.details.recipient, solana: nativeQuoteFixture.details.sender },
+      now: () => NATIVE_QUOTE_NOW,
         relay: { solanaMint: SOLANA_MINT, maxSettlementWindowSeconds: '600' },
         moneyConfiguration: {
           ...configuredMoney,
           minimums: {
             ...configuredMoney.minimums,
-            returnUsdg: { ...configuredMoney.minimums.returnUsdg, amountAtomic: '2' },
+            returnEth: { ...configuredMoney.minimums.returnEth, amountAtomic: '2' },
           },
         },
       },
       cycleRepository: repository(),
       context: { cycleId: 'cycle-return-nonzero-minimum' },
-      nowMs: (quoteFixture.protocol.v2.orderData.output.deadline * 1000) - 1,
+      nowMs: NATIVE_QUOTE_NOW,
     }),
-    /returnUsdg.*zero/,
+    /returnEth.*zero/,
   );
 });
 
@@ -539,15 +554,15 @@ test('reconcileLiveReturn retains the wallet nonce reservation while source fina
 
 function moneyConfiguration() {
   return {
-    schema: 'hookemon.money-configuration.v1',
+    schema: 'hookemon.money-configuration.v2',
     assets: {
-      usdg: { chainId: '4663', assetId: '0x5fc5360d0400a0fd4f2af552add042d716f1d168', decimals: 6 },
+      eth: { chainId: '4663', assetId: 'native', decimals: 18 },
       solanaStablecoin: { chainId: '792703809', assetId: SOLANA_MINT, decimals: 6 },
     },
     minimums: {
-      robinhoodReceive: { chainId: '4663', assetId: '0x5fc5360d0400a0fd4f2af552add042d716f1d168', decimals: 6, amountAtomic: '0' },
+      robinhoodReceive: { chainId: '4663', assetId: 'native', decimals: 18, amountAtomic: '0' },
       solanaReceive: { chainId: '792703809', assetId: SOLANA_MINT, decimals: 6, amountAtomic: '0' },
-      returnUsdg: { chainId: '4663', assetId: '0x5fc5360d0400a0fd4f2af552add042d716f1d168', decimals: 6, amountAtomic: '0' },
+      returnEth: { chainId: '4663', assetId: 'native', decimals: 18, amountAtomic: '0' },
     },
     evm: {
       perTransactionGasPriceCap: { chainId: '4663', assetId: 'native', decimals: 18, amountAtomic: '100' },
