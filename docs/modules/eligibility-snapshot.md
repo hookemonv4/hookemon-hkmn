@@ -26,11 +26,8 @@ The runtime configuration requires `chainId`, `hkmn.{address,deployBlock,decimal
 - The stage only emits `dual-source` completeness evidence. Source IDs distinguish configured clients but do not themselves authenticate provider provenance; a frozen provider-authority binding is required before that provenance can be treated as independent.
 - The excluded set comes only from the launch manifest and role history. Unlisted contract recipients remain eligible at their own addresses.
 - A holder set is never shortened to fit a recipient limit. The feasibility envelope decides whether the cycle is held before claim processing.
-- The current recipient and transaction check is the lower of the configured maximum and the
-  1,025 plan limit. It is not yet an executable capacity check: the journal's 64-item array bound
-  rejects a persisted eligibility manifest and direct-payout state above 64 holders. A storage or
-  owner-approved capacity revision must align these limits before a live claim can rely on this
-  gate.
+- Recipient and transaction limits are the lower of the configured maximum and the 10,000-recipient implementation ceiling. They are admission limits, not a selection of the first N holders.
+- Completed manifests that exceed the journal payload limit use immutable paged stage evidence. The journal retains a content-addressed reference; reopening resolves and verifies the full manifest.
 
 ## State transitions
 
@@ -38,16 +35,14 @@ The runtime configuration requires `chainId`, `hkmn.{address,deployBlock,decimal
 - `AutomatedCycleService` durably completes `eligibility-snapshot` from that evidence before it can prepare `claim-process`.
 - A hash, log, source, supply, or configuration verification failure holds the cycle as `HELD_DATA_UNVERIFIED`; an exceeded envelope holds it as `HELD_UNAVAILABLE`.
 - A detected stale lease is rethrown without issuing a terminal hold. The repository transition remains responsible for atomic fencing across workers.
-- A held envelope refusal records block identity, holder-snapshot digest, source evidence, and feasibility summary without shortening the holder set. The current bounded journal cannot persist a complete large entry array.
+- A held envelope refusal records block identity, holder-snapshot digest, source evidence, and feasibility summary without shortening the holder set. The hold summary does not replace the complete successful manifest.
 
 ## Operational commands
 
 - Provide a verified depth for `robinhood-stage-finality-v1`; an absent depth is refused before any RPC read.
 - Supply a content-addressed launch manifest and two genuinely independent log sources before reconciling.
-- Keep measured transfer gas, gas-price ceiling, native reserve, native balance, and
-  recipient/transaction limits current before reconciliation. Values above 1,025 do not increase
-  the plan limit, and no value above 64 is currently persistence-safe for production.
-- Do not configure a feasible large holder set until durable content-addressed manifest storage is available for the full entry array.
+- Keep measured transfer gas, gas-price ceiling, native reserve, native balance, and recipient/transaction limits current before reconciliation. Raising a configured maximum never bypasses the 10,000-recipient implementation ceiling or the native fee check.
+- Run `node --test --test-name-pattern='capacity matrix' packages/adapters/test/app/eligibility-snapshot.test.mjs` for the 100, 200, 300, 400, 500 and 600-holder admission, paged manifest reopen, and insufficient-envelope cases. RPC logs are fixtures; these checks do not measure live payment throughput.
 - Ensure the production composition supplies token decimals, snapshot configuration, and both log clients. Missing values fail closed before claim processing.
 
 ## Recovery pointers
