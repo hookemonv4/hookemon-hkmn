@@ -57,7 +57,7 @@ const REGEX_RULES = [
 ];
 
 // Review-bound exact bytes only. Manifest edits require a new checker/control review.
-const NATIVE_RECOGNITION_SHA256 = '86363267d658bf570376146ad900eb8ac69275e0db071b4e54f4898a82a903d9';
+const NATIVE_RECOGNITION_SHA256 = '7ab8a7df33250cca070499c811ea4c987492ab6649efc9d1a7ecddbbb968fdc8';
 const nativeRecognitionBytes = readFileSync(new URL('./native-cleanroom-recognition.json', import.meta.url));
 if (hash('sha256', nativeRecognitionBytes) !== NATIVE_RECOGNITION_SHA256) {
   throw new Error('native clean-room recognition manifest integrity mismatch');

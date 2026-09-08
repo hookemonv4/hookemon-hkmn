@@ -173,3 +173,16 @@ test('unsupported capture mode refuses without network activity', async t => {
   await assert.rejects(observeNativeRuntimeAuthority({ checkpointMode: 'latest-only' }), /INVALID_CHECKPOINT_MODE/);
   assert.equal(calls.length, 0);
 });
+
+
+test('permit authority includes the verified fallback signature interface', async t => {
+  await withFetch(t);
+  const observed = await observeNativeRuntimeAuthority();
+  const role = observed.runtime.contracts.find(contract => contract.role === 'permitAuthority');
+  const combined = JSON.parse(observed.evidenceBytes[role.abiPath]);
+  const details = JSON.parse(observed.evidenceBytes[role.observationPath]);
+  const fallback = JSON.parse(observed.evidenceBytes[details.fallbackAbiPath]);
+  assert.ok(fallback.some(item => item.type === 'function' && item.name === 'isValidSignature'));
+  assert.ok(combined.some(item => item.type === 'function' && item.name === 'isValidSignature'));
+  assert.equal(combined.filter(item => item.type === 'constructor').length, 1);
+});
