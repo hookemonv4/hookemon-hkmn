@@ -185,6 +185,6 @@
   },
   "offchainAmendment": {
     "path": "feasibility/phase3-offchain-interface-amendment.json",
-    "sha256": "sha256:9e94624d9ef77277354ee3f1590c448747ae436c95f6c7f2b9497cf63a094581"
+    "sha256": "sha256:3e91a11ca644f1664f670979a772628690caf4f3eeda53e0ecb2722f91daa6b0"
   }
 }

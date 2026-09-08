@@ -58,6 +58,8 @@ import {
   RELAY_SYNTHETIC_API_KEY,
 } from '../signing/collector-production-binding.mjs';
 
+import { requireCollectorLiveBindingAnchors } from '../signing/collector-live-anchors.mjs';
+
 // Signing dependencies load only when a signer is actually constructed. Read-only configuration,
 // repository status, and direct keychain readiness must not initialize the transaction-policy path.
 const OPERATOR_EVM_ROLE = 'operator-evm';
@@ -805,12 +807,13 @@ export function readEnvironment(env = process.env, { profile = 'inspection', dry
   // depth alongside `../signing/collector-production-binding.mjs`'s own loader/resolver refusals):
   // no independently pinned live authority exists in this codebase.
   const productionBindingAuthority = readString(env, 'HOOKEMON_COLLECTOR_PRODUCTION_BINDING_AUTHORITY', { defaultValue: null });
-  if (productionBindingAuthority !== null && productionBindingAuthority !== COLLECTOR_PRODUCTION_BINDING_AUTHORITY_SYNTHETIC_OFFLINE) {
-    fail('HOOKEMON_COLLECTOR_PRODUCTION_BINDING_AUTHORITY must be "synthetic-offline" when set; no live authority is ever accepted here');
+  if (productionBindingAuthority !== null && !['live', COLLECTOR_PRODUCTION_BINDING_AUTHORITY_SYNTHETIC_OFFLINE].includes(productionBindingAuthority)) {
+    fail('HOOKEMON_COLLECTOR_PRODUCTION_BINDING_AUTHORITY must be "synthetic-offline" or an approved "live" authority');
   }
   if (productionBindingAuthority !== null && profile !== 'production') {
     fail('HOOKEMON_COLLECTOR_PRODUCTION_BINDING_AUTHORITY requires the production execution profile');
   }
+  if (productionBindingAuthority === 'live') requireCollectorLiveBindingAnchors();
   const syntheticOffline = productionBindingAuthority === COLLECTOR_PRODUCTION_BINDING_AUTHORITY_SYNTHETIC_OFFLINE;
   if (syntheticOffline && Object.hasOwn(env, 'HOOKEMON_COLLECTOR_CRYPT_API_KEY_PATH')) {
     fail('synthetic-offline authority refuses a real Collector API credential file selector');
@@ -905,7 +908,7 @@ export function readEnvironment(env = process.env, { profile = 'inspection', dry
   // construct its own branded isolated child setup before composing -- never read or interpreted by
   // this module itself.
   const collectorProductionBindingRegistry = readJsonObjectFile(env, 'HOOKEMON_COLLECTOR_PRODUCTION_BINDING_REGISTRY_PATH', {
-    required: syntheticOffline,
+    required: productionBindingAuthority !== null,
   });
   const collectorSyntheticRoot = readAbsolutePath(env, 'HOOKEMON_COLLECTOR_SYNTHETIC_ROOT', { required: syntheticOffline });
 

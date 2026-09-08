@@ -17,7 +17,8 @@ The evidence control records immutable, content-addressed receipts and projects 
 ## Invariants
 
 - Receipt files are regular `100644` blobs named with one contiguous numeric sequence beginning at `r-00001.json`.
-- A receipt is never modified, deleted, renamed, replaced, or linked through a symlink.
+- Receipt history is immutable. The dedicated ETH PR39/PR40 collision producer retains the two pinned PR40 active blobs and preserves the two pinned PR39 blobs byte-for-byte outside the active ledger, with a non-authorizing descriptor. No other receipt replacement, deletion, rename, or symlink is accepted.
+- Collision verification checks both merge parents, their pinned ancestry, each original blob and mode, the complete archive set, and the exact descriptor. Archives and descriptors remain append-only. Historical owner approvals keep their original hashes and can remain stale; preservation grants no authority.
 - Every recorded input is repository-relative, remains inside the repository after symlink resolution, and is bound by SHA-256.
 - Generic receipt creation rejects every receipt type reserved by any gate definition. Reserved types are writable only behind the validating gate and owner commands.
 - A gate item accepts only its declared receipt type, authority, proof schema, exact artifact allowlist, required inputs, matching phase and item, passing result, and fresh transitive evidence.
@@ -52,6 +53,8 @@ node scripts/check-append-only.mjs <base-sha> <head-sha>
 ```
 
 ## Recovery pointers
+
+- During the PR39/PR40 two-parent merge, `node scripts/v4.mjs receipt preserve-eth-collision` produces `evidence/receipt-provenance/eth-pr39-pr40/` and restores only the two active PR40 receipt blobs. Stage and commit its outputs with the merge. The command rejects other histories and existing differing provenance. It never renews owner approval.
 
 - Do not edit a stale receipt. Append replacement evidence, update the gate run to the new receipt IDs, and run the gate again.
 - A malformed or noncanonical receipt must be corrected before commit. Once committed, preserve it and append a valid successor only if the repository policy permits that recovery.

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { execFileSync } from 'node:child_process';
+import { verifiedEthCollisionPaths } from './lib/receipt-provenance.mjs';
 
 const SHA_PATTERN = /^[0-9a-f]{40}$/i;
 
@@ -12,7 +13,7 @@ const SUPERSEDED_MERGE_PARENTS = new Map([
 ]);
 
 function git(root, args, options = {}) {
-  return execFileSync('git', ['-C', root, ...args], options);
+  return execFileSync('git', ['--no-replace-objects', '-C', root, ...args], options);
 }
 
 function assertSha(value, label) {
@@ -38,7 +39,7 @@ function assertAncestor(root, base, head) {
 function receiptChanges(root, parent, commit) {
   const output = git(
     root,
-    ['diff-tree', '-r', '-M', '--name-status', '-z', parent, commit, '--', 'receipts'],
+    ['diff-tree', '-r', '-M', '--name-status', '-z', parent, commit, '--', 'receipts', 'evidence/receipt-provenance'],
     { encoding: 'utf8' },
   );
   const fields = output.split('\0').filter(Boolean);
@@ -98,9 +99,11 @@ export function scanAppendOnlyRange(root, base, head, { requireAncestor = false 
       .trim().split(/\s+/).filter(Boolean);
     if (parents.length === 0) throw new Error(`commit ${commit} has no parent`);
 
+    const preserved = verifiedEthCollisionPaths(root, commit, parents);
     for (const parent of parents) {
       if (SUPERSEDED_MERGE_PARENTS.get(commit)?.has(parent)) continue;
       for (const change of receiptChanges(root, parent, commit)) {
+        if (change.status === 'M' && preserved.get(parent)?.has(change.path)) continue;
         const rule = ruleFor(root, commit, change);
         if (rule) {
           findings.push({

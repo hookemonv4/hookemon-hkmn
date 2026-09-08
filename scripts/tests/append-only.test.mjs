@@ -237,3 +237,18 @@ test('fails closed for abbreviated or unknown commit SHAs', () => {
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('rejects modification of archived receipt provenance', () => {
+  const { root, base } = repository();
+  try {
+    mkdirSync(join(root, 'evidence/receipt-provenance/example'), { recursive: true });
+    const path = join(root, 'evidence/receipt-provenance/example/archive.json');
+    writeFileSync(path, '{"original":true}\n');
+    commit(root, 'archive evidence');
+    writeFileSync(path, '{"original":false}\n');
+    const head = commit(root, 'tamper archive');
+    const result = scan(root, base, head);
+    assert.equal(result.status, 1);
+    assert.match(result.stdout, /archive.json: modified/);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});

@@ -7,6 +7,7 @@ import {
   recordGateEvidence, reservedGateReceiptTypes, validateTaskDeferralApproval,
 } from './lib/gates.mjs';
 import { addReceipt } from './lib/receipts.mjs';
+import { preserveEthReceiptCollision } from './lib/receipt-provenance.mjs';
 import {
   addRequirement, listRequirements, taskEvidenceContext, traceCheck,
 } from './lib/reqs.mjs';
@@ -77,6 +78,10 @@ try {
     });
     const r = authorizeNotApplicable(root, phase, values.item, values.rationale, values.approval);
     out(r);
+  }
+  else if (cmd === 'receipt' && sub === 'preserve-eth-collision') {
+    if (rest.length) throw new Error('receipt preserve-eth-collision takes no arguments');
+    out(preserveEthReceiptCollision(root));
   }
   else if (cmd === 'receipt' && sub === 'add') {
     const { values } = flags({

@@ -618,7 +618,7 @@ function collectorOnlyPurchaseSolanaClient({ operator, latestBlockhash, invalidF
       if (method === 'getLatestBlockhash') result = { value: { blockhash: latestBlockhash, lastValidBlockHeight: 4242 } };
       else if (method === 'isBlockhashValid') {
         isBlockhashValidCalls += 1;
-        result = { value: invalidFromCall === null || isBlockhashValidCalls < invalidFromCall };
+        result = { context: { slot: 1000 }, value: invalidFromCall === null || isBlockhashValidCalls < invalidFromCall };
       } else if (method === 'getBlockHeight') result = 100;
       else if (method === 'getBalance') result = { value: 10_000_000 };
       else if (method === 'getAccountInfo') {
@@ -1083,42 +1083,42 @@ test('a composed production purchase refuses at the trusted resolver before any 
   const { error, calls } = await composedProductionPurchaseAttempt(t, {
     latestBlockhash: 'SysvarC1ock11111111111111111111111111111111',
     transactionBlockhash: 'SysvarRecentB1ockHashes11111111111111111111',
+    invalidFromCall: 1,
   });
 
   assert.match(
     error?.message ?? '',
-    /Solana blockhashContextResolver failed: compose Solana blockhashContextResolver refuses a blockhash that is not the current latest/,
+    /Solana blockhashContextResolver failed: original blockhash is not valid/,
   );
   assert.equal(calls.generateYoloPacks, 1, 'decode must reach the resolver only after the batch call and candidate transaction exist');
   assert.equal(calls.sign, 0);
   assert.equal(calls.submitTransaction, 0);
 });
 
-test('a composed production purchase refuses at the trusted resolver before any signer or submit call, when the RPC latest blockhash is already unusable', async t => {
+test('a composed production purchase refuses at the trusted resolver before any signer or submit call, when RPC marks the original blockhash unusable', async t => {
   const blockhash = 'SysvarC1ock11111111111111111111111111111111';
   const { error, calls } = await composedProductionPurchaseAttempt(t, {
     latestBlockhash: blockhash,
     transactionBlockhash: blockhash,
     // Unlike the collector-only rehearsal path, production purchase has no separate startup canary
     // consuming an earlier `isBlockhashValid` call -- call 1 is the resolver's own internal
-    // `readUsableLatestBlockhash` during decode, so that is the one this test makes report the
-    // latest blockhash as no longer usable.
+    // original-hash validity observation during decode, so that is the one this test rejects.
     invalidFromCall: 1,
   });
 
   assert.match(
     error?.message ?? '',
-    /Solana blockhashContextResolver failed: latest Solana blockhash is no longer valid before signing/,
+    /Solana blockhashContextResolver failed: original blockhash is not valid/,
   );
   assert.equal(calls.generateYoloPacks, 1, 'decode must reach the resolver only after the batch call and candidate transaction exist');
   assert.equal(calls.sign, 0);
   assert.equal(calls.submitTransaction, 0);
 });
 
-test('a composed production purchase advances past the trusted resolver on an exact blockhash match, refusing only at the genuine next pinned-policy boundary', async t => {
+test('a composed production purchase advances past the trusted resolver on a valid older blockhash, refusing only at the genuine next pinned-policy boundary', async t => {
   const blockhash = 'SysvarC1ock11111111111111111111111111111111';
   const { error, calls } = await composedProductionPurchaseAttempt(t, {
-    latestBlockhash: blockhash,
+    latestBlockhash: 'SysvarRecentB1ockHashes11111111111111111111',
     transactionBlockhash: blockhash,
   });
 

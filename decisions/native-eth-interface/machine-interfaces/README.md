@@ -1,0 +1,9 @@
+# Native machine interface preparation
+
+`native-machine-interfaces.patch` targets the exact architecture JSON files at PR39 commit `56f185e07dfafe5533df617ec1dad473ecb63f68`. It translates the revision 71 proposal at `31b79355`, whose proposed requirements hash is recorded in `verification.json`. This directory does not modify active interfaces, establish a feasibility freeze, admit a provider, or authorize live execution. The coordinator applies the reviewed patch after integrating its baseline and reconciles final schema versions with the bot implementation.
+
+Run `python3 decisions/native-eth-interface/machine-interfaces/generate.py` from the repository root to regenerate the patch and verification. The generator reads immutable Git objects, applies exact scoped replacements, verifies preserved boundaries, and applies its patch to temporary copies of both original files. Active architecture files are never written.
+
+The patch updates native currency identity, four fee combinations with the existing cumulative stream rules and 1000-wei threshold, unresolved explicit wei claim ceilings, exact payable seed debt/refund, native custody and proof versions, USD controls and held purchase-cost attribution, and rejecting-recipient quarantine. The added `nativeMigration` section makes proposed fields and their evidence prerequisites explicit without choosing live amounts. Historical custody references are labeled as historical; no old digest certifies the proposed native producer.
+
+The complete `transactionPolicy` subtree remains byte-identical to PR39, including all Collector purchase, buyback, registry, signature, blockhash and live-anchor boundaries. Existing fee stream definitions, permanent custody flags, legacy exclusion rules, Solana purchase schema, and Solana observation construction contract remain unchanged. Verification covers those boundaries and exact patch application; it is not runtime or live financial evidence.

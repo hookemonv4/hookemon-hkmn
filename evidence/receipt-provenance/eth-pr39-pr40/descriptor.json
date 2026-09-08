@@ -1,0 +1,20 @@
+{
+  "schema": "hookemon-eth-receipt-collision-v1",
+  "authority": false,
+  "sourceCommit": "56f185e07dfafe5533df617ec1dad473ecb63f68",
+  "activeCommit": "63396266c1fa7f30814177a6c548e9af332d07ad",
+  "entries": [
+    {
+      "path": "receipts/r-00648.json",
+      "sourceBlob": "b196230ae714ce01a0d3317bde4bfbfbd65b6891",
+      "activeBlob": "6493f375f51d3e3a33d6ccba93205687517844bf",
+      "archive": "evidence/receipt-provenance/eth-pr39-pr40/b196230ae714ce01a0d3317bde4bfbfbd65b6891.json"
+    },
+    {
+      "path": "receipts/r-00649.json",
+      "sourceBlob": "ac3f12b7a7e285e5cb54caed5ef9b2b709dfe1c3",
+      "activeBlob": "81526a5fb151a41a553d5135b3eb5260cd45fd6a",
+      "archive": "evidence/receipt-provenance/eth-pr39-pr40/ac3f12b7a7e285e5cb54caed5ef9b2b709dfe1c3.json"
+    }
+  ]
+}

@@ -348,3 +348,15 @@ only at the two fixture identity pins and fixed synthetic interface metadata. Th
 establish live provider acceptance or authorize live signing, spending or deployment.
 
 The wallet nonce boundary resolves a renewed automation context against the durable reservation before asserting or releasing it. Only the same cycle, chain, wallet, stage, fencing token and acquisition timestamp may retain that reservation's original expiry. A later context expiry does not extend a held nonce lease; signing still refuses after its original deadline. Released handles retain their original window only for idempotent release. A new reservation after release uses the current active lease window. Reopening the repository or rebuilding a context does not change the binding, and a stale release cannot remove a successor's global reservation.
+
+Live Collector resolution reads the fixed release manifest and authenticates its canonical digest
+against the active frozen interface authority. Exactly two purchase/buyback anchors bind separate
+owner approval receipts, approval bytes and binding bytes; neither registry configuration nor its
+adjacent digest grants authority. Load and resolve both repeat these checks. Missing artifacts,
+changed release identity and synthetic child configuration fail before a live Collector mutation.
+No live binding values ship with this implementation; existing schemas and synthetic isolation
+remain enforced.
+
+Live Collector bindings require an executable-pinned SHA-256 of the exact release manifest bytes. The pin remains unset until real, separately owner-approved purchase and buyback artifacts exist. Loaded entries preserve the manifest identity, revisions, binding path and digest, receipt identity and approval evidence hashes; resolution compares that complete identity again. A release change cannot reuse an admitted registry merely because transaction binding bytes match. Synthetic isolated child contexts cannot select live authority.
+
+`createOriginalSolanaBlockhashContextResolver(client)` wires `config.solana.originalBlockhashContextResolver` for purchase only. It reads `isBlockhashValid` for the original provider hash and returns its validity observation slot. It never substitutes the latest hash or an unrelated expiry height. Legacy and buyback resolver behavior is unchanged.

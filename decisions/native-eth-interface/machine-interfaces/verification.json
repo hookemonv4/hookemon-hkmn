@@ -1,0 +1,24 @@
+{
+  "schema": "hookemon.native-machine-interface-verification.v1",
+  "baseCommit": "56f185e07dfafe5533df617ec1dad473ecb63f68",
+  "proposalCommit": "31b7935514ebf85da805677128e2555eecc7fef5",
+  "requirementsSha256": "750a12abf47a771d1181dd6a1782c1b6fbcc4eebb4632e5d1927bf52f4193425",
+  "patchSha256": "564607e461d85bb48726a0b161b1ea07138c08a362afb69c76b99f29f0797962",
+  "checks": {
+    "collectorSubtreeByteIdentical": true,
+    "collectorSubtreeSha256": "27cfc22c67319380a02c235e7ab0e8b5b225d4dae7d233fc14cac0728cfc3bb8",
+    "feeStreamsPreserved": true,
+    "legacyFreezeAndPhaseBoundaryPreserved": true,
+    "permanentCustodyPreserved": true,
+    "solanaPurchaseAndObservationPreserved": true,
+    "nativeFeeCombinations": 4,
+    "minimumGrossWei": "1000",
+    "explicitCeilingsRemainUnset": true,
+    "launchEligible": false,
+    "patchAppliesToExactBaseline": true
+  },
+  "outputs": {
+    "architecture/interfaces.json": "ca6209f8da73339de0dd666144633f8b5f0d4a47f66154097d8ce4a103314cbc",
+    "architecture/provisional-interfaces.json": "c3a060596e46cbf8a1adbbda8533e0db344786e620125b3ba71c816f859875f7"
+  }
+}

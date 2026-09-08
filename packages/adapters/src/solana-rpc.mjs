@@ -221,6 +221,16 @@ export async function readBlockHeight(client) {
   return BigInt(result);
 }
 
+/** Observe original provider message validity without inventing its expiry height. */
+export async function readOriginalBlockhashContext(client, blockhash) {
+  const key = assertPublicKey(blockhash, 'blockhash');
+  const result = await rpc(client, 'isBlockhashValid', [key.toBase58(), { commitment: client.commitment }]);
+  invariant(result?.value === true, SolanaMalformedResponseError, 'original blockhash is not valid');
+  invariant(Number.isSafeInteger(result?.context?.slot) && result.context.slot >= 0,
+    SolanaMalformedResponseError, 'original blockhash validity observation has no valid slot');
+  return Object.freeze({ type: 'rpc-blockhash-validity', blockhash: key.toBase58(), valid: true, observedSlot: String(result.context.slot) });
+}
+
 /** isBlockhashValid proves that a provider-supplied recent blockhash remains usable before signing. */
 export async function readBlockhashValidity(client, blockhash) {
   const key = assertPublicKey(blockhash, 'blockhash');
