@@ -648,7 +648,7 @@ test('mutatePayout fails closed when composition supplies no cycle-attributable 
 test('mutatePayout rechecks native gas before durable admission and records the exact deficit', async () => {
   const plan = planFor(1);
   const required = BigInt(plan.feasibility.requiredNativeAmount.amountAtomic);
-  const observed = required - 10n;
+  const observed = required + BigInt(plan.distributablePool.amountAtomic) - 10n;
   const context = {
     cycleId: plan.cycleId,
     requestDigest: `sha256:${'e'.repeat(64)}`,
@@ -681,3 +681,41 @@ test('mutatePayout rechecks native gas before durable admission and records the 
   assert.equal(cycleRepository.holds[0].evidence.admission.outcome, 'NON_SPENDING_NATIVE_GAS_SHORTFALL');
   assert.equal(cycleRepository.holds[0].evidence.admission.deficit, '10');
 });
+
+
+for (const [balance, admitted] of [[110n, false], [120n, true]]) {
+  test(`native payout admission ${admitted ? 'accepts exact' : 'refuses insufficient'} combined principal and gas before dust consumption`, async () => {
+    const manifest = eligibilityManifest(1);
+    manifest.feasibility = {
+      ...manifest.feasibility,
+      measuredTransferGas: '2', maxGasPriceWei: '5',
+      estimatedNativeFee: usdg('10'), nativeReserve: usdg('10'),
+      nativeBalance: usdg('20'), requiredNativeAmount: usdg('20'),
+    };
+    const plan = compileDirectPayoutPlan({
+      cycleId: manifest.cycleId, eligibilityManifest: manifest,
+      finalizedReturn: usdg('90'), previousDust: usdg('10'),
+      previousDustSource: { cycleId: 'prior-native', digest: `sha256:${'a'.repeat(64)}`, planDigest: `sha256:${'b'.repeat(64)}` },
+      returnBinding: RETURN_BINDING,
+    });
+    const cycleRepository = shortfallCycleRepository();
+    let dustConsumptions = 0;
+    const initialize = cycleRepository.consumePayoutDustAndPersistPagedPayoutState;
+    cycleRepository.consumePayoutDustAndPersistPagedPayoutState = async (...args) => {
+      dustConsumptions += 1;
+      await initialize(...args);
+      throw new Error('admitted checkpoint reached');
+    };
+    const client = { ...windowRpc(), async getBalance() { return balance; }, async readCycleAttributableFinalizedAvailable() { return usdg('100'); } };
+    const counter = { sign: 0 };
+    await assert.rejects(() => mutatePayout({
+      liveMode: true, config: lifecycleConfig(), cycleRepository,
+      context: { cycleId: plan.cycleId, requestDigest: `sha256:${'c'.repeat(64)}`, fencingToken: 'native-combined-admission' },
+      request: { plan }, adapters: { robinhood: { client } }, signerClient: lifecycleSigner(counter),
+    }), admitted ? /admitted checkpoint reached/ : error => error instanceof DirectPayoutNativeGasShortfallError && error.deficit === '10');
+    assert.equal(dustConsumptions, admitted ? 1 : 0);
+    assert.equal(cycleRepository.getStored() !== null, admitted);
+    assert.equal(counter.sign, 0);
+    assert.equal(cycleRepository.holds.length, admitted ? 0 : 1);
+  });
+}
