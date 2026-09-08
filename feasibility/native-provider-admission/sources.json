@@ -1,0 +1,58 @@
+[
+  {
+    "file": "discovery.json",
+    "url": "https://programmable.market/.well-known/programmable.json",
+    "at": "2026-09-08T10:25:08.933951+00:00",
+    "sha256": "bd63db1d503824cc3c303063a5c15ad3edaef7c639148eb4184ba848a42a88f9",
+    "bytes": 40558,
+    "transport": "curl with system TLS verification, --fail-with-body; successful exit, status code not separately captured"
+  },
+  {
+    "file": "capabilities.json",
+    "url": "https://api.programmable.market/v4/chains/4663/capabilities",
+    "at": "2026-09-08T10:25:10.034712+00:00",
+    "sha256": "0fd7201b07bcfc115d34eae547a7832e1d3fa1702d0668d55bdca0addc06dac1",
+    "bytes": 37040,
+    "transport": "curl with system TLS verification, --fail-with-body; successful exit, status code not separately captured"
+  },
+  {
+    "file": "openapi.json",
+    "url": "https://programmable.market/openapi/custom-launch-v4.1.json",
+    "at": "2026-09-08T10:25:08.984489+00:00",
+    "sha256": "d44a77fd2d7f6d14d60b837fedd45349083b47bc93c5b29de2612274407928df",
+    "bytes": 4045687,
+    "transport": "curl with system TLS verification, --fail-with-body; successful exit, status code not separately captured"
+  },
+  {
+    "file": "create-schema.json",
+    "url": "https://programmable.market/schemas/custom-launch/v4.1/create-request.json",
+    "at": "2026-09-08T10:25:08.879496+00:00",
+    "sha256": "c4d23b0f3bd232b209d6566ac804348720b81432a2978728a10cc4317895c404",
+    "bytes": 180599,
+    "transport": "curl with system TLS verification, --fail-with-body; successful exit, status code not separately captured"
+  },
+  {
+    "file": "guide.md",
+    "url": "https://programmable.market/developers/custom-launch-api-v1.md",
+    "at": "2026-09-08T10:25:08.847422+00:00",
+    "sha256": "be14b6979bb5d7caa57f8b88821b913c4ee7f2b95d78d6573256e757fb24999a",
+    "bytes": 54235,
+    "transport": "curl with system TLS verification, --fail-with-body; successful exit, status code not separately captured"
+  },
+  {
+    "file": "coverage.json",
+    "url": "https://api.programmable.market/v4/chains/4663/launch-coverage",
+    "at": "2026-09-08T10:25:10.026936+00:00",
+    "sha256": "c8a536ff560363d88ea665f3d6461df6801e819eea84d3c84cad804d7b74ed7f",
+    "bytes": 20512,
+    "transport": "curl with system TLS verification, --fail-with-body; successful exit, status code not separately captured"
+  },
+  {
+    "file": "readiness.json",
+    "url": "https://api.programmable.market/v4/chains/4663/readiness",
+    "at": "2026-09-08T10:25:10.011541+00:00",
+    "sha256": "30e4de862eb6b50c2d85594136ad9a544bb61bb2605fdd14c26d9083816bf6cf",
+    "bytes": 3624,
+    "transport": "curl with system TLS verification, --fail-with-body; successful exit, status code not separately captured"
+  }
+]

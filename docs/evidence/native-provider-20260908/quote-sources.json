@@ -1,0 +1,20 @@
+[
+  {
+    "name": "relay-outbound",
+    "at": "2026-09-08T08:22:02.045535+00:00",
+    "url": "https://api.relay.link/quote/v2",
+    "httpStatus": "200",
+    "requestSha256": "5c7c4462981b0685a65780e88503a358ec84adb110c363abb6282ef9e5c4ebce",
+    "responseSha256": "7b1b5a871f7db31b8ad708df47cdbdde73ba9c0905d25c55d69f96c90af03176",
+    "scenarioOnly": true
+  },
+  {
+    "name": "relay-return-scenario",
+    "at": "2026-09-08T08:22:02.597826+00:00",
+    "url": "https://api.relay.link/quote/v2",
+    "httpStatus": "200",
+    "requestSha256": "f9f5cb605c1187c5ded4525a5640601b0f8a3d3af0222042569c62ac93e821b7",
+    "responseSha256": "29dd53a2b791943bdf1d5a2fad68295c1f45615d9f0fb2be52eea353bcea8b7f",
+    "scenarioOnly": true
+  }
+]

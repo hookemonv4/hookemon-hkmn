@@ -1,0 +1,49 @@
+{
+  "scope": "qualified preparation only; no funding order or complete cycle feasibility",
+  "observedAt": "2026-09-08T08:29:27.011011+00:00",
+  "quoteResponseSha256": "7b1b5a871f7db31b8ad708df47cdbdde73ba9c0905d25c55d69f96c90af03176",
+  "processPrincipalWei": "10243579001330370",
+  "minimumGrossVolumeWei": "409743160053214800",
+  "cumulativeFeesWei": {
+    "250": "10243579001330370",
+    "40": "1638972640212859",
+    "10": "409743160053214"
+  },
+  "totalFeeDiversionWei": "12292294801596443",
+  "historicalRoleBalanceReads": [
+    {
+      "rpcUrl": "https://rpc.mainnet.chain.robinhood.com",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "eth_getBalance",
+        "params": [
+          "0xfc82B0da6d487B97d7eA1AA0d51E00AfF4F3a729",
+          "latest"
+        ]
+      },
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "result": "0x0"
+      }
+    },
+    {
+      "rpcUrl": "https://rpc.mainnet.chain.robinhood.com",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "eth_getBalance",
+        "params": [
+          "0xB54AAF746eb1e80AFDb5eb0992a75b08DB2E4384",
+          "latest"
+        ]
+      },
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "result": "0x0"
+      }
+    }
+  ]
+}
