@@ -5,7 +5,6 @@ import { encodeAbiParameters, encodeEventTopics, keccak256, parseAbi } from 'vie
 import { createTestProfileMutationAuthority } from '../../../runner/src/cycle/preflight.mjs';
 import { createSolanaRpcClient, signedSolanaTransactionSignature } from '../../src/solana-rpc.mjs';
 import { createRelayNativePaymentProof, createTestNativePaymentBinding, readReleaseBoundRelaySourceDebit, isProcessNativePaymentProof } from '../../src/native-payment-proof.mjs';
-const owner = Keypair.fromSeed(Uint8Array.from({ length: 32 }, () => 7)); // Public, synthetic fixture seed.
 export const mint = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 export const orderId = `0x${'ab'.repeat(32)}`;
 export const emitter = `0x${'11'.repeat(20)}`;
@@ -14,7 +13,8 @@ const txHash = `0x${'33'.repeat(32)}`;
 const blockHash = `0x${'44'.repeat(32)}`;
 const runtime = '0x6000';
 export async function setup({ corruptSourceBytes = false, corruptSourceSlot = false, runtimeMutation = () => {},
-  runtimeObservation = null, sourceSlot = 10 } = {}) {
+  runtimeObservation = null, sourceSlot = 10, sourceTimestamp = 100, seed = 7 } = {}) {
+  const owner = Keypair.fromSeed(typeof seed === 'number' ? Uint8Array.from({ length: 32 }, () => seed) : seed); // Public synthetic fixture seed.
   const programId = '99vQwtBwYtrqqD9YSXbdum3KBdxPAVxYTaQ3cfnJSrN2';
   const programDataAddress = '6y7C7Lfh1WRRbKohE2FQmFBD2asw3yMi17kStwEcAWWF';
   const loaderOwner = 'BPFLoaderUpgradeab1e11111111111111111111111';
@@ -50,7 +50,7 @@ export async function setup({ corruptSourceBytes = false, corruptSourceSlot = fa
       return { ok: true, status: 200, text: async () => JSON.stringify({ jsonrpc: '2.0', id: request.id, result: observation }) };
     }
     const raw = request.params[1].encoding === 'base64';
-    const result = { slot: raw && corruptSourceSlot ? sourceSlot + 1 : sourceSlot, blockTime: 100, meta, transaction: raw
+    const result = { slot: raw && corruptSourceSlot ? sourceSlot + 1 : sourceSlot, blockTime: sourceTimestamp, meta, transaction: raw
       ? [corruptSourceBytes ? Buffer.from('different bytes').toString('base64') : encoded, 'base64'] : { message: { accountKeys: [owner.publicKey.toBase58()] } } };
     return { ok: true, status: 200, text: async () => JSON.stringify({ jsonrpc: '2.0', id: request.id, result }) };
   } });

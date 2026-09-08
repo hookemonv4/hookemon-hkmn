@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict';
+import { encodeAbiParameters } from 'viem';
+import { createRelayClient, createQuoteUsdValuation, readProcessQuoteUsdProvenance } from '../../src/relay-client.mjs';
+import { setup as nativeRelaySetup } from '../native/relay-native-proof-fixture.mjs';
 import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -251,6 +254,34 @@ function returnRelayLeg(cycleId, overrides = {}) {
   };
 }
 
+const nativeReturnTransports = new Map();
+async function nativeReturnLeg(cycleId) {
+  const transport = await nativeRelaySetup({ sourceTimestamp: 1700000010, seed: createHash('sha256').update(cycleId).digest() });
+  const leg = returnRelayLeg(cycleId, { schema: 'hookemon.relay-leg.v2', sourceAmountAtomic: transport.expected.sourceAmountAtomic,
+    destinationAssetId: 'native', destinationDecimals: 18 });
+  Object.assign(leg.returnAttribution.intent, { orderId: transport.expected.orderId, sender: transport.expected.sourceOwner,
+    recipient: transport.expected.recipient, originAmount: leg.sourceAmountAtomic,
+    destinationAssetId: 'native', destinationDecimals: 18 });
+  const intent = leg.returnAttribution.intent, zero = `0x${'00'.repeat(20)}`;
+  const raw = { requestId: leg.relayRequestId, details: { sender: intent.sender, recipient: intent.recipient,
+    currencyIn: { currency: { chainId: 792703809, address: leg.sourceAssetId, decimals: 6 }, amount: leg.sourceAmountAtomic, amountUsd: '25' },
+    currencyOut: { currency: { chainId: 4663, address: zero, decimals: 18 }, amount: leg.destinationAmountAtomic, minimumAmount: leg.destinationAmountAtomic, amountUsd: '20.0000009' } },
+    protocol: { v2: { orderId: intent.orderId, orderData: { inputs: [{ payment: { chainId: 'solana', currency: leg.sourceAssetId, amount: leg.sourceAmountAtomic },
+      refunds: [{ chainId: 'solana', currency: leg.sourceAssetId, recipient: intent.sender, deadline: 2_000_000_000 }] }],
+      output: { chainId: 'robinhood', deadline: 2_000_000_000, calls: [], payments: [{ recipient: intent.recipient, currency: zero, expectedAmount: leg.destinationAmountAtomic, minimumAmount: leg.destinationAmountAtomic }] } } } }, steps: [] };
+  const client = createRelayClient({ now: () => 1_700_000_000_000, quoteValidityMs: 600000,
+    fetchImpl: async () => ({ ok: true, status: 200, text: async () => JSON.stringify(raw) }) });
+  const quote = await client.quoteReturnBridge({ user: intent.sender, recipient: intent.recipient, amount: leg.sourceAmountAtomic, skipRouteCheck: true });
+  const destinationUsd = createQuoteUsdValuation({ quote, side: 'destination', amount: { chainId: '4663', assetId: 'native', decimals: 18, amountAtomic: leg.destinationAmountAtomic }, rounding: 'down', nowMs: 1_700_000_000_000 });
+  leg.quoteDigest = quote.quoteDigest;
+  leg.returnAttribution = { ...leg.returnAttribution, schema: 'hookemon.return-leg-attribution-context.v2',
+    intent: client.prepareExecution({ quote, liveMode: true }).intent, destinationUsd,
+    destinationUsdEvidence: { ...readProcessQuoteUsdProvenance(destinationUsd), quote } };
+  transport.destinationUsd = destinationUsd;
+  nativeReturnTransports.set(leg.relayRequestId, transport);
+  return leg;
+}
+
 function unbrandedReturnDestinationProof(leg, {
   destinationTxHash = `0x${'f'.repeat(64)}`,
   observedToken = SETTLEMENT_SOURCE_ASSET,
@@ -315,6 +346,21 @@ function returnDestinationReceiptClient({
 }
 
 async function returnDestinationProof(leg, options = {}) {
+  if (leg.schema === 'hookemon.relay-leg.v2') {
+    const transport = nativeReturnTransports.get(leg.relayRequestId);
+    const transactionHash = options.destinationTxHash ?? transport.expected.transactionHash;
+    const receipt = structuredClone(transport.receipt);
+    receipt.transactionHash = transactionHash;
+    receipt.logs[0].transactionHash = transactionHash;
+    receipt.logs[0].data = encodeAbiParameters([{ type: 'address' }, { type: 'address' }, { type: 'address' }, { type: 'uint256' }, { type: 'bytes' }],
+      [transport.route.emitter, options.observedRecipient ?? transport.expected.recipient,
+        options.observedToken ?? `0x${'00'.repeat(20)}`, BigInt(options.observedAmountAtomic ?? leg.destinationAmountAtomic), transport.expected.orderId]);
+    const client = { ...transport.client, getTransactionReceipt: async () => receipt,
+      getBlock: async () => ({ number: receipt.blockNumber, hash: receipt.blockHash, timestamp: BigInt(options.destinationTimestampUnixSeconds ?? '1700000011') }) };
+    return readReturnLegDestinationProof({ client, pointer: { schema: 'hookemon.relay-terminal-destination-pointer.v1',
+      relayRequestId: leg.relayRequestId, status: 'SUCCESS', destinationTxHash: transactionHash },
+      leg, sourceProof: transport.sourceProof, nativePaymentBinding: transport.binding });
+  }
   const raw = unbrandedReturnDestinationProof(leg, options);
   return readReturnLegDestinationProof({
     client: returnDestinationReceiptClient({
@@ -339,13 +385,13 @@ async function prepareReturnRelaySettlementAttempt(repository, cycleId, leg, sou
   const requestDigest = `sha256:${'7'.repeat(64)}`;
   await repository.prepareChainTransactionAttempt(cycleId, 'return', preparedChainAttempt(cycleId, 'return', requestDigest));
   await repository.recordSignedTransaction(cycleId, 'return', requestDigest, {
-    rawBytes: 'return-signed-bytes', nonce: null, blockhash: 'return-blockhash', hash: `sha256:${'6'.repeat(64)}`,
+    rawBytes: nativeReturnTransports.get(leg.relayRequestId)?.encoded ?? 'return-signed-bytes', nonce: null, blockhash: 'return-blockhash', hash: `sha256:${'6'.repeat(64)}`,
   });
   await repository.recordBroadcast(cycleId, 'return', requestDigest, { transactionHash: sourceTxHash });
   await repository.recordFinality(cycleId, 'return', requestDigest, {
     transactionHash: sourceTxHash,
     debitedAmountAtomic: leg.sourceAmountAtomic,
-    finalizedAtSource: { height: '52', hash: 'return-source-slot', timestampUnixSeconds: '1700000010' },
+    finalizedAtSource: nativeReturnTransports.get(leg.relayRequestId)?.sourceProof.finality ?? { height: '52', hash: 'return-source-slot', timestampUnixSeconds: '1700000010' },
   });
   return requestDigest;
 }
@@ -356,8 +402,8 @@ async function finalizedReturnFixture(t, {
   const directory = await tempDirectory(t);
   const repository = await CycleRepository.open(directory);
   const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
-  const recorded = await repository.recordRelayLeg(cycleId, returnRelayLeg(cycleId));
-  const sourceTxHash = `return-source-${cycleId}`;
+  const recorded = await repository.recordRelayLeg(cycleId, await nativeReturnLeg(cycleId));
+  const sourceTxHash = nativeReturnTransports.get(recorded.relayRequestId).sourceProof.transactionHash;
   const attributed = await repository.recordRelayLegSource(cycleId, recorded.relayRequestId, sourceTxHash);
   const requestDigest = await prepareReturnRelaySettlementAttempt(repository, cycleId, attributed, sourceTxHash);
   return {
@@ -377,7 +423,7 @@ async function finalizedReturnFixture(t, {
 function canonicalEvmUsdgIdentity(leg) {
   return {
     chainId: `eip155:${leg.destinationChainId}`,
-    assetId: `eip155:${leg.destinationChainId}/erc20:${leg.destinationAssetId.toLowerCase()}`,
+    assetId: leg.destinationAssetId === 'native' ? `eip155:${leg.destinationChainId}/native` : `eip155:${leg.destinationChainId}/erc20:${leg.destinationAssetId.toLowerCase()}`,
     decimals: leg.destinationDecimals,
   };
 }
@@ -426,11 +472,11 @@ async function finalizedReturnExpectationFixture(t, {
   proof = {},
 } = {}) {
   const directory = await tempDirectory(t);
-  const repository = await CycleRepository.open(directory);
+  const repository = await CycleRepository.open(directory, () => 1_700_000_000_000);
   const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
-  const leg = returnRelayLeg(cycleId);
-  const recorded = await repository.recordReturnRelayLegExpectation(cycleId, leg, expectationLedgerFor(leg, cycleId));
-  const sourceTxHash = `return-source-${cycleId}`;
+  const leg = await nativeReturnLeg(cycleId);
+  const recorded = await repository.recordReturnRelayLegExpectation(cycleId, leg, expectationLedgerFor(leg, cycleId), { destinationUsd: nativeReturnTransports.get(leg.relayRequestId).destinationUsd });
+  const sourceTxHash = nativeReturnTransports.get(leg.relayRequestId).sourceProof.transactionHash;
   const attributed = await repository.recordRelayLegSource(cycleId, recorded.relayRequestId, sourceTxHash);
   const requestDigest = await prepareReturnRelaySettlementAttempt(repository, cycleId, attributed, sourceTxHash);
   return {
@@ -513,10 +559,20 @@ async function assertRelayHoldRecoveryTuple({
   assert.deepEqual((await repository.readChainTransactionAttempt(cycleId, stage, requestDigest)).attempt, before.attempt);
 }
 
+test('historical return legs remain readable and cannot issue native settlement proofs', async t => {
+  const directory = await tempDirectory(t);
+  const repository = await CycleRepository.open(directory);
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  const leg = await repository.recordRelayLeg(cycleId, returnRelayLeg(cycleId));
+  await assert.rejects(returnDestinationProof(leg), /historical token legs/);
+  const reopened = await CycleRepository.open(directory);
+  assert.deepEqual(await reopened.readRelayLeg(cycleId, leg.relayRequestId), leg);
+});
+
 test('settleRelayLeg rejects a syntactically valid but unbranded return destination proof', async t => {
   const fixture = await finalizedReturnFixture(t);
   const unbrandedSubmission = {
-    returnDestinationProof: unbrandedReturnDestinationProof(fixture.leg),
+    returnDestinationProof: structuredClone(fixture.submission.returnDestinationProof),
   };
 
   await assert.rejects(
@@ -3388,7 +3444,7 @@ test('settleRelayLeg binds an exact finalized return receipt to custody before p
   assert.equal(state.terminalState, null);
   assert.equal(state.relayLegs.get(fixture.leg.relayRequestId).state, 'SETTLED');
   assert.equal(
-    state.custodyLedgers.get(`4663\u0000${SETTLEMENT_SOURCE_ASSET}`).returnReceived,
+    state.custodyLedgers.get(`4663\u0000native`).returnReceived,
     fixture.leg.destinationAmountAtomic,
   );
   assert.equal((await reopened.readChainTransactionAttempt(fixture.cycleId, 'return', fixture.requestDigest)).attempt.state, 'FINALIZED');
@@ -3407,7 +3463,7 @@ test('settleRelayLeg holds a wrong-amount return receipt as HELD_RELAY_PARTIAL a
   const state = await reopened.describeCycle(fixture.cycleId);
   assert.equal(state.terminalState, 'HELD_RELAY_PARTIAL');
   assert.equal(state.relayLegs.get(fixture.leg.relayRequestId).state, 'HELD_RELAY_PARTIAL');
-  assert.equal(state.custodyLedgers.get(`4663\u0000${SETTLEMENT_SOURCE_ASSET}`), undefined);
+  assert.equal(state.custodyLedgers.get(`4663\u0000native`), undefined);
   await assertRelayHoldRecoveryTuple({
     repository: reopened,
     cycleId: fixture.cycleId,
@@ -3447,35 +3503,20 @@ test('settleRelayLeg holds a late return receipt as HELD_RELAY_LATE after reopen
   );
 });
 
-test('settleRelayLeg holds a wrong-token or wrong-recipient return receipt as HELD_RELAY_WRONG_ASSET after reopen', async t => {
-  const cases = [
-    { observedToken: `0x${'1'.repeat(40)}` },
-    { observedRecipient: `0x${'2'.repeat(40)}` },
-  ];
-  for (const proof of cases) {
-    const fixture = await finalizedReturnFixture(t, { proof });
-    const settled = await fixture.repository.settleRelayLeg(
-      fixture.cycleId,
-      fixture.leg.relayRequestId,
-      fixture.submission,
-    );
-    assert.equal(settled.state, 'HELD_RELAY_WRONG_ASSET');
-
+test('native return refuses a wrong-token or wrong-recipient receipt before settlement after reopen', async t => {
+  for (const observation of [{ observedToken: `0x${'1'.repeat(40)}` }, { observedRecipient: `0x${'3'.repeat(40)}` }]) {
+    const fixture = await finalizedReturnFixture(t);
+    const before = await fixture.repository.describeCycle(fixture.cycleId);
+    await assert.rejects(returnDestinationProof(fixture.leg, observation), /native payment event conflicts with the attributed order/);
     const reopened = await CycleRepository.open(fixture.directory);
     const state = await reopened.describeCycle(fixture.cycleId);
-    assert.equal(state.terminalState, 'HELD_RELAY_WRONG_ASSET');
-    assert.equal(state.relayLegs.get(fixture.leg.relayRequestId).state, 'HELD_RELAY_WRONG_ASSET');
-    await assertRelayHoldRecoveryTuple({
-      repository: reopened,
-      cycleId: fixture.cycleId,
-      stage: 'return',
-      requestDigest: fixture.requestDigest,
-      expectedTerminalState: 'HELD_RELAY_WRONG_ASSET',
-    });
-    await assert.rejects(
-      () => reopened.settleRelayLeg(fixture.cycleId, fixture.leg.relayRequestId, fixture.submission),
-      /terminal|transition/i,
-    );
+    assert.equal(state.terminalState, null);
+    assert.equal(state.relayLegs.get(fixture.leg.relayRequestId).state, 'RECORDED');
+    assert.deepEqual(state.custodyLedgers, before.custodyLedgers);
+    assert.equal((await reopened.readChainTransactionAttempt(fixture.cycleId, 'return', fixture.requestDigest)).attempt.state, 'FINALIZED');
+    // Repeating the rejected observation cannot credit custody or create a settlement.
+    await assert.rejects(returnDestinationProof(fixture.leg, observation), /native payment event conflicts with the attributed order/);
+    assert.deepEqual((await reopened.describeCycle(fixture.cycleId)).relayLegs, state.relayLegs);
   }
 });
 
@@ -3622,8 +3663,8 @@ test('settleRelayLeg rejects a destination hash already attributed to another re
   const secondCycleId = 'cycle-return-destination-conflict';
   await createSiblingCycle(first.directory, secondCycleId);
   const second = await CycleRepository.open(first.directory);
-  const recorded = await second.recordRelayLeg(secondCycleId, returnRelayLeg(secondCycleId));
-  const sourceTxHash = 'return-source-destination-conflict';
+  const recorded = await second.recordRelayLeg(secondCycleId, await nativeReturnLeg(secondCycleId));
+  const sourceTxHash = nativeReturnTransports.get(recorded.relayRequestId).sourceProof.transactionHash;
   const attributed = await second.recordRelayLegSource(secondCycleId, recorded.relayRequestId, sourceTxHash);
   await prepareReturnRelaySettlementAttempt(second, secondCycleId, attributed, sourceTxHash);
   const duplicate = {
@@ -3646,8 +3687,8 @@ test('settleRelayLeg leaves an unfinalized return source unsettled after reopen'
   const directory = await tempDirectory(t);
   const repository = await CycleRepository.open(directory);
   const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
-  const recorded = await repository.recordRelayLeg(cycleId, returnRelayLeg(cycleId));
-  const sourceTxHash = 'return-source-unfinalized';
+  const recorded = await repository.recordRelayLeg(cycleId, await nativeReturnLeg(cycleId));
+  const sourceTxHash = nativeReturnTransports.get(recorded.relayRequestId).sourceProof.transactionHash;
   const attributed = await repository.recordRelayLegSource(cycleId, recorded.relayRequestId, sourceTxHash);
   const requestDigest = `sha256:${'5'.repeat(64)}`;
   await repository.prepareChainTransactionAttempt(cycleId, 'return', preparedChainAttempt(cycleId, 'return', requestDigest));
