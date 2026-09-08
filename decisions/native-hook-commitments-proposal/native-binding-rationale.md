@@ -1,0 +1,3 @@
+REQ-provider-binding-2 still names the historical quote asset, vault and route executor although revision71 migrates the active path to native ETH. This proposed correction binds the existing native token/hook/permanent-position graph and preserves atomic initialization and rollback requirements. It does not introduce a different custody design, approve constructor commitments, select funding or activate a new requirements revision.
+
+The patch is independent of the REQ-provider-binding-3 commitment proposal. Both must receive explicit owner approval before the resulting spec becomes authoritative. The native implementation and archive tests provide evidence to assess the correction; a passing test does not constitute approval.
