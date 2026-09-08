@@ -1678,13 +1678,13 @@ test('phase three source documents retain the full-pool three-call launch model'
     'release/phase3/launch-plan.md',
   ].map((path) => readFileSync(resolve(root, path), 'utf8')).join('\n');
 
-  assert.match(source, /exactly three ABI-derived calls/i);
-  assert.match(source, /token\.allocate\(hook\)/i);
-  assert.match(source, /Requirements revision 65/i);
-  assert.match(source, /canonical market/i);
-  assert.match(source, /(?:zero other allocation|no other HKMN allocation exists)/i);
-  assert.match(source, /(?:240000000.*USDG|240 USDG)/i);
-  assert.match(source, /accepted 10 bps platform share/i);
+  assert.match(source, /three initializers run atomically in that order: `token\.allocate\(hook\)`, `custody\.configureBindingHook\(hook\)`, then `hook\.initializeGraphLaunch\(custody,sqrtPriceX96\)`/i);
+  assert.match(source, /complete one-billion HKMN stock enters the canonical market; there is no other allocation/i);
+  assert.match(source, /separate payable owner seed uses native ETH as currency0 and HKMN as currency1/i);
+  assert.match(source, /`msg\.value == amount0Max`/);
+  assert.match(source, /complete HKMN stock.*exact native debt.*refunds excess native value/i);
+  assert.match(source, /300 bps of gross native quote volume: 10 Programmable, 40 treasury and 250 process/i);
+  assert.match(source, /published provider terms differ.*inclusive fee model and separate seed; exact-request admission remains required/i);
 });
 
 test('phase three submission normalization removes builder notes and binds mutable recipient controls', () => {
