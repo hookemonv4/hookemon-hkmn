@@ -3352,7 +3352,14 @@ test('settleRelayLeg holds a process-RPC origin refund credit after reopen witho
       source: sender, recipient: depository, amountWei: recorded.sourceAmountAtomic, calldataDigest: keccak256(data), nonce: '7' } });
   const requestDigest = await prepareOutboundRelaySettlementAttempt(repository, cycleId, sourceTxHash, '1700000200', recorded, {
     signedBytes: signedSourceTransaction, relayRoute: { sourceSender: sender, sourceRecipient: depository, destinationOwner: SETTLEMENT_SOLANA_OWNER },
-    relayIntent: { ...outboundRelayIntent(recorded, '1700000200'), schema: 'hookemon.relay-intent.v2', originAssetId: `0x${'00'.repeat(20)}`, sender },
+    relayIntent: createRelayClient().prepareExecution({ liveMode: true, quote: {
+      direction: 'OUTBOUND', tradeType: 'EXACT_OUTPUT', requestId: recorded.relayRequestId,
+      orderId, sender, recipient: SETTLEMENT_SOLANA_OWNER, deadlineUnixSeconds: 1700000200,
+      origin: { chainId: 4663, address: `0x${'00'.repeat(20)}`, decimals: 18, amount: recorded.sourceAmountAtomic },
+      destination: { chainId: 792703809, address: SETTLEMENT_SOLANA_MINT, decimals: 6,
+        amount: recorded.destinationAmountAtomic, minimumAmount: recorded.destinationAmountAtomic },
+      raw: { steps: [] },
+    } }).intent,
   });
   await repository.recordRelayLegSource(cycleId, recorded.relayRequestId, sourceTxHash);
   await repository.recordBroadcast(cycleId, 'outbound', requestDigest, { transactionHash: sourceTxHash });
