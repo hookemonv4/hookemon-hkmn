@@ -1,0 +1,20 @@
+{
+  "id": "r-00648",
+  "at": "2026-09-07T19:22:16.993Z",
+  "type": "owner-spec-approved",
+  "phase": "spec",
+  "result": "PASSED",
+  "data": {
+    "approvalInput": "decisions/owner-approvals/revision-69-collector-explicit-spec-s5-approved.json",
+    "itemId": "S5",
+    "producer": "v4-owner-authorize-v1",
+    "proofSchema": "sha256-input-manifest-v1",
+    "rationale": "The owner explicitly authorized completing the Collector live integration and retrieving generatePack with the Collector API key, including API costs, while forbidding signing and broadcast. This records the revision-69 implementation contract only; no actual release anchors or transaction signatures are approved."
+  },
+  "inputHashes": {
+    "gates/spec.json": "23d8ad8e9c416b02267bbf432e89cd30c0ae48c8a03b660971eca970c88a3343",
+    "policy/policy.json": "3ffc546b2bee1aa64d71f8399cfbf40b96847c1bcd87c0f65db09e797375a4d8",
+    "specs/requirements.json": "4c05221e177aa820d7e282f1d343a32fafc5a1aac5458f516612f5cb7625a67f",
+    "decisions/owner-approvals/revision-69-collector-explicit-spec-s5-approved.json": "e576590ea782085ff791887a7f9dac4ef52f7a68e6066b436ae722d82cc869fb"
+  }
+}

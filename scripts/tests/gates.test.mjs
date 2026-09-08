@@ -797,7 +797,7 @@ test('task and build gates distinguish active work from owner-deferred exclusion
   );
   assert.equal(
     build.items.find(item => item.id === 'B1').text,
-    'Every active ledger task is done; every excluded task is explicitly owner-deferred; no live leases; merge queue empty (no queued or retest rows)',
+    'Every active ledger task is done; every excluded task is explicitly owner-deferred; no live leases or queued or unresolved retest entries. Retained retest history has a verified replacement merge or an explicit owner disposition, with its evidence preserved',
   );
 });
 

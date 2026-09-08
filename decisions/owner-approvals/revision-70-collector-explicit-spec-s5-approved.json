@@ -1,0 +1,14 @@
+{
+  "schema": "v4-owner-approval-v2",
+  "authority": "OWNER",
+  "action": "GATE_EVIDENCE",
+  "phase": "spec",
+  "itemId": "S5",
+  "rationale": "The owner explicitly replied freigegeben to the concrete revision 70 and A6 additional patch approval question. This approves the exact Collector generatePack purchase profile, independent original-blockhash validity and immutable recovery minimum slot, and the two exact A6 approval paths. Signing, broadcast and actual live release anchors remain excluded.",
+  "approvalToken": "OWNER APPROVED",
+  "subjectHashes": {
+    "gates/spec.json": "23d8ad8e9c416b02267bbf432e89cd30c0ae48c8a03b660971eca970c88a3343",
+    "policy/policy.json": "3ffc546b2bee1aa64d71f8399cfbf40b96847c1bcd87c0f65db09e797375a4d8",
+    "specs/requirements.json": "d8162e9fdbcc0e2b2f2e4091b25bca9d51e6250afbcc1dabd8817cf762826d51"
+  }
+}
