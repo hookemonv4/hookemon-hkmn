@@ -116,3 +116,12 @@ test('when projectCycleStatus was given a readAccounting seam, the real per-cycl
   assert.deepEqual(status.cycle.roundAccounting, FIXTURE_ACCOUNTING);
   assert.equal(status.cycle.rewardStatus, 'not-started');
 });
+
+
+test('v5 operator configuration retains the native public schema without an active cycle', async () => {
+  const configuration = createDefaultOperatorConfiguration();
+  assert.equal(configuration.schema, 'hookemon.operator-configuration.v5');
+  const internalStatus = await projectCycleStatus({ activeCycleId: null, terminalCycles: [], configuration, now: Date.parse('2026-01-01T00:00:00.000Z') });
+  const status = buildPublicCycleStatus({ profileId: 'mainnet', internalStatus, configuration });
+  assert.equal(status.schemaVersion, 7);
+});
