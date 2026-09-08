@@ -115,3 +115,24 @@ test('checks the bundle content hash independently of unchanged size and mode', 
   const f = fixture(t); f.options.sourceBundleManifest.entries[0].contentSha256 = `sha256:${'f'.repeat(64)}`;
   assert.throws(() => collectNativeBuildClosure(f.options), /bundle filesystem mismatch/);
 });
+test('requires the longest context import even when a global prefix is longer', t => {
+  const f = fixture(t);
+  f.input.sources['src/Main.sol'].content = 'import "@dep/deep/Dep.sol"; contract Main {}';
+  f.write('src/Main.sol', f.input.sources['src/Main.sol'].content);
+  f.input.settings.remappings = ['src/:@dep/=lib/', '@dep/deep/=other/'];
+  delete f.input.sources['lib/Dep.sol'];
+  f.input.sources['other/Dep.sol'] = { content: 'contract Dep {}' };
+  f.write('other/Dep.sol', 'contract Dep {}'); f.updateInput();
+  assert.throws(() => collectNativeBuildClosure(f.options), /external callback: lib\/deep\/Dep.sol/);
+  f.input.sources['lib/deep/Dep.sol'] = { content: 'contract ContextDep {}' };
+  f.write('lib/deep/Dep.sol', 'contract ContextDep {}'); f.updateInput();
+  assert.ok(collectNativeBuildClosure(f.options).sourceBytes['lib/deep/Dep.sol']);
+});
+test('requires the settings object consumed by the pure commitment helper', t => {
+  const f = fixture(t); delete f.input.settings; f.updateInput();
+  assert.throws(() => collectNativeBuildClosure(f.options), /inline Solidity/);
+});
+for (const path of ['src/Café.sol', 'src/space name.sol', 'src/@Alias.sol']) test(`refuses noncanonical commitment path ${path}`, t => {
+  const f = fixture(t); f.input.sources[path] = { content: 'contract Extra {}' }; f.write(path, 'contract Extra {}'); f.updateInput();
+  assert.throws(() => collectNativeBuildClosure(f.options), /relative POSIX|commitment closure path/);
+});

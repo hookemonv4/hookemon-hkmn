@@ -7,8 +7,13 @@ const sha256 = bytes => `0x${createHash('sha256').update(bytes).digest('hex')}`;
 const fail = message => { throw new TypeError(`native build closure: ${message}`); };
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 function relativePath(path) {
-  if (typeof path !== 'string' || !path || /[\\:\x00-\x1f\x7f]/u.test(path) || path.startsWith('/')
+  if (typeof path !== 'string' || !path || /[^\x20-\x7e]|[\\:]/u.test(path) || path.startsWith('/')
     || path.split('/').some(part => !part || part === '.' || part === '..')) fail(`invalid relative POSIX path ${String(path)}`);
+  return path;
+}
+function closurePath(path) {
+  relativePath(path);
+  if (!/^[a-zA-Z0-9_.-]+(?:\/[a-zA-Z0-9_.-]+)*$/u.test(path)) fail(`invalid commitment closure path ${path}`);
   return path;
 }
 function directoryWithoutSymlinks(path) {
@@ -22,7 +27,7 @@ function directoryWithoutSymlinks(path) {
   return absolute;
 }
 function fileBytes(root, path) {
-  relativePath(path);
+  closurePath(path);
   const absolute = resolve(root, path);
   directoryWithoutSymlinks(resolve(absolute, '..'));
   const before = lstatSync(absolute);
@@ -67,7 +72,7 @@ function parseStandardInput(bytes) {
   visit();
   if (!object(value) || value.language !== 'Solidity' || !object(value.sources) || !Object.keys(value.sources).length
     || Object.keys(value).some(key => !['language', 'sources', 'settings'].includes(key))
-    || (value.settings !== undefined && !object(value.settings))) fail('requires an inline Solidity standard input');
+    || !object(value.settings)) fail('requires an inline Solidity standard input');
   if (value.settings?.libraries !== undefined && (!object(value.settings.libraries) || Object.keys(value.settings.libraries).length)) {
     fail('external library linking is not allowed');
   }
@@ -107,28 +112,36 @@ function resolvedImport(importer, specifier, remappings) {
   let path = specifier.startsWith('./') || specifier.startsWith('../')
     ? posix.normalize(posix.join(posix.dirname(importer), specifier)) : specifier;
   const applicable = remappings.filter(entry => importer.startsWith(entry.context) && path.startsWith(entry.prefix))
-    .sort((a, b) => b.prefix.length - a.prefix.length || b.index - a.index);
+    // solc v0.8.26 implementation takes context precedence before prefix, then latest entry.
+    // https://github.com/ethereum/solidity/blob/v0.8.26/libsolidity/interface/ImportRemapper.cpp
+    .sort((a, b) => b.context.length - a.context.length || b.prefix.length - a.prefix.length || b.index - a.index);
   if (applicable.length) path = applicable[0].target + path.slice(applicable[0].prefix.length);
-  return relativePath(path);
+  return closurePath(path);
 }
 
-/** Collects declared build inputs, not compiler approval, readiness, or global output acyclicity. */
+/**
+ * Verifies every declared bundle member and unions it with compiler/input/source bytes.
+ * This does not establish that the bundle contains the complete compiler/tool inventory:
+ * the root producer must enforce that inventory and its mapping under the approved policy.
+ * A compiler is required in the commitment closure, not necessarily in the provider bundle.
+ * No compiler approval, readiness, or global output acyclicity is asserted here.
+ */
 export function collectNativeBuildClosure({ root, compilerPath, compilerSha256, standardInputPath,
   sourceBundleManifest, excludedOutputPaths, sourceRoot = '.' } = {}) {
   if (typeof root !== 'string' || !isAbsolute(root)) fail('root must be an absolute directory');
   const base = directoryWithoutSymlinks(root);
-  relativePath(compilerPath); relativePath(standardInputPath);
+  closurePath(compilerPath); closurePath(standardInputPath);
   if (compilerPath === standardInputPath) fail('compiler and standard input paths must differ');
   if (!/^0x[0-9a-f]{64}$/u.test(compilerSha256 ?? '')) fail('expected compiler SHA-256 is required');
   if (!Array.isArray(excludedOutputPaths) || !excludedOutputPaths.length) fail('explicit excluded output paths are required');
-  const excluded = new Set(excludedOutputPaths.map(relativePath));
+  const excluded = new Set(excludedOutputPaths.map(closurePath));
   if (excluded.size !== excludedOutputPaths.length) fail('duplicate excluded output path');
-  if (sourceRoot !== '.') relativePath(sourceRoot);
+  if (sourceRoot !== '.') closurePath(sourceRoot);
   directoryWithoutSymlinks(resolve(base, sourceRoot));
   assertSourceBundleManifest(sourceBundleManifest);
   const collected = new Map();
   function add(key, physicalPath = key) {
-    relativePath(key); relativePath(physicalPath);
+    closurePath(key); closurePath(physicalPath);
     for (const forbidden of excluded) if ([key, physicalPath].some(path => path === forbidden || path.startsWith(`${forbidden}/`))) {
       fail(`forbidden output path ${physicalPath}`);
     }
@@ -142,7 +155,7 @@ export function collectNativeBuildClosure({ root, compilerPath, compilerSha256, 
   const input = parseStandardInput(add(standardInputPath).bytes);
   const remappings = remappingsFor(input.settings);
   for (const [path, source] of Object.entries(input.sources)) {
-    relativePath(path);
+    closurePath(path);
     if (!object(source) || Object.keys(source).length !== 1 || typeof source.content !== 'string') fail(`source must contain inline content only: ${path}`);
     const physical = sourceRoot === '.' ? path : `${sourceRoot}/${path}`;
     if (!add(path, physical).bytes.equals(Buffer.from(source.content, 'utf8'))) fail(`embedded source bytes mismatch: ${path}`);
