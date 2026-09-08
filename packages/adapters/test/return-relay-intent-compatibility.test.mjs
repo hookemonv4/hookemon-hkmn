@@ -18,7 +18,7 @@ function loadFixture(name) {
 }
 
 const chainsFixture = loadFixture('chains.json');
-const quoteReturnFixture = loadFixture('quote-return.json');
+const quoteReturnFixture = JSON.parse(readFileSync(new URL('../../../docs/evidence/native-relay-source-instruction-20260908/relay-return-scenario-response.json', import.meta.url), 'utf8'));
 const RETURN_QUOTE_INPUT = Object.freeze({
   user: quoteReturnFixture.details.sender,
   recipient: quoteReturnFixture.details.recipient,
