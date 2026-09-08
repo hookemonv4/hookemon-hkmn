@@ -352,3 +352,5 @@ transaction hash and canonical `amountWei`. Their exact sum equals typed `gasSpe
 fields on replay of that hash and cost. A changed cost, removed entry or duplicate hash refuses.
 
 Native supplementary return boundaries require the persisted signed source and a process-authenticated destination payment. A single journal event consumes the destination transaction globally and credits the existing native custody row. The row retains its gas reservation and payment history; a missing native row refuses settlement. Historical v1 supplementary evidence retains its original decoder and cannot resume native execution.
+
+A finalized reverted claim or outbound deposit records its signed-transaction gas proof before recovery reports the failure. Repeated reconciliation preserves the unique gas entry and every principal bucket; failed transactions never grant payment authority.

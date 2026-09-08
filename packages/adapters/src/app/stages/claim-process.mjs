@@ -1,5 +1,5 @@
 import { applyNativeCustodyGasPayment } from '../../native-payment-proof.mjs';
-import { createNativePaymentProof } from '../../native-payment-proof.mjs';
+import { createNativePaymentProof, createNativeTransactionGasProof } from '../../native-payment-proof.mjs';
 import {
   decodeEventLog,
   keccak256,
@@ -660,7 +660,7 @@ async function observeClaimCustodyBalance({ adapters, configured, asset }) {
   return observeBalance();
 }
 
-async function recordClaimCustodyLedger(cycleRepository, cycle, request, configured, adapters, nativeProof) {
+async function recordClaimCustodyLedger(cycleRepository, cycle, request, configured, adapters, nativeProof, { creditPrincipal = true } = {}) {
   if (typeof cycleRepository?.recordCustodyLedger !== 'function') {
     throw new Error('claim-process requires custody-ledger persistence before finality');
   }
@@ -691,7 +691,7 @@ async function recordClaimCustodyLedger(cycleRepository, cycle, request, configu
   const verifiedCurrentBalance = await observeClaimCustodyBalance({ adapters, configured, asset });
   const buckets = Object.fromEntries(CUSTODY_LEDGER_BUCKETS.map(bucket => [
     bucket,
-    bucket === 'claimed' ? amountAtomic : (existing?.[bucket] ?? '0'),
+    bucket === 'claimed' && creditPrincipal ? amountAtomic : (existing?.[bucket] ?? '0'),
   ]));
   // ADR-0026: only the dedicated return-leg writers may populate or clear `expectedCycleAsset`; this
   // generic claim writer must carry an existing v2 row's value forward unchanged, never null it out
@@ -782,6 +782,11 @@ export async function reconcileLiveClaimProcess({ adapters, config, cycleReposit
     throw new Error(`claimProcess receipt reports a different transaction hash than ${transactionHash}`);
   }
   if (!receiptSucceeded(observation.receipt.status)) {
+    const gasProof = await createNativeTransactionGasProof({ client: adapters.robinhood.client, signedTransaction: chain.attempt.rawBytes,
+      expected: { chainId: String(configured.chainId), assetId: 'native', decimals: 18, transactionHash,
+        source: configured.operations, recipient: request.call.to, amountWei: '0', calldataDigest: keccak256(request.call.data),
+        nonce: String(parseTransaction(chain.attempt.rawBytes).nonce) } });
+    await recordClaimCustodyLedger(cycleRepository, cycle, request, configured, adapters, gasProof, { creditPrincipal: false });
     throw new StageMutationRevertedError(
       'claim-process',
       `claimProcess transaction ${transactionHash} reverted on-chain`,
