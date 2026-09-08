@@ -280,6 +280,11 @@
     },
     "controls": [
       {
+        "path": ".github/workflows/v4-gates.yml",
+        "previousSha256": "5a530f2f4705673a2e101170c284ef6c39da95b6ef17089571fdf502c1c99e25",
+        "sha256": "ecccae212a38753fbc4a60eaba7e5e10451355d4121e3b8efb05e10a0f026c1e"
+      },
+      {
         "path": "scripts/verify-control-dependencies.mjs",
         "previousSha256": "20577b51e3644f62f77c2d9bfde16245a752690e74c69a5d5ec67fa0f1ae3d0a",
         "sha256": "c13a14bf4311f44a3b9ca7f866dd514b34aba5d867d00d0141c6f128172fa9e3"
