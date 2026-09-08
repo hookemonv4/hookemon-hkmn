@@ -5,8 +5,8 @@
   "baseRequirementsRevision": 70,
   "baseRequirementsSha256": "d8162e9fdbcc0e2b2f2e4091b25bca9d51e6250afbcc1dabd8817cf762826d51",
   "proposedRequirementsRevision": 71,
-  "proposedRequirementsSha256": "28c74cd1b99ffe33a525684a8e30eda66eb48109943d7cc95f0a8b34dfcfe76c",
-  "patchSha256": "6e80411c4b7830cca8c48a2dc1e4781d20674f2157f85f461da70a0d3b5cbafd",
+  "proposedRequirementsSha256": "750a12abf47a771d1181dd6a1782c1b6fbcc4eebb4632e5d1927bf52f4193425",
+  "patchSha256": "bd4af750c1ec9fcb939a8bc1165b136738242e731d41fbaa9619bc9523814e91",
   "changes": [
     {
       "requirementId": "REQ-provider-binding-1",
@@ -46,7 +46,7 @@
     },
     {
       "requirementId": "REQ-fee-accounting-6",
-      "rationale": "The selected quote and settlement asset is native ETH; preserve the existing economic rule."
+      "rationale": "Verify cumulative numerator arithmetic and funded-wei conservation as separate unit-correct invariants."
     },
     {
       "requirementId": "REQ-fee-accounting-7",
