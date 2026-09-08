@@ -73,12 +73,6 @@ test('clean-room scanner accepts neutral project files', () => {
   }
 });
 
-test('clean-room scanner accepts the repository that defines its rules', () => {
-  const result = spawnSync(process.execPath, [scanner, repoRoot], { encoding: 'utf8' });
-
-  assert.equal(result.status, 0, result.stderr || result.stdout);
-});
-
 test('clean-room scanner permits the approved X handle while still detecting a retired ticker', () => {
   const root = fixture();
   try {

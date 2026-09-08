@@ -136,7 +136,7 @@ test('CI isolates the Phase 3 bytecode-binding test in its own required job with
   assert.match(workflow, /^ {2}phase3-bytecode:\n {4}runs-on: ubuntu-24\.04\n {4}timeout-minutes: 45\n/m);
   assert.match(
     workflow,
-    /^ {2}gates:\n {4}needs: \[phase3-bytecode\]\n {4}if: \$\{\{ always\(\) \}\}\n {4}runs-on: ubuntu-24\.04\n {4}timeout-minutes: 45\n/m,
+    /^ {2}gates:\n {4}needs: \[phase3-bytecode\]\n {4}if: \$\{\{ !cancelled\(\) \}\}\n {4}runs-on: ubuntu-24\.04\n {4}timeout-minutes: 45\n/m,
   );
   const requireStep = [
     '      - name: Require the isolated Phase 3 bytecode job to succeed',
