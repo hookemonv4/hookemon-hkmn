@@ -481,6 +481,8 @@ test('readFinalizedRelaySourceDebit requires one successful finalized source deb
     amountAtomic: '25',
   }), {
     transactionHash: SIGNATURE,
+    owner: OWNER,
+    mint: CIRCLE_USD_MINT,
     debitedAmountAtomic: '25',
     finality: { height: '43', hash: SIGNATURE, timestampUnixSeconds: '1700000011' },
   });
@@ -786,4 +788,26 @@ test('submitSignedTransaction rejects an empty payload before ever calling the R
   const { client, calls } = mockClient(() => jsonResponse({ jsonrpc: '2.0', id: 1, result: SIGNATURE }));
   await assert.rejects(() => submitSignedTransaction(client, ''), SolanaAdapterError);
   assert.equal(calls.length, 0);
+});
+
+
+test('buildRelayLegacyTransaction admits only canonical accountless priority-fee instructions', () => {
+  // @solana/web3.js 1.98.4 ComputeBudgetProgram returns keys: [] for these exact layouts.
+  const canonical = buildPriorityFeeInstructions({ computeUnitLimit: 200_000, microLamports: '1234' })
+    .map(instruction => ({ programId: instruction.programId.toBase58(), keys: [], data: instruction.data.toString('hex') }));
+  const compile = instructions => buildRelayLegacyTransaction({ feePayer: OWNER, recentBlockhash: SYSTEM_PROGRAM_ID,
+    instructionPlan: { instructions, addressLookupTableAddresses: [] } });
+  const wire = compile(canonical);
+  const decoded = Transaction.from(Buffer.from(wire, 'base64'));
+  assert.equal(decoded.instructions.length, 2);
+  for (let i = 0; i < canonical.length; i += 1) {
+    assert.deepEqual(decoded.instructions[i].keys, []);
+    assert.equal(decoded.instructions[i].data.toString('hex'), canonical[i].data);
+  }
+  for (const instruction of [
+    { ...canonical[0], programId: SYSTEM_PROGRAM_ID },
+    { ...canonical[0], data: '0100000000' },
+    { ...canonical[0], data: canonical[0].data + '00' },
+    { ...canonical[1], data: canonical[1].data.slice(0, -2) },
+  ]) assert.throws(() => compile([instruction]), /keys are required/);
 });

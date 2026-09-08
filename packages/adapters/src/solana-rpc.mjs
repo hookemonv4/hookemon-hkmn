@@ -822,7 +822,10 @@ function relayInstruction(value, index) {
   const label = `Relay instruction ${index}`;
   invariant(value && typeof value === 'object' && !Array.isArray(value), SolanaAdapterError, `${label} is invalid`);
   invariant(typeof value.programId === 'string', SolanaAdapterError, `${label} programId is required`);
-  invariant(Array.isArray(value.keys) && value.keys.length > 0, SolanaAdapterError, `${label} keys are required`);
+  const data = relayInstructionBytes(value.data, label);
+  const accountlessPriorityFee = value.programId === ComputeBudgetProgram.programId.toBase58()
+    && ((data[0] === 2 && data.length === 5) || (data[0] === 3 && data.length === 9));
+  invariant(Array.isArray(value.keys) && (value.keys.length > 0 || accountlessPriorityFee), SolanaAdapterError, `${label} keys are required`);
   const keys = value.keys.map((key, keyIndex) => {
     invariant(key && typeof key === 'object' && !Array.isArray(key), SolanaAdapterError, `${label} key ${keyIndex} is invalid`);
     invariant(typeof key.pubkey === 'string' && typeof key.isSigner === 'boolean' && typeof key.isWritable === 'boolean', SolanaAdapterError, `${label} key ${keyIndex} is malformed`);
@@ -835,7 +838,7 @@ function relayInstruction(value, index) {
   return new TransactionInstruction({
     programId: assertPublicKey(value.programId, `${label} programId`),
     keys,
-    data: relayInstructionBytes(value.data, label),
+    data,
   });
 }
 
