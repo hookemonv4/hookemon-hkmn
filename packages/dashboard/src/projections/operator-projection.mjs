@@ -1,3 +1,4 @@
+import { assertPackPlan } from '../../../runner/src/config/pack-plan.mjs';
 import { nativeUnknownFields } from '../contracts/native-accounting.mjs';
 // Maps the runner-owned operator-control status into the dashboard's compatibility read models.
 // The dashboard receives a snapshot from `operatorControl.status()` and does not inspect a state
@@ -31,6 +32,7 @@ function mapOperatorState(configuration, revision) {
     version: revision,
     desiredStatus: effective.killSwitch ? 'killed' : (isPaused(effective) ? 'paused' : 'active'),
     allowedPackIds: effective.allowedPackIds,
+    ...(effective.packPlan === undefined ? {} : { packPlan: assertPackPlan(effective.packPlan) }),
     requestedOrders: effective.requestedOrders,
     intervalMinutes: effective.intervalMinutes,
     manualPackOrders: effective.allowedPackIds.length === 1
