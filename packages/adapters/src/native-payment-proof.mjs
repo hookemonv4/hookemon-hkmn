@@ -1,9 +1,14 @@
+import { isProcessRpcRelaySourceDebit } from './solana-rpc.mjs';
+import { readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { requireLiveMutationAuthority } from '../../runner/src/cycle/preflight.mjs';
 import { decodeEventLog, decodeFunctionData, keccak256, parseAbi, parseTransaction, recoverTransactionAddress } from 'viem';
 import { digest } from '../../runner/src/cycle/journal.mjs';
 import { readFinalizedTransactionReceipt, readBlockByNumber } from './robinhood-rpc.mjs';
 
 export const NATIVE_PAYMENT_PROOF_SCHEMA = 'hookemon.native-payment-proof.v1';
 const capabilities = new WeakMap();
+const releaseBindings = new WeakSet();
 const CLAIM_ABI = parseAbi([
   'function claimProcess(bytes32 cycleId, uint256 amountWei, address destination)',
   'event ProcessClaimed(bytes32 indexed cycleId, uint256 amountWei, address indexed destination, uint256 timestamp, uint256 capWei, uint256 usedAfterWei)',
@@ -88,11 +93,101 @@ export async function createNativePaymentProof({ client, signedTransaction, expe
     && typeof receipt.effectiveGasPrice === 'bigint' && receipt.effectiveGasPrice >= 0n, 'missing separate gas cost');
   const facts = {
     schema: NATIVE_PAYMENT_PROOF_SCHEMA, kind: intent.kind, chainId: '4663', assetId: 'native', decimals: 18,
-    transactionHash, transactionDigest: digest(signedTransaction), blockNumber: block.number.toString(), blockHash: block.hash,
+    transactionHash, transactionDigest: digest(signedTransaction), blockNumber: block.number.toString(), blockHash: block.hash, timestampUnixSeconds: block.timestamp.toString(),
     source, recipient, amountWei, calldataDigest: keccak256(data), nonce: intent.nonce, receiptStatus: 'success',
     gasSpentWei: (receipt.gasUsed * receipt.effectiveGasPrice).toString(),
     ...(intent.kind === 'hook-claim' ? { cycleId: intent.cycleId, hookRuntimeHash: intent.hookRuntimeHash.toLowerCase(), logIndex } : {}),
   };
+  const proof = Object.freeze({ ...facts, evidenceDigest: digest(facts) });
+  capabilities.set(proof, proof);
+  return proof;
+}
+
+/** Environment selects bytes only; the frozen coordinator interface selects their authority. */
+export function requireNativePaymentBinding(path) {
+  const authority = requireLiveMutationAuthority();
+  const interfaces = JSON.parse(readFileSync(new URL('../../../architecture/interfaces.json', import.meta.url)));
+  need(interfaces.requirementsRevision === authority.requirementsRevision && authority.requirementsRevision === 71
+    && interfaces.architectureRevision === authority.architectureRevision, 'native release revision mismatch');
+  const pinned = interfaces.nativeMigration?.nativePaymentBindingSha256;
+  need(typeof pinned === 'string' && /^[a-f0-9]{64}$/.test(pinned), 'native payment binding is not release-pinned');
+  const bytes = readFileSync(path);
+  need(createHash('sha256').update(bytes).digest('hex') === pinned, 'native payment binding bytes differ from release');
+  const binding = JSON.parse(bytes);
+  need(binding.schema === 'hookemon.native-payment-binding.v1' && binding.chainId === '4663', 'native payment binding identity mismatch');
+  address(binding.hook?.address); hash(binding.hook?.runtimeHash);
+  function freeze(value) { if (value && typeof value === 'object') { Object.values(value).forEach(freeze); Object.freeze(value); } return value; }
+  releaseBindings.add(binding);
+  return freeze(binding);
+}
+
+
+/** A successful router cleanup event is authority only under a release-pinned runtime and source decoder. */
+export async function createRelayNativePaymentProof({ client, binding, sourceProof, signedSourceTransaction, expected }) {
+  need(releaseBindings.has(binding), 'Relay route binding is not authenticated by this release');
+  const route = binding.relay;
+  need(route?.schema === 'hookemon.relay-native-route.v1' && route.metadataEncoding === 'order-id', 'Relay native route semantics are unverified');
+  const intent = structuredClone(expected);
+  need(['relay-return', 'relay-refund'].includes(intent.kind) && intent.chainId === '4663' && intent.assetId === 'native' && intent.decimals === 18, 'invalid Relay native intent');
+  const orderId = hash(intent.orderId);
+  if (intent.kind === 'relay-return') {
+  need(isProcessRpcRelaySourceDebit(sourceProof, { transactionHash: intent.sourceTransactionHash, owner: intent.sourceOwner,
+    mint: intent.sourceMint, debitedAmountAtomic: intent.sourceAmountAtomic }), 'Relay source lacks finalized persisted-byte provenance');
+  const grammar = route.sourceInstruction;
+  need(grammar && typeof grammar.programId === 'string' && /^[a-f0-9]+$/.test(grammar.discriminatorHex)
+    && grammar.discriminatorHex.length % 2 === 0, 'Relay source instruction decoder is unverified');
+  need(Number.isSafeInteger(grammar.dataLengthBytes) && grammar.dataLengthBytes > 0
+    && Number.isSafeInteger(grammar.amountOffsetBytes) && grammar.amountOffsetBytes >= grammar.discriminatorHex.length / 2
+    && Number.isSafeInteger(grammar.orderIdOffsetBytes) && grammar.orderIdOffsetBytes >= grammar.amountOffsetBytes + 8
+    && grammar.orderIdOffsetBytes + 32 === grammar.dataLengthBytes, 'Relay source instruction decoder is invalid');
+  need(sourceProof.instructions.length === 1, 'Relay source requires one exact admitted instruction');
+  const ix = sourceProof.instructions[0];
+  need(ix.programId === grammar.programId && ix.data.startsWith(grammar.discriminatorHex)
+    && ix.data.length === grammar.dataLengthBytes * 2, 'Relay source program/discriminator mismatch');
+  const sourceData = Buffer.from(ix.data, 'hex');
+  need(sourceData.readBigUInt64LE(grammar.amountOffsetBytes) === BigInt(intent.sourceAmountAtomic)
+    && `0x${sourceData.subarray(grammar.orderIdOffsetBytes).toString('hex')}` === orderId, 'Relay source order or principal mismatch');
+  } else {
+    need(route.refundsSupported === true, 'Relay native refund semantics are unverified');
+    need(isProcessNativePaymentProof(sourceProof, { kind: 'direct', transactionHash: intent.sourceTransactionHash,
+      source: address(intent.recipient), recipient: address(intent.depository), amountWei: atomic(intent.sourceAmountAtomic) }),
+    'Relay refund source lacks finalized persisted native payment provenance');
+    need(typeof signedSourceTransaction === 'string' && keccak256(signedSourceTransaction) === sourceProof.transactionHash,
+      'Relay refund source bytes differ from finalized payment');
+    const sourceTx = parseTransaction(signedSourceTransaction);
+    const deposit = decodeFunctionData({ abi: parseAbi(['function depositNative(address depositor, bytes32 id)']), data: sourceTx.data });
+    need(deposit.functionName === 'depositNative' && address(deposit.args[0]) === address(intent.recipient)
+      && hash(deposit.args[1]) === orderId && sourceTx.value === BigInt(intent.sourceAmountAtomic), 'Relay refund source order mismatch');
+  }
+  const emitter = address(route.emitter);
+  const runtimeHash = hash(route.runtimeHash);
+  const recipient = address(intent.recipient);
+  const transactionHash = hash(intent.transactionHash);
+  need(await client.getChainId() === 4663, 'Relay destination RPC chain mismatch');
+  const observed = await readFinalizedTransactionReceipt(client, transactionHash);
+  need(observed.finalized && observed.receipt.status === 'success', 'Relay native destination is unsuccessful or nonfinal');
+  const code = await client.getCode({ address: emitter, blockNumber: observed.receiptBlockNumber });
+  need(code && code !== '0x' && keccak256(code) === runtimeHash, 'Relay native runtime differs at payment checkpoint');
+  const abi = parseAbi(['event FundsMovement(address from, address to, address currency, uint256 amount, bytes metadata)']);
+  const matches = [];
+  for (const log of observed.receipt.logs) {
+    if (address(log.address) !== emitter) continue;
+    let event;
+    try { event = decodeEventLog({ abi, data: log.data, topics: log.topics, strict: true }); } catch { continue; }
+    if (event.args.metadata.toLowerCase() !== orderId) continue;
+    need(event.args.from.toLowerCase() === emitter && event.args.to.toLowerCase() === recipient
+      && event.args.currency === '0x0000000000000000000000000000000000000000'
+      && event.args.amount > 0n && log.removed !== true && Number.isSafeInteger(log.logIndex) && log.logIndex >= 0,
+    'Relay native payment event conflicts with the attributed order');
+    matches.push({ amountWei: event.args.amount.toString(), logIndex: log.logIndex });
+  }
+  need(matches.length === 1, 'Relay native payment requires exactly one attributable successful cleanup');
+  const block = await readBlockByNumber(client, observed.receiptBlockNumber);
+  need(block.hash === observed.receiptBlockHash, 'Relay native payment checkpoint reorged');
+  const facts = { schema: NATIVE_PAYMENT_PROOF_SCHEMA, kind: intent.kind, chainId: '4663', assetId: 'native', decimals: 18,
+    transactionHash, sourceTransactionHash: sourceProof.transactionHash, sourceTransactionDigest: sourceProof.signedTransactionDigest ?? sourceProof.transactionDigest,
+    relayRequestId: intent.relayRequestId, orderId, source: emitter, recipient, runtimeHash, ...matches[0],
+    blockNumber: block.number.toString(), blockHash: block.hash, timestampUnixSeconds: block.timestamp.toString(), receiptStatus: 'success' };
   const proof = Object.freeze({ ...facts, evidenceDigest: digest(facts) });
   capabilities.set(proof, proof);
   return proof;

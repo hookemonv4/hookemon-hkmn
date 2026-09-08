@@ -395,12 +395,13 @@ function assertCustodyRowIdentity(value, rowIdentity, label) {
 export function assertCustodyLedger(value, label = 'custody ledger', { allowLegacyBuckets = false } = {}) {
   if (allowLegacyBuckets) value = completeLegacyCustodyBuckets(value);
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${label} must be a plain object`);
-  if (value.schema !== 'hookemon.custody-ledger.v1' && value.schema !== 'hookemon.custody-ledger.v2') {
+  if (value.schema !== 'hookemon.custody-ledger.v1' && value.schema !== 'hookemon.custody-ledger.v2' && value.schema !== 'hookemon.custody-ledger.v3') {
     throw new Error(`${label} schema is invalid`);
   }
-  const isV2 = value.schema === 'hookemon.custody-ledger.v2';
+  const isV3 = value.schema === 'hookemon.custody-ledger.v3';
+  const isV2 = value.schema === 'hookemon.custody-ledger.v2' || isV3;
   const fields = isV2
-    ? ['schema', 'cycleId', 'chainId', 'assetId', 'decimals', ...CUSTODY_LEDGER_BUCKETS, ...CUSTODY_LEDGER_V2_FIELDS]
+    ? ['schema', 'cycleId', 'chainId', 'assetId', 'decimals', ...CUSTODY_LEDGER_BUCKETS, ...CUSTODY_LEDGER_V2_FIELDS, ...(isV3 ? ['gasReserve', 'gasSpent'] : [])]
     : ['schema', 'cycleId', 'chainId', 'assetId', 'decimals', ...CUSTODY_LEDGER_BUCKETS];
   assertPlainObject(value, fields, label);
   assertNonEmptyString(value.cycleId, `${label} cycleId`);
@@ -408,6 +409,13 @@ export function assertCustodyLedger(value, label = 'custody ledger', { allowLega
   assertNonEmptyString(value.assetId, `${label} assetId`);
   if (!Number.isInteger(value.decimals) || value.decimals < 0 || value.decimals > 255) throw new Error(`${label} decimals is invalid`);
   for (const bucket of CUSTODY_LEDGER_BUCKETS) assertAtomic(value[bucket], `${label} ${bucket}`);
+  if (isV3) {
+    if (value.chainId !== '4663' || value.assetId !== 'native' || value.decimals !== 18) throw new Error(`${label} v3 requires native ETH identity`);
+    for (const name of ['gasReserve', 'gasSpent']) {
+      const gas = assertTypedAmount(value[name], `${label} ${name}`);
+      assertCustodyRowIdentity(gas, value, `${label} ${name}`);
+    }
+  }
   if (!isV2) return clone(value);
   const rowIdentity = { chainId: value.chainId, assetId: value.assetId, decimals: value.decimals };
   if (value.verifiedCurrentBalance !== null) {
@@ -574,7 +582,7 @@ function assertReturnRelayIntent(value, relayRequestId, label) {
   }
   const carriesTradeEvidence = hasTradeType;
   assertPlainObject(value, carriesTradeEvidence ? RETURN_RELAY_INTENT_FIELDS_WITH_TRADE_EVIDENCE : RETURN_RELAY_INTENT_FIELDS, label);
-  if (value.schema !== 'hookemon.relay-intent.v1') throw new Error(`${label} schema is invalid`);
+  if (value.schema !== 'hookemon.relay-intent.v1' && value.schema !== 'hookemon.relay-intent.v2') throw new Error(`${label} schema is invalid`);
   if (value.requestId !== relayRequestId) throw new Error(`${label} requestId does not match its Relay leg`);
   if (value.direction !== 'RETURN') throw new Error(`${label} direction is invalid`);
   if (carriesTradeEvidence) {
@@ -642,7 +650,7 @@ export function assertRelayLeg(value, label = 'relay leg') {
     ? [...RELAY_LEG_FIELDS, 'returnAttribution']
     : RELAY_LEG_FIELDS;
   assertPlainObject(value, fields, label);
-  if (value.schema !== 'hookemon.relay-leg.v1') throw new Error(`${label} schema is invalid`);
+  if (value.schema !== 'hookemon.relay-leg.v1' && value.schema !== 'hookemon.relay-leg.v2') throw new Error(`${label} schema is invalid`);
   assertNonEmptyString(value.cycleId, `${label} cycleId`);
   if (!relayLegDirectionSet.has(value.direction)) throw new Error(`${label} direction is invalid`);
   assertNonEmptyString(value.relayRequestId, `${label} relayRequestId`);
@@ -689,7 +697,7 @@ export function createRecordedRelayLeg({ cycleId, direction, relayRequestId, quo
   const sourceAmount = assertTypedAmount(source, 'relay leg source');
   const destinationAmount = assertTypedAmount(destination, 'relay leg destination');
   const leg = {
-    schema: 'hookemon.relay-leg.v1',
+    schema: [sourceAmount, destinationAmount].some(amount => amount.chainId === '4663' && amount.assetId === 'native' && amount.decimals === 18) ? 'hookemon.relay-leg.v2' : 'hookemon.relay-leg.v1',
     cycleId,
     direction,
     relayRequestId,
@@ -746,8 +754,9 @@ export function transitionRelayLeg(value, nextState, evidence = {}) {
  * exact transfer facts are independently observed by this process before this value is created.
  */
 export function assertReturnLegDestinationProof(value, label = 'return leg destination proof') {
-  assertPlainObject(value, RETURN_LEG_DESTINATION_PROOF_FIELDS, label);
-  if (value.schema !== 'hookemon.return-leg-destination-proof.v1') throw new Error(`${label} schema is invalid`);
+  const native = value?.schema === 'hookemon.return-leg-destination-proof.v2';
+  assertPlainObject(value, native ? [...RETURN_LEG_DESTINATION_PROOF_FIELDS, 'nativePaymentProof'] : RETURN_LEG_DESTINATION_PROOF_FIELDS, label);
+  if (!native && value.schema !== 'hookemon.return-leg-destination-proof.v1') throw new Error(`${label} schema is invalid`);
   assertNonEmptyString(value.relayRequestId, `${label} relayRequestId`);
   assertPlainObject(value.terminalStatus, ['status', 'destinationTxHash'], `${label} terminalStatus`);
   if (value.terminalStatus.status !== 'SUCCESS') throw new Error(`${label} terminalStatus is invalid`);
@@ -763,11 +772,22 @@ export function assertReturnLegDestinationProof(value, label = 'return leg desti
   if (!Number.isInteger(value.transferCount) || value.transferCount !== 1) {
     throw new Error(`${label} transferCount must equal one`);
   }
-  if (typeof value.observedToken !== 'string' || !evmAddressPattern.test(value.observedToken)) {
+  if (native ? value.observedToken !== 'native' : (typeof value.observedToken !== 'string' || !evmAddressPattern.test(value.observedToken))) {
     throw new Error(`${label} observedToken is invalid`);
   }
   if (typeof value.observedRecipient !== 'string' || !evmAddressPattern.test(value.observedRecipient)) {
     throw new Error(`${label} observedRecipient is invalid`);
+  }
+  if (native) {
+    const proof = value.nativePaymentProof;
+    if (!proof || proof.schema !== 'hookemon.native-payment-proof.v1' || proof.kind !== 'relay-return'
+      || proof.chainId !== '4663' || proof.assetId !== 'native' || proof.decimals !== 18
+      || proof.transactionHash !== value.destinationTxHash || proof.sourceTransactionHash !== value.sourceTxHash
+      || proof.relayRequestId !== value.relayRequestId || proof.recipient !== value.observedRecipient
+      || proof.amountWei !== value.observedAmountAtomic || proof.blockNumber !== value.destinationFinality.height
+      || proof.blockHash !== value.destinationFinality.hash || proof.timestampUnixSeconds !== value.destinationFinality.timestampUnixSeconds) {
+      throw new Error(`${label} native payment evidence is inconsistent`);
+    }
   }
   assertAtomic(value.observedAmountAtomic, `${label} observedAmountAtomic`);
   return clone(value);
@@ -841,7 +861,7 @@ function assertMoneyAmount(value, asset, label) {
   return amount;
 }
 
-export const MONEY_CONFIGURATION_SCHEMA = 'hookemon.money-configuration.v1';
+export const MONEY_CONFIGURATION_SCHEMA = 'hookemon.money-configuration.v2';
 
 /**
  * MoneyConfigurationV1: every money minimum and gas cap is an explicit TypedAmount. A missing field
@@ -850,6 +870,52 @@ export const MONEY_CONFIGURATION_SCHEMA = 'hookemon.money-configuration.v1';
 export function assertMoneyConfiguration(value, label = 'money configuration') {
   assertPlainObject(value, ['schema', 'assets', 'minimums', 'evm', 'solana'], label);
   if (value.schema !== MONEY_CONFIGURATION_SCHEMA) throw new Error(`${label} schema is invalid`);
+  assertPlainObject(value.assets, ['eth', 'solanaStablecoin'], `${label} assets`);
+  const eth = assertConfiguredAsset(value.assets.eth, `${label} assets eth`);
+  if (eth.chainId !== '4663' || eth.assetId !== 'native' || eth.decimals !== 18) throw new Error(`${label} native ETH identity is invalid`);
+  const solanaStablecoin = assertConfiguredAsset(value.assets.solanaStablecoin, `${label} assets solanaStablecoin`);
+  if (eth.chainId === solanaStablecoin.chainId) throw new Error(`${label} assets must be distinct chains`);
+  assertPlainObject(value.minimums, ['robinhoodReceive', 'solanaReceive', 'returnEth'], `${label} minimums`);
+  if (!value.evm || typeof value.evm !== 'object' || Array.isArray(value.evm) || !Object.hasOwn(value.evm, 'perTransactionGasPriceCap')) {
+    throw new Error(`${label} evm perTransactionGasPriceCap is required`);
+  }
+  if (!Object.hasOwn(value.evm, 'nativeReserve')) throw new Error(`${label} evm nativeReserve is required`);
+  assertPlainObject(value.evm, ['perTransactionGasPriceCap', 'nativeReserve'], `${label} evm`);
+  if (!value.solana || typeof value.solana !== 'object' || Array.isArray(value.solana) || !Object.hasOwn(value.solana, 'priorityFeeCap')) {
+    throw new Error(`${label} solana priorityFeeCap is required`);
+  }
+  if (!Object.hasOwn(value.solana, 'lamportReserve')) throw new Error(`${label} solana lamportReserve is required`);
+  assertPlainObject(value.solana, ['priorityFeeCap', 'lamportReserve'], `${label} solana`);
+  const evmNative = { chainId: eth.chainId, assetId: 'native', decimals: 18 };
+  const solanaNative = { chainId: solanaStablecoin.chainId, assetId: 'native', decimals: 9 };
+  const computeUnitPrice = { chainId: solanaStablecoin.chainId, assetId: 'microlamports-per-compute-unit', decimals: 0 };
+  const returnEth = assertMoneyAmount(value.minimums.returnEth, eth, `${label} minimums returnEth`);
+  if (returnEth.amountAtomic !== '0') {
+    throw new Error(`${label} minimums returnEth must be the revision-63 zero value`);
+  }
+  return {
+    schema: MONEY_CONFIGURATION_SCHEMA,
+    assets: { eth, solanaStablecoin },
+    minimums: {
+      robinhoodReceive: assertMoneyAmount(value.minimums.robinhoodReceive, eth, `${label} minimums robinhoodReceive`),
+      solanaReceive: assertMoneyAmount(value.minimums.solanaReceive, solanaStablecoin, `${label} minimums solanaReceive`),
+      returnEth,
+    },
+    evm: {
+      perTransactionGasPriceCap: assertMoneyAmount(value.evm.perTransactionGasPriceCap, evmNative, `${label} evm perTransactionGasPriceCap`),
+      nativeReserve: assertMoneyAmount(value.evm.nativeReserve, evmNative, `${label} evm nativeReserve`),
+    },
+    solana: {
+      priorityFeeCap: assertMoneyAmount(value.solana.priorityFeeCap, computeUnitPrice, `${label} solana priorityFeeCap`),
+      lamportReserve: assertMoneyAmount(value.solana.lamportReserve, solanaNative, `${label} solana lamportReserve`),
+    },
+  };
+}
+
+/** Read-only decoder for historical USDG configuration; never use for native admission. */
+export function assertHistoricalMoneyConfiguration(value, label = 'money configuration') {
+  assertPlainObject(value, ['schema', 'assets', 'minimums', 'evm', 'solana'], label);
+  if (value.schema !== 'hookemon.money-configuration.v1') throw new Error(`${label} schema is invalid`);
   assertPlainObject(value.assets, ['usdg', 'solanaStablecoin'], `${label} assets`);
   const usdg = assertConfiguredAsset(value.assets.usdg, `${label} assets usdg`);
   const solanaStablecoin = assertConfiguredAsset(value.assets.solanaStablecoin, `${label} assets solanaStablecoin`);
@@ -873,7 +939,7 @@ export function assertMoneyConfiguration(value, label = 'money configuration') {
     throw new Error(`${label} minimums returnUsdg must be the revision-63 zero value`);
   }
   return {
-    schema: MONEY_CONFIGURATION_SCHEMA,
+    schema: 'hookemon.money-configuration.v1',
     assets: { usdg, solanaStablecoin },
     minimums: {
       robinhoodReceive: assertMoneyAmount(value.minimums.robinhoodReceive, usdg, `${label} minimums robinhoodReceive`),

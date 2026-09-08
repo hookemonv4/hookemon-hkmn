@@ -350,3 +350,17 @@ serializes within 1232 bytes, and decodes to verify exact programs, data, ordere
 effective transaction-wide privileges. Incomplete/index-only plans and oversized packets refuse.
 This capability does not imply provider route approval and never recompiles Collector co-signed
 messages. The captured complete return plan measures 483 bytes with pinned SDK 1.98.4.
+
+Native return reconciliation requires a release-authenticated `hookemon.native-payment-binding.v1`
+object. Its Relay route identifies the exact router runtime and source instruction decoder. A null
+route cannot issue a payment proof. The source reader verifies the persisted Solana transaction's
+signatures, fee payer, finalized token debit, and byte-for-byte finalized RPC transaction. The
+pinned decoder binds its program, discriminator, amount and order. A return payment requires one
+successful native `FundsMovement` cleanup with that order as metadata, the configured recipient,
+and the matching historical router code hash. The destination receipt and canonical checkpoint
+are independently finalized. The repository reserves the destination transaction hash across all
+cycles before applying a return credit; a retry preserves that attribution.
+
+Native outbound finality records principal in `bridgeOut` and execution cost in typed `gasSpent`.
+These are separate amounts. Reconciliation repeats RPC observation and preserves the already
+recorded debit and gas cost. Held cards retain their USD purchase basis outside native custody.

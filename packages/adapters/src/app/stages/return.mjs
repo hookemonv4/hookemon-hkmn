@@ -1,3 +1,4 @@
+import { createRelayNativePaymentProof } from '../../native-payment-proof.mjs';
 import {
   DIRECTIONS,
   RELAY_CONSTANTS,
@@ -24,7 +25,7 @@ import {
   createRecordedRelayLeg,
   CUSTODY_LEDGER_BUCKETS,
 } from '../../../../runner/src/cycle/money-schemas.mjs';
-import { createEvmCustodyBalanceObservationReader } from '../../evm-custody-balance-observation.mjs';
+import { createNativeCustodyBalanceObservationReader } from '../../evm-custody-balance-observation.mjs';
 import { COLLECTOR_CRYPT_SETTLEMENT_ASSET } from '../../collector-crypt.mjs';
 import {
   createCanonicalTransactionPolicy,
@@ -49,7 +50,8 @@ const ATOMIC_AMOUNT = /^(?:0|[1-9][0-9]*)$/;
 const EVM_ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 const EVM_TRANSACTION_HASH = /^0x[0-9a-fA-F]{64}$/;
 const EVM_WORD = /^0x[0-9a-fA-F]{64}$/;
-const USDG_ADDRESS = RELAY_CONSTANTS.USDG_ADDRESS.toLowerCase();
+const NATIVE_ADDRESS = RELAY_CONSTANTS.NATIVE_ADDRESS.toLowerCase();
+const NATIVE_ASSET = 'native';
 const SOLANA_CHAIN_ID = String(RELAY_CONSTANTS.SOLANA_CHAIN_ID);
 const EVM_CHAIN_ID = String(RELAY_CONSTANTS.ROBINHOOD_CHAIN_ID);
 const DIGEST = /^sha256:[0-9a-f]{64}$/;
@@ -102,7 +104,7 @@ function canonicalAmount(value, label) {
 export function typedAmount(leg) {
   return Object.freeze({
     chainId: String(leg.chainId),
-    assetId: leg.chainId === RELAY_CONSTANTS.ROBINHOOD_CHAIN_ID ? leg.address.toLowerCase() : leg.address,
+    assetId: leg.chainId === RELAY_CONSTANTS.ROBINHOOD_CHAIN_ID && leg.address.toLowerCase() === NATIVE_ADDRESS ? NATIVE_ASSET : leg.address,
     decimals: leg.decimals,
     amountAtomic: leg.amount,
   });
@@ -142,7 +144,7 @@ function sameReturnCustodyAsset(left, right) {
  * checked for self-consistency between two configured fields (`config.solana.chainId` and
  * `config.collectorCrypt.settlementAsset.chainId` could otherwise both be wrongly set to the same
  * incorrect value and still "agree"). Then cross-checked against the Relay-facing
- * `configured.solanaMint` and `MoneyConfigurationV1.assets.solanaStablecoin` so the two namespaces
+ * `configured.solanaMint` and `MoneyConfigurationV2.assets.solanaStablecoin` so the two namespaces
  * are proven to name the same mint before either is trusted.
  */
 function resolveReturnNativeSolanaCustodyIdentity(config, configured, money) {
@@ -160,7 +162,7 @@ function resolveReturnNativeSolanaCustodyIdentity(config, configured, money) {
     throw new Error('return native Solana settlement asset does not match the configured Relay Solana mint');
   }
   if (asset.decimals !== money.assets.solanaStablecoin.decimals) {
-    throw new Error('return native Solana settlement asset decimals do not match MoneyConfigurationV1');
+    throw new Error('return native Solana settlement asset decimals do not match MoneyConfigurationV2');
   }
   return Object.freeze({ chainId: asset.chainId, assetId: asset.assetId, decimals: asset.decimals });
 }
@@ -193,7 +195,7 @@ export function returnableProceedsDelta(ledger) {
 
 function zeroProceedsReturnEvidence({ request, context, configured, money }) {
   if (!request || typeof request !== 'object' || Array.isArray(request)
-    || request.schema !== 'hookemon.return-zero-proceeds-request.v1'
+    || request.schema !== 'hookemon.return-zero-proceeds-request.v2'
     || request.cycleId !== context?.cycleId
     || !request.inputAmount || !request.destinationAmount) {
     throw new Error('return zero-proceeds request is invalid');
@@ -202,34 +204,34 @@ function zeroProceedsReturnEvidence({ request, context, configured, money }) {
   const destination = request.destinationAmount;
   if (input.chainId !== SOLANA_CHAIN_ID || input.assetId !== configured.solanaMint
     || input.decimals !== money.assets.solanaStablecoin.decimals || input.amountAtomic !== '0'
-    || destination.chainId !== EVM_CHAIN_ID || destination.assetId?.toLowerCase() !== USDG_ADDRESS
-    || destination.decimals !== money.assets.usdg.decimals || destination.amountAtomic !== '0') {
+    || destination.chainId !== EVM_CHAIN_ID || destination.assetId?.toLowerCase() !== NATIVE_ASSET
+    || destination.decimals !== money.assets.eth.decimals || destination.amountAtomic !== '0') {
     throw new Error('return zero-proceeds request does not match the configured settlement assets');
   }
   return Object.freeze({
-    schema: 'hookemon.return-zero-proceeds-evidence.v1',
+    schema: 'hookemon.return-zero-proceeds-evidence.v2',
     cycleId: context.cycleId,
     finalized: true,
     noBridge: true,
     destinationAccount: configured.evm,
-    destinationAsset: USDG_ADDRESS,
+    destinationAsset: NATIVE_ASSET,
     destinationCreditAmount: '0',
   });
 }
 
 function isZeroProceedsReturnEvidence(value, { cycleId, configured, money }) {
   if (!value || typeof value !== 'object' || Array.isArray(value)
-    || value.schema !== 'hookemon.return-zero-proceeds-evidence.v1'
+    || value.schema !== 'hookemon.return-zero-proceeds-evidence.v2'
     || value.cycleId !== cycleId || value.finalized !== true || value.noBridge !== true
     || value.destinationAccount?.toLowerCase() !== configured.evm.toLowerCase()
-    || value.destinationAsset?.toLowerCase() !== USDG_ADDRESS
+    || value.destinationAsset?.toLowerCase() !== NATIVE_ASSET
     || value.destinationCreditAmount !== '0') return false;
-  return money.assets.usdg.chainId === EVM_CHAIN_ID && money.assets.usdg.decimals === 6;
+  return money.assets.eth.chainId === EVM_CHAIN_ID && money.assets.eth.decimals === 18;
 }
 
 function zeroProceedsReturnRequest({ context, configured, money }) {
   return Object.freeze({
-    schema: 'hookemon.return-zero-proceeds-request.v1',
+    schema: 'hookemon.return-zero-proceeds-request.v2',
     cycleId: context.cycleId,
     inputAmount: Object.freeze({
       chainId: SOLANA_CHAIN_ID,
@@ -239,8 +241,8 @@ function zeroProceedsReturnRequest({ context, configured, money }) {
     }),
     destinationAmount: Object.freeze({
       chainId: EVM_CHAIN_ID,
-      assetId: USDG_ADDRESS,
-      decimals: money.assets.usdg.decimals,
+      assetId: NATIVE_ASSET,
+      decimals: money.assets.eth.decimals,
       amountAtomic: '0',
     }),
   });
@@ -278,8 +280,8 @@ export function assertReturnQuote(quote, config, money = null) {
   if (quote.origin?.chainId !== RELAY_CONSTANTS.SOLANA_CHAIN_ID || quote.origin?.address !== config.solanaMint) {
     throw new Error('return quote origin does not match the configured Solana mint');
   }
-  if (quote.destination?.chainId !== RELAY_CONSTANTS.ROBINHOOD_CHAIN_ID || quote.destination?.address?.toLowerCase() !== USDG_ADDRESS) {
-    throw new Error('return quote destination is not USDG on chain 4663');
+  if (quote.destination?.chainId !== RELAY_CONSTANTS.ROBINHOOD_CHAIN_ID || quote.destination?.address?.toLowerCase() !== NATIVE_ADDRESS) {
+    throw new Error('return quote destination is not native ETH on chain 4663');
   }
   if (quote.sender !== config.solana) throw new Error('return quote sender does not match Operations Solana account');
   if (quote.recipient?.toLowerCase() !== config.evm.toLowerCase()) throw new Error('return quote recipient does not match Operations EVM account');
@@ -289,8 +291,8 @@ export function assertReturnQuote(quote, config, money = null) {
     throw new Error('return quote is missing asset decimals');
   }
   if (money !== null && (quote.origin.decimals !== money.assets.solanaStablecoin.decimals
-    || quote.destination.decimals !== money.assets.usdg.decimals)) {
-    throw new Error('return quote decimals do not match MoneyConfigurationV1 assets');
+    || quote.destination.decimals !== money.assets.eth.decimals)) {
+    throw new Error('return quote decimals do not match MoneyConfigurationV2 assets');
   }
   return quote;
 }
@@ -329,6 +331,7 @@ export async function prepareReturnRequest({ adapters, config, cycleRepository, 
   const configured = assertReturnConfiguration(config);
   const money = assertReturnMoneyConfiguration(config, configured);
   const cycle = await cycleRepository.describeCycle(context.cycleId);
+  if (cycle.admission?.schema !== 'hookemon.policy-admission.v3') throw new Error('native return refuses historical cycle resume');
   const nativeIdentity = resolveReturnNativeSolanaCustodyIdentity(config, configured, money);
   assertNoCompetingReturnCustodyLedger(cycle, nativeIdentity);
   const ledger = custodyLedgerFor(cycle, { chainId: nativeIdentity.chainId, assetId: nativeIdentity.assetId });
@@ -352,7 +355,7 @@ export async function prepareReturnRequest({ adapters, config, cycleRepository, 
   assertQuoteUsable({ quote, nowMs });
   const execution = adapters.relay.prepareExecution({ quote, liveMode: true });
   return Object.freeze({
-    schema: 'hookemon.return-relay-request.v1',
+    schema: 'hookemon.return-relay-request.v2',
     cycleId: context.cycleId,
     inputAmount: typedAmount(quote.origin),
     destinationAmount: typedAmount(quote.destination),
@@ -465,16 +468,16 @@ export function assertReturnMoneyConfiguration(config, configured) {
   try {
     money = assertMoneyConfiguration(config?.moneyConfiguration, 'return money configuration');
   } catch (error) {
-    throw new Error(`return requires MoneyConfigurationV1: ${error.message}`);
+    throw new Error(`return requires MoneyConfigurationV2: ${error.message}`);
   }
-  if (money.assets.usdg.chainId !== EVM_CHAIN_ID
-    || money.assets.usdg.assetId.toLowerCase() !== USDG_ADDRESS
-    || money.assets.usdg.decimals !== 6) {
-    throw new Error('return MoneyConfigurationV1 USDG asset does not match the configured Robinhood route');
+  if (money.assets.eth.chainId !== EVM_CHAIN_ID
+    || money.assets.eth.assetId.toLowerCase() !== NATIVE_ASSET
+    || money.assets.eth.decimals !== 18) {
+    throw new Error('return MoneyConfigurationV2 native ETH asset does not match the configured Robinhood route');
   }
   if (money.assets.solanaStablecoin.chainId !== SOLANA_CHAIN_ID
     || money.assets.solanaStablecoin.assetId !== configured.solanaMint) {
-    throw new Error('return MoneyConfigurationV1 Solana asset does not match the configured Relay route');
+    throw new Error('return MoneyConfigurationV2 Solana asset does not match the configured Relay route');
   }
   return money;
 }
@@ -574,19 +577,9 @@ function returnRelayLeg(context, request) {
   });
 }
 
-/**
- * ADR-0026 / interfaces.json revision 67: the canonical identity for the EVM USDG custody row,
- * built only from the already-validated `MoneyConfigurationV1.assets.usdg` -- exactly the formula
- * `claim-process.mjs#claimCustodyAsset` and `payout.mjs#canonicalEvmUsdgCustodyIdentity` already
- * apply -- never from the leg's own raw destination fields.
- */
+/** Native custody uses the exact active identity; historical token rows remain separate. */
 function returnCustodyAsset(money) {
-  const chainId = `eip155:${money.assets.usdg.chainId}`;
-  return Object.freeze({
-    chainId,
-    assetId: `${chainId}/erc20:${money.assets.usdg.assetId.toLowerCase()}`,
-    decimals: money.assets.usdg.decimals,
-  });
+  return Object.freeze({ ...money.assets.eth });
 }
 
 function returnCustodyLedgerKey(asset) {
@@ -608,7 +601,7 @@ function legacyRawReturnCustodyKey(leg) {
  * the configured Operations account -- never a supplied balance callback or a candidate row.
  */
 async function observeReturnCustodyBalance({ adapters, asset, account }) {
-  const observeBalance = createEvmCustodyBalanceObservationReader({
+  const observeBalance = createNativeCustodyBalanceObservationReader({
     publicClient: adapters?.robinhood?.client ?? null,
     archiveClient: adapters?.robinhood?.historicalEvidenceClient ?? null,
     identity: { chainId: asset.chainId, assetId: asset.assetId, decimals: asset.decimals, account },
@@ -638,7 +631,7 @@ function returnLegIdentity(leg) {
  * genuinely new leg), so a non-null existing expectation can only belong to a different leg.
  */
 function hasConflictingUnresolvedReturnExpectation(existing) {
-  return existing?.schema === 'hookemon.custody-ledger.v2' && existing.expectedCycleAsset !== null;
+  return existing?.schema === 'hookemon.custody-ledger.v3' && existing.expectedCycleAsset !== null;
 }
 
 /**
@@ -668,6 +661,7 @@ async function recordReturnCustodyExpectation({ cycleRepository, cycle, leg, con
     );
   }
   const existing = cycle?.custodyLedgers?.get?.(canonicalKey) ?? null;
+  if (existing && existing.schema !== 'hookemon.custody-ledger.v3') throw new Error('native return refuses historical custody reinterpretation');
   if (hasConflictingUnresolvedReturnExpectation(existing)) {
     throw new Error('cycle-repository recordReturnRelayLegExpectation: an unresolved return leg for this destination already exists');
   }
@@ -683,12 +677,14 @@ async function recordReturnCustodyExpectation({ cycleRepository, cycle, leg, con
   const observation = await observeReturnCustodyBalance({ adapters, asset, account: configured.evm.toLowerCase() });
   context?.assertLease?.();
   const refreshed = Object.freeze({
-    schema: 'hookemon.custody-ledger.v2',
+    schema: 'hookemon.custody-ledger.v3',
     cycleId: leg.cycleId,
     chainId: asset.chainId,
     assetId: asset.assetId,
     decimals: asset.decimals,
     ...returnCarriedCustodyBuckets(existing),
+    gasReserve: existing?.gasReserve ?? { ...asset, amountAtomic: '0' },
+    gasSpent: existing?.gasSpent ?? { ...asset, amountAtomic: '0' },
     verifiedCurrentBalance: observation,
     expectedCycleAsset: null,
   });
@@ -699,7 +695,7 @@ async function recordReturnCustodyExpectation({ cycleRepository, cycle, leg, con
 }
 
 function assertReturnRequest({ request, context, cycle, configured, money, nativeIdentity }) {
-  if (!request || request.schema !== 'hookemon.return-relay-request.v1' || request.cycleId !== context.cycleId) {
+  if (!request || request.schema !== 'hookemon.return-relay-request.v2' || request.cycleId !== context.cycleId) {
     throw new Error('return requires the canonical request prepared for this cycle');
   }
   canonicalAmount(request.requestCreatedAtUnixSeconds, 'return request creation time');
@@ -720,11 +716,11 @@ function assertReturnRequest({ request, context, cycle, configured, money, nativ
     amountAtomic: request.inputAmount?.amountAtomic,
   }) || !sameAmount(request.destinationAmount, {
     chainId: EVM_CHAIN_ID,
-    assetId: USDG_ADDRESS,
-    decimals: money.assets.usdg.decimals,
+    assetId: NATIVE_ASSET,
+    decimals: money.assets.eth.decimals,
     amountAtomic: request.destinationAmount?.amountAtomic,
   })) {
-    throw new Error('return request assets do not match MoneyConfigurationV1');
+    throw new Error('return request assets do not match MoneyConfigurationV2');
   }
   canonicalAmount(request.inputAmount.amountAtomic, 'return request input amount');
   canonicalAmount(request.destinationAmount.amountAtomic, 'return request destination amount');
@@ -764,7 +760,7 @@ function assertReturnPriorityFeeCap(decoded, money) {
     || decoded.priorityFee.assetId !== money.solana.priorityFeeCap.assetId
     || decoded.priorityFee.decimals !== money.solana.priorityFeeCap.decimals
     || BigInt(decoded.priorityFee.amountAtomic) > BigInt(money.solana.priorityFeeCap.amountAtomic)) {
-    throw new Error('return Relay priority fee exceeds the configured MoneyConfigurationV1 cap');
+    throw new Error('return Relay priority fee exceeds the configured MoneyConfigurationV2 cap');
   }
 }
 
@@ -982,7 +978,7 @@ export async function mutateReturn({
   }
   const configured = assertReturnConfiguration(config);
   const money = assertReturnMoneyConfiguration(config, configured);
-  if (request?.schema === 'hookemon.return-zero-proceeds-request.v1') {
+  if (request?.schema === 'hookemon.return-zero-proceeds-request.v2') {
     const evidence = zeroProceedsReturnEvidence({ request, context, configured, money });
     if (typeof cycleRepository?.readStageAttempt !== 'function' || typeof cycleRepository?.recordStageAttempt !== 'function') {
       throw new Error('return zero-proceeds settlement requires a durable stage-attempt repository');
@@ -1171,75 +1167,33 @@ function legacyUnauthenticatedReturnAttempt(attempt) {
   return intent;
 }
 
-function successfulEvmReceipt(receipt) {
-  return receipt?.status === 'success' || receipt?.status === '0x1' || receipt?.status === 1 || receipt?.status === 1n;
-}
-
-function oneReturnTransfer(receipt) {
-  if (!Array.isArray(receipt?.logs)) return null;
-  const transfers = [];
-  for (const log of receipt.logs) {
-    if (typeof log?.topics?.[0] !== 'string' || log.topics[0].toLowerCase() !== ERC20_TRANSFER_TOPIC) continue;
-    if (typeof log.address !== 'string' || !EVM_ADDRESS.test(log.address)
-      || log.topics.length !== 3 || !EVM_WORD.test(log.topics[1]) || !EVM_WORD.test(log.topics[2])
-      || typeof log.data !== 'string' || !EVM_WORD.test(log.data)) {
-      return null;
-    }
-    transfers.push({
-      token: log.address.toLowerCase(),
-      recipient: `0x${log.topics[2].slice(-40).toLowerCase()}`,
-      amountAtomic: BigInt(log.data).toString(),
-    });
-  }
-  return transfers.length === 1 ? transfers[0] : null;
-}
-
-/**
- * Builds ReturnLegDestinationProofV1 from Relay's authenticated hash pointer and this process's
- * own finalized Robinhood receipt. The Relay result supplies no amount or settlement conclusion.
- */
-export async function readReturnLegDestinationProof({ client, pointer, leg, sourceFinality }) {
-  if (!client || typeof client !== 'object') throw new Error('return destination proof requires a Robinhood RPC client');
+/** Native return facts are reconstructed from finalized source bytes and release-bound router semantics. */
+export async function readReturnLegDestinationProof({ client, pointer, leg, sourceProof, nativePaymentBinding }) {
   if (!pointer || pointer.schema !== 'hookemon.relay-terminal-destination-pointer.v1'
     || pointer.relayRequestId !== leg?.relayRequestId || pointer.status !== 'SUCCESS'
     || typeof pointer.destinationTxHash !== 'string' || !EVM_TRANSACTION_HASH.test(pointer.destinationTxHash)) {
     throw new Error('return destination proof requires an authenticated successful Relay transaction pointer');
   }
-  const observation = await readFinalizedTransactionReceipt(client, pointer.destinationTxHash);
-  if (!observation.finalized || !successfulEvmReceipt(observation.receipt)
-    || observation.receiptBlockNumber === null || observation.receiptBlockHash === null) {
-    return null;
+  if (leg.schema !== 'hookemon.relay-leg.v2' || leg.destinationAssetId !== NATIVE_ASSET || leg.destinationDecimals !== 18) {
+    throw new Error('native return refuses historical token legs');
   }
-  const receiptBlock = await readBlockByNumber(client, observation.receiptBlockNumber);
-  if (receiptBlock.hash !== observation.receiptBlockHash) return null;
-  const transfer = oneReturnTransfer(observation.receipt);
-  if (transfer === null) return null;
+  const native = await createRelayNativePaymentProof({ client, binding: nativePaymentBinding, sourceProof,
+    expected: { kind: 'relay-return', chainId: EVM_CHAIN_ID, assetId: NATIVE_ASSET, decimals: 18,
+      transactionHash: pointer.destinationTxHash, relayRequestId: leg.relayRequestId,
+      orderId: leg.returnAttribution.intent.orderId, recipient: leg.returnAttribution.intent.recipient,
+      sourceTransactionHash: leg.sourceTxHash, sourceOwner: leg.returnAttribution.intent.sender,
+      sourceMint: leg.sourceAssetId, sourceAmountAtomic: leg.sourceAmountAtomic } });
   const proof = assertReturnLegDestinationProof({
-    schema: 'hookemon.return-leg-destination-proof.v1',
-    relayRequestId: leg.relayRequestId,
-    terminalStatus: {
-      status: pointer.status,
-      destinationTxHash: pointer.destinationTxHash.toLowerCase(),
-    },
-    sourceTxHash: leg.sourceTxHash,
-    sourceFinality,
-    destinationTxHash: pointer.destinationTxHash.toLowerCase(),
-    destinationFinality: {
-      height: receiptBlock.number.toString(),
-      hash: receiptBlock.hash,
-      timestampUnixSeconds: receiptBlock.timestamp.toString(),
-    },
-    transferCount: 1,
-    observedToken: transfer.token,
-    observedRecipient: transfer.recipient,
-    observedAmountAtomic: transfer.amountAtomic,
+    schema: 'hookemon.return-leg-destination-proof.v2', relayRequestId: leg.relayRequestId,
+    terminalStatus: { status: 'SUCCESS', destinationTxHash: native.transactionHash },
+    sourceTxHash: leg.sourceTxHash, sourceFinality: sourceProof.finality,
+    destinationTxHash: native.transactionHash,
+    destinationFinality: { height: native.blockNumber, hash: native.blockHash, timestampUnixSeconds: native.timestampUnixSeconds },
+    transferCount: 1, observedToken: NATIVE_ASSET, observedRecipient: native.recipient, observedAmountAtomic: native.amountWei,
+    nativePaymentProof: native,
   });
-  processRpcReturnLegDestinationProofs.set(proof, Object.freeze({
-    proofDigest: canonicalDigest(proof),
-    relayRequestId: proof.relayRequestId,
-    sourceTxHash: proof.sourceTxHash,
-    destinationTxHash: proof.destinationTxHash.toLowerCase(),
-  }));
+  processRpcReturnLegDestinationProofs.set(proof, Object.freeze({ proofDigest: canonicalDigest(proof),
+    relayRequestId: proof.relayRequestId, sourceTxHash: proof.sourceTxHash, destinationTxHash: proof.destinationTxHash }));
   return proof;
 }
 
@@ -1266,7 +1220,7 @@ function assertReturnCanonicalCustodyAssociation(cycle, leg, money) {
     );
   }
   const row = cycle?.custodyLedgers?.get?.(canonicalKey) ?? null;
-  if (row === null || row.schema !== 'hookemon.custody-ledger.v2'
+  if (row === null || row.schema !== 'hookemon.custody-ledger.v3'
     || row.chainId !== asset.chainId || row.assetId !== asset.assetId || row.decimals !== asset.decimals) {
     throw new ReturnRecoveryRequiredError(
       'RETURN_CUSTODY_ASSOCIATION_MISSING',
@@ -1334,13 +1288,13 @@ function returnPayoutSettlementEvidence(leg, { configured, money, context }) {
     throw new Error('return leg attributed recipient does not match the configured Operations EVM account');
   }
   if (leg.destinationChainId !== EVM_CHAIN_ID
-    || typeof leg.destinationAssetId !== 'string' || leg.destinationAssetId.toLowerCase() !== USDG_ADDRESS
-    || leg.destinationDecimals !== money.assets.usdg.decimals) {
-    throw new Error('return leg destination asset does not match the configured USDG identity');
+    || typeof leg.destinationAssetId !== 'string' || leg.destinationAssetId.toLowerCase() !== NATIVE_ASSET
+    || leg.destinationDecimals !== money.assets.eth.decimals) {
+    throw new Error('return leg destination asset does not match the configured native ETH identity');
   }
   const destinationCreditAmount = canonicalAmount(leg.netDeltaAtomic, 'return leg netDeltaAtomic');
   return Object.freeze({
-    schema: 'hookemon.return-relay-settlement-evidence.v1',
+    schema: 'hookemon.return-relay-settlement-evidence.v2',
     finalized: true,
     destinationAccount: recipient,
     destinationAsset: leg.destinationAssetId,
@@ -1356,7 +1310,7 @@ function returnPayoutSettlementEvidence(leg, { configured, money, context }) {
 export async function reconcileLiveReturn({ adapters, config, cycleRepository, context }) {
   if (typeof cycleRepository?.readStageAttempt === 'function') {
     const zeroEvidence = await cycleRepository.readStageAttempt(context.cycleId, 'return');
-    if (zeroEvidence?.schema === 'hookemon.return-zero-proceeds-evidence.v1') {
+    if (zeroEvidence?.schema === 'hookemon.return-zero-proceeds-evidence.v2') {
       const configured = assertReturnConfiguration(config);
       const money = assertReturnMoneyConfiguration(config, configured);
       if (!isZeroProceedsReturnEvidence(zeroEvidence, { cycleId: context.cycleId, configured, money })) {
@@ -1449,6 +1403,7 @@ export async function reconcileLiveReturn({ adapters, config, cycleRepository, c
       owner: config?.accounts?.solana,
       mint: leg.sourceAssetId,
       amountAtomic: leg.sourceAmountAtomic,
+      signedTransactionBase64: record.attempt.rawBytes,
     });
   } catch {
     return null;
@@ -1484,7 +1439,8 @@ export async function reconcileLiveReturn({ adapters, config, cycleRepository, c
       client: adapters.robinhood.client,
       pointer,
       leg,
-      sourceFinality: record.finalityEvidence.finalizedAtSource,
+      sourceProof: source,
+      nativePaymentBinding: config.nativePaymentBinding,
     });
   } catch {
     return null;

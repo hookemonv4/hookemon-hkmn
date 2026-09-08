@@ -324,3 +324,24 @@ node --test --test-timeout=120000 packages/runner/test/cycle/money-schemas.test.
   after a crashed writer's SQLite operating-system lease has released: the store reclaims only an
   unchanged fence whose recorded PID is absent. A live PID, an inaccessible PID, or changed fence
   metadata remains contention and requires owner review rather than manual deletion.
+
+## Native held-cost and custody records
+
+New held NFT evidence uses `hookemon.held-position-evidence.v2` with `costMicroUsd` and
+`valueMicroUsd`. Both equal the committed admission's aggregate USD purchase cost; the existing
+conservative per-position attribution remains, including when several cards share a cycle.
+Insured amounts are informational. These position records retain count and USD risk without
+writing USD micro-units into an ETH principal bucket. The native held writer therefore omits the
+optional asset-ledger association. A missing committed USD basis refuses the held write.
+Historical v1 evidence keeps its original fields and digest; it cannot authorize native risk.
+
+Native custody rows use v3 at `4663/native/18`. Their typed gas costs never decrease, their
+verified balance cannot disappear or move backward, and a prior historical row cannot be
+reinterpreted at that key. Stored v2 policy admissions use the dedicated historical decoder;
+new admissions use the strict native v3 validator.
+
+Native policy custody exposes `cycleExposureMicroUsd` for reservation reconciliation. Native
+amounts require fresh exact-amount Relay USD valuation capabilities with upward rounding; missing,
+stale or serialized valuation objects make exposure unvalued and prevent new risk. Gas reserve and
+spent gas remain separate wei fields. Held positions contribute their original USD purchase cost
+and count even when they have no native principal ledger association.

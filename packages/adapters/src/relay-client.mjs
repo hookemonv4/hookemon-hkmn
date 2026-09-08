@@ -562,7 +562,7 @@ function assertRelayIntent(value, label = 'Relay intent') {
     RelayMalformedResponseError,
     `${label} has an invalid shape`,
   );
-  invariant(value.schema === 'hookemon.relay-intent.v1', RelayMalformedResponseError, `${label} schema is invalid`);
+  invariant(value.schema === 'hookemon.relay-intent.v2', RelayMalformedResponseError, `${label} schema is invalid`);
   invariant(typeof value.requestId === 'string' && value.requestId.length > 0, RelayMalformedResponseError, `${label}.requestId is invalid`);
   invariant(typeof value.orderId === 'string' && /^0x[0-9a-fA-F]{64}$/.test(value.orderId), RelayMalformedResponseError, `${label}.orderId is invalid`);
   const route = ROUTES[value.direction];
@@ -576,10 +576,10 @@ function assertRelayIntent(value, label = 'Relay intent') {
   invariant(Number.isInteger(value.originDecimals) && value.originDecimals >= 0, RelayMalformedResponseError, `${label}.originDecimals is invalid`);
   invariant(Number.isInteger(value.destinationDecimals) && value.destinationDecimals >= 0, RelayMalformedResponseError, `${label}.destinationDecimals is invalid`);
   if (route.origin.chainId !== SOLANA_CHAIN_ID) {
-    invariant(addressEquals(value.originAssetId, route.origin.address), RelayMalformedResponseError, `${label}.originAssetId is not the fixed route asset`);
+    invariant(value.originAssetId === 'native' && value.originDecimals === 18, RelayMalformedResponseError, `${label}.originAssetId is not the fixed route asset`);
   }
   if (route.destination.chainId !== SOLANA_CHAIN_ID) {
-    invariant(addressEquals(value.destinationAssetId, route.destination.address), RelayMalformedResponseError, `${label}.destinationAssetId is not the fixed route asset`);
+    invariant(value.destinationAssetId === 'native' && value.destinationDecimals === 18, RelayMalformedResponseError, `${label}.destinationAssetId is not the fixed route asset`);
   }
   assertCanonicalAmount(value.originAmount, `${label}.originAmount`);
   assertCanonicalAmount(value.quotedDestinationAmount, `${label}.quotedDestinationAmount`);
@@ -873,7 +873,7 @@ export function createRelayClient({
     invariant(quoteResult?.requestId, RelayAdapterError, 'a QuoteResult (from quote/quoteOutboundBridge/quoteReturnBridge) is required');
 
     const record = assertRelayIntent({
-      schema: 'hookemon.relay-intent.v1',
+      schema: 'hookemon.relay-intent.v2',
       requestId: quoteResult.requestId,
       orderId: quoteResult.orderId,
       direction: quoteResult.direction,
@@ -881,9 +881,9 @@ export function createRelayClient({
       quoteDigest: relayQuoteDigest(quoteResult),
       originChainId: quoteResult.origin.chainId,
       destinationChainId: quoteResult.destination.chainId,
-      originAssetId: quoteResult.origin.address,
+      originAssetId: quoteResult.origin.chainId === ROBINHOOD_CHAIN_ID ? 'native' : quoteResult.origin.address,
       originDecimals: quoteResult.origin.decimals,
-      destinationAssetId: quoteResult.destination.address,
+      destinationAssetId: quoteResult.destination.chainId === ROBINHOOD_CHAIN_ID ? 'native' : quoteResult.destination.address,
       destinationDecimals: quoteResult.destination.decimals,
       originAmount: quoteResult.origin.amount,
       quotedDestinationAmount: quoteResult.destination.amount,

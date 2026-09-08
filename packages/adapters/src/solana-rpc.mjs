@@ -20,6 +20,7 @@
 // for an injected signerClient to sign; `submitSignedTransaction` only ever broadcasts bytes that
 // signer already produced.
 
+import { createHash } from 'node:crypto';
 import { ComputeBudgetProgram, PublicKey, Transaction, TransactionInstruction, VersionedTransaction } from '@solana/web3.js';
 
 export const SOLANA_MAINNET_RPC_URL = 'https://api.mainnet-beta.solana.com';
@@ -547,12 +548,19 @@ export async function readFinalizedRelayDestinationAttribution(client, {
   return observation;
 }
 
+const relaySourceCapabilities = new WeakMap();
+export function isProcessRpcRelaySourceDebit(value, expected = {}) {
+  const facts = value && relaySourceCapabilities.get(value);
+  return !!facts && Object.entries(expected).every(([key, wanted]) => facts[key] === wanted);
+}
+
 /** Proves one exact finalized source debit before a Relay leg can be settled. */
 export async function readFinalizedRelaySourceDebit(client, {
   signature,
   owner,
   mint,
   amountAtomic,
+  signedTransactionBase64 = null,
 }) {
   invariant(typeof signature === 'string' && signature.length > 0, SolanaAdapterError, 'Relay source signature is required');
   assertPublicKey(owner, 'Relay source owner');
@@ -566,11 +574,29 @@ export async function readFinalizedRelaySourceDebit(client, {
   }]);
   const finality = finalizedRelayTransaction(result, signature, 'Relay source');
   exactRelayTokenDelta(result, signature, { owner, mint, amountAtomic, direction: 'debit' });
-  return Object.freeze({
-    transactionHash: signature,
-    debitedAmountAtomic: amountAtomic,
-    finality,
-  });
+  let signedIdentity = {};
+  if (signedTransactionBase64 !== null) {
+    const signed = Transaction.from(Buffer.from(signedTransactionBase64, 'base64'));
+    invariant(signed.feePayer?.toBase58() === owner && signed.verifySignatures(), SolanaAdapterError, 'Relay source signed identity is invalid');
+    invariant(signedSolanaTransactionSignature(signedTransactionBase64) === signature, SolanaAdapterError, 'Relay source signature differs from persisted bytes');
+    const encoded = await rpc(client, 'getTransaction', [signature, {
+      commitment: 'finalized', maxSupportedTransactionVersion: 0, encoding: 'base64',
+    }]);
+    const encodedFinality = finalizedRelayTransaction(encoded, signature, 'Relay source bytes');
+    invariant(encodedFinality.height === finality.height && encodedFinality.timestampUnixSeconds === finality.timestampUnixSeconds
+      && Array.isArray(encoded.transaction) && encoded.transaction[1] === 'base64'
+      && Buffer.from(encoded.transaction[0], 'base64').equals(Buffer.from(signedTransactionBase64, 'base64')),
+    SolanaAdapterError, 'Relay source finalized bytes differ from persisted transaction');
+    signedIdentity = {
+      signedTransactionDigest: `sha256:${createHash('sha256').update(signedTransactionBase64).digest('hex')}`,
+      instructions: signed.instructions.map(ix => Object.freeze({ programId: ix.programId.toBase58(), data: ix.data.toString('hex'),
+        keys: Object.freeze(ix.keys.map(key => Object.freeze({ pubkey: key.pubkey.toBase58(), isSigner: key.isSigner, isWritable: key.isWritable }))) })),
+    };
+    Object.freeze(signedIdentity.instructions);
+  }
+  const proof = Object.freeze({ transactionHash: signature, owner, mint, debitedAmountAtomic: amountAtomic, finality, ...signedIdentity });
+  if (signedTransactionBase64 !== null) relaySourceCapabilities.set(proof, proof);
+  return proof;
 }
 
 /**

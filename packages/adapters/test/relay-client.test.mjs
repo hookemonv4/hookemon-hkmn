@@ -369,7 +369,7 @@ test('restoreIntent rejects a tampered persisted destination chain before making
   assert.throws(
     () => client.restoreIntent({
       intent: {
-        schema: 'hookemon.relay-intent.v1',
+        schema: 'hookemon.relay-intent.v2',
         requestId: quoteOutboundFixture.requestId,
         orderId: quoteOutboundFixture.protocol.v2.orderId,
         direction: DIRECTIONS.OUTBOUND,

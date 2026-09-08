@@ -40,3 +40,18 @@ test('native proof refuses substituted identity, amount, signed intent and unsuc
     const input = setup(); mutate(input); await assert.rejects(createNativePaymentProof(input));
   }
 });
+
+test('finalized native outbound spends principal once and records gas separately on replay', async () => {
+  const { nativeOutboundCustodyAfterPayment } = await import('../src/app/stages/outbound.mjs');
+  const proof = await createNativePaymentProof(setup());
+  const asset = { chainId: '4663', assetId: 'native', decimals: 18 };
+  const row = { schema: 'hookemon.custody-ledger.v3', ...asset, claimed: '42', bridgeOut: '0',
+    gasReserve: { ...asset, amountAtomic: '100000' }, gasSpent: { ...asset, amountAtomic: '12' } };
+  const spent = nativeOutboundCustodyAfterPayment(row, proof, null);
+  assert.equal(spent.claimed, '42');
+  assert.equal(spent.bridgeOut, '42');
+  assert.equal(spent.gasSpent.amountAtomic, '63012');
+  assert.deepEqual(nativeOutboundCustodyAfterPayment(spent, proof, null), spent);
+  assert.throws(() => nativeOutboundCustodyAfterPayment(row, structuredClone(proof), null));
+  assert.throws(() => nativeOutboundCustodyAfterPayment({ ...row, claimed: '41' }, proof, null));
+});
