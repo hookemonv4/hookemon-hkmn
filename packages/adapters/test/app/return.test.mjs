@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
+import { encodeAbiParameters, encodeEventTopics, parseAbi } from 'viem';
 import { readFileSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -9,9 +11,11 @@ import test from 'node:test';
 import { Keypair, Transaction } from '@solana/web3.js';
 
 import { createRelayClient, RelayIntentAuthenticationError } from '../../src/relay-client.mjs';
+import { readReleaseBoundRelaySourceDebit } from '../../src/native-payment-proof.mjs';
 import { CycleRepository } from '../../src/app/cycle-repository.mjs';
 import { ERC20_TRANSFER_TOPIC } from '../../src/robinhood-rpc.mjs';
-import { TOKEN_PROGRAM_ID, createSolanaRpcClient, signedSolanaTransactionSignature } from '../../src/solana-rpc.mjs';
+import { createSolanaRpcClient, signedSolanaTransactionSignature } from '../../src/solana-rpc.mjs';
+import { producedReturnSigningFixture } from '../native/return-signing-fixture.mjs';
 import { nativeProducedAdmissionFixture } from '../native/admission-fixture.mjs';
 import { createTestProfileMutationAuthority } from '../../../runner/src/cycle/preflight.mjs';
 import {
@@ -24,7 +28,8 @@ import {
 } from '../../src/app/stages/return.mjs';
 
 const EVM_ACCOUNT = '0x000000000000000000000000000000000000dEaD';
-const SOLANA_ACCOUNT = '8PJ6Nrp5eyzBzYCvApEZCGpdw9AreDAnM2Haf4QRGUto';
+const RETURN_OPERATOR = Keypair.fromSeed(Uint8Array.from({ length: 32 }, () => 21));
+const SOLANA_ACCOUNT = RETURN_OPERATOR.publicKey.toBase58();
 const SOLANA_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 const TEST_PREFLIGHT_AUTHORITY = createTestProfileMutationAuthority();
 
@@ -377,7 +382,7 @@ test('reconcileLiveReturn refuses unauthenticated Relay status data before it ca
   assert.equal(statusCalls, 0);
 });
 
-function returnReconciliationRepository({ sourceTransactionHash, relayRequestId, sourceAmountAtomic, destinationAmountAtomic }) {
+function returnReconciliationRepository({ sourceTransactionHash, relayRequestId, sourceAmountAtomic, destinationAmountAtomic, signedBytes }) {
   let record = {
     attempt: {
       schema: 'hookemon.chain-transaction-attempt.v1',
@@ -385,14 +390,14 @@ function returnReconciliationRepository({ sourceTransactionHash, relayRequestId,
       stage: 'return',
       state: 'BROADCAST',
       requestDigest: `sha256:${'d'.repeat(64)}`,
-      rawBytes: 'signed-return-bytes',
+      rawBytes: signedBytes,
       nonce: null,
       blockhash: 'return-blockhash',
       hash: `sha256:${'e'.repeat(64)}`,
     },
   };
   const leg = {
-    schema: 'hookemon.relay-leg.v1',
+    schema: 'hookemon.relay-leg.v2',
     cycleId: 'cycle-return-reconcile',
     direction: 'return',
     relayRequestId,
@@ -404,8 +409,8 @@ function returnReconciliationRepository({ sourceTransactionHash, relayRequestId,
     sourceAmountAtomic,
     destinationChainId: '4663',
     destinationTxHash: null,
-    destinationAssetId: '0x5fc5360d0400a0fd4f2af552add042d716f1d168',
-    destinationDecimals: 6,
+    destinationAssetId: 'native',
+    destinationDecimals: 18,
     destinationAmountAtomic,
     finalizedAtSource: null,
     finalizedAtDestination: null,
@@ -420,16 +425,16 @@ function returnReconciliationRepository({ sourceTransactionHash, relayRequestId,
     get walletReleases() { return structuredClone(walletReleases); },
     get settleCalls() { return settleCalls; },
     async describeCycle() {
-      const canonicalKey = `eip155:4663 eip155:4663/erc20:${leg.destinationAssetId}`;
+      const canonicalKey = '4663\u0000native';
       return {
         relayLegs: new Map([[relayRequestId, structuredClone(leg)]]),
         chainAttempts: new Map([[`return ${record.attempt.requestDigest}`, structuredClone(record)]]),
         returnLegLedgerKeys: new Map([[relayRequestId, canonicalKey]]),
         custodyLedgers: new Map([[canonicalKey, {
-          schema: 'hookemon.custody-ledger.v2',
+          schema: 'hookemon.custody-ledger.v3',
           cycleId: leg.cycleId,
-          chainId: 'eip155:4663',
-          assetId: `eip155:4663/erc20:${leg.destinationAssetId}`,
+          chainId: '4663',
+          assetId: 'native',
           decimals: leg.destinationDecimals,
           claimed: '0', bridgeOut: '0', bridgeIn: '0', packCost: '0', buybackProceeds: '0',
           returnInput: '0', returnReceived: '0', refunds: '0', residual: '0', heldAssets: '0',
@@ -437,12 +442,12 @@ function returnReconciliationRepository({ sourceTransactionHash, relayRequestId,
           verifiedCurrentBalance: {
             schema: 'hookemon.custody-balance-observation.v1',
             account: EVM_ACCOUNT.toLowerCase(),
-            balance: { chainId: 'eip155:4663', assetId: `eip155:4663/erc20:${leg.destinationAssetId}`, decimals: leg.destinationDecimals, amountAtomic: '0' },
+            balance: { chainId: '4663', assetId: 'native', decimals: leg.destinationDecimals, amountAtomic: '0' },
             finality: { height: '1', hash: `0x${'a'.repeat(64)}`, timestampUnixSeconds: '1700000000' },
           },
           expectedCycleAsset: {
-            chainId: 'eip155:4663',
-            assetId: `eip155:4663/erc20:${leg.destinationAssetId}`,
+            chainId: '4663',
+            assetId: 'native',
             decimals: leg.destinationDecimals,
             amountAtomic: leg.destinationAmountAtomic,
           },
@@ -470,11 +475,16 @@ function returnReconciliationRepository({ sourceTransactionHash, relayRequestId,
 }
 
 test('reconcileLiveReturn does not inspect a destination receipt without an authenticated terminal Relay pointer', async () => {
-  const sourceTransactionHash = 'return-source-signature';
+  const operator = Keypair.fromSeed(Uint8Array.from({ length: 32 }, () => 19));
+  const native = await producedReturnSigningFixture({ sender: operator.publicKey.toBase58(), recipient: EVM_ACCOUNT });
+  const signed = Transaction.from(Buffer.from(native.transaction, 'base64'));
+  signed.sign(operator);
+  const signedBytes = signed.serialize().toString('base64');
+  const sourceTransactionHash = signedSolanaTransactionSignature(signedBytes);
   const sourceAmountAtomic = '17';
   const destinationAmountAtomic = '16';
   const cycleRepository = returnReconciliationRepository({
-    sourceTransactionHash,
+    sourceTransactionHash, signedBytes,
     relayRequestId: 'relay-return-unattributed-credit',
     sourceAmountAtomic,
     destinationAmountAtomic,
@@ -483,7 +493,7 @@ test('reconcileLiveReturn does not inspect a destination receipt without an auth
 
   const result = await reconcileLiveReturn({
     adapters: {
-      solana: { client: returnSourceFinalityClient({ owner: SOLANA_ACCOUNT, amountAtomic: sourceAmountAtomic }) },
+      solana: { client: returnSourceFinalityClient({ owner: operator.publicKey.toBase58(), amountAtomic: sourceAmountAtomic, signedBytes, observation: native.observation }) },
       robinhood: {
         client: new Proxy({}, {
           get() {
@@ -493,7 +503,7 @@ test('reconcileLiveReturn does not inspect a destination receipt without an auth
         }),
       },
     },
-    config: { accounts: { evm: EVM_ACCOUNT, solana: SOLANA_ACCOUNT }, relay: { solanaMint: SOLANA_MINT, maxSettlementWindowSeconds: '600' }, moneyConfiguration: moneyConfiguration() },
+    config: { nativePaymentBinding: native.nativePaymentBinding, accounts: { evm: EVM_ACCOUNT, solana: operator.publicKey.toBase58() }, relay: { solanaMint: SOLANA_MINT, maxSettlementWindowSeconds: '600' }, moneyConfiguration: moneyConfiguration() },
     cycleRepository,
     context: {
       cycleId: 'cycle-return-reconcile',
@@ -510,7 +520,7 @@ test('reconcileLiveReturn does not inspect a destination receipt without an auth
     cycleId: 'cycle-return-reconcile',
     reservation: {
       chainId: '792703809',
-      wallet: SOLANA_ACCOUNT,
+      wallet: operator.publicKey.toBase58(),
       stage: 'return',
       fencingToken: '22222222-2222-4222-8222-222222222222',
       leaseAcquiredAtMs: 0,
@@ -520,9 +530,14 @@ test('reconcileLiveReturn does not inspect a destination receipt without an auth
 });
 
 test('reconcileLiveReturn retains the wallet nonce reservation while source finality is unavailable', async () => {
-  const sourceTransactionHash = 'return-source-unfinalized';
+  const operator = Keypair.fromSeed(Uint8Array.from({ length: 32 }, () => 20));
+  const native = await producedReturnSigningFixture({ sender: operator.publicKey.toBase58(), recipient: EVM_ACCOUNT });
+  const signed = Transaction.from(Buffer.from(native.transaction, 'base64')); signed.sign(operator);
+  const signedBytes = signed.serialize().toString('base64');
+  const sourceTransactionHash = signedSolanaTransactionSignature(signedBytes);
+  let sourceReads = 0;
   const cycleRepository = returnReconciliationRepository({
-    sourceTransactionHash,
+    sourceTransactionHash, signedBytes,
     relayRequestId: 'relay-return-unfinalized',
     sourceAmountAtomic: '17',
     destinationAmountAtomic: '16',
@@ -531,14 +546,14 @@ test('reconcileLiveReturn retains the wallet nonce reservation while source fina
   const result = await reconcileLiveReturn({
     adapters: {
       solana: {
-        client: {
-          async request() {
-            throw new Error('source transaction is not finalized');
-          },
-        },
+        client: createSolanaRpcClient({ fetchImpl: async (_url, options) => {
+          assert.equal(JSON.parse(options.body).method, 'getTransaction');
+          sourceReads += 1;
+          throw new Error('source transaction is not finalized');
+        } }),
       },
     },
-    config: { accounts: { evm: EVM_ACCOUNT, solana: SOLANA_ACCOUNT }, relay: { solanaMint: SOLANA_MINT, maxSettlementWindowSeconds: '600' }, moneyConfiguration: moneyConfiguration() },
+    config: { nativePaymentBinding: native.nativePaymentBinding, accounts: { evm: EVM_ACCOUNT, solana: operator.publicKey.toBase58() }, relay: { solanaMint: SOLANA_MINT, maxSettlementWindowSeconds: '600' }, moneyConfiguration: moneyConfiguration() },
     cycleRepository,
     context: {
       cycleId: 'cycle-return-reconcile',
@@ -547,6 +562,7 @@ test('reconcileLiveReturn retains the wallet nonce reservation while source fina
   });
 
   assert.equal(result, null);
+  assert.equal(sourceReads, 1);
   assert.deepEqual(cycleRepository.finalities, []);
   assert.deepEqual(cycleRepository.walletReleases, []);
   assert.equal(cycleRepository.settleCalls, 0);
@@ -575,26 +591,6 @@ function moneyConfiguration() {
   };
 }
 
-function splTransferCheckedPlan({ owner, source, destination, amountAtomic }) {
-  const data = Buffer.alloc(10);
-  data.writeUInt8(12, 0);
-  data.writeBigUInt64LE(BigInt(amountAtomic), 1);
-  data.writeUInt8(6, 9);
-  return {
-    instructions: [{
-      programId: TOKEN_PROGRAM_ID,
-      keys: [
-        { pubkey: source, isSigner: false, isWritable: true },
-        { pubkey: SOLANA_MINT, isSigner: false, isWritable: false },
-        { pubkey: destination, isSigner: false, isWritable: true },
-        { pubkey: owner, isSigner: true, isWritable: false },
-      ],
-      data: data.toString('hex'),
-    }],
-    addressLookupTableAddresses: [],
-  };
-}
-
 function computeBudgetInstruction({ owner, tag, value }) {
   const data = Buffer.alloc(tag === 2 ? 5 : 9);
   data.writeUInt8(tag, 0);
@@ -607,28 +603,8 @@ function computeBudgetInstruction({ owner, tag, value }) {
   };
 }
 
-function priorityFeeReturnPlan({ owner, source, destination, amountAtomic }) {
-  const transfer = splTransferCheckedPlan({ owner, source, destination, amountAtomic });
-  return {
-    instructions: [
-      computeBudgetInstruction({ owner, tag: 2, value: 1_000_000 }),
-      computeBudgetInstruction({ owner, tag: 3, value: '2' }),
-      ...transfer.instructions,
-    ],
-    addressLookupTableAddresses: [],
-  };
-}
-
-// A pre-seeded canonical v2 EVM USDG custody row, matching every return fixture's destination
-// asset. Return's own custody-v2 writer (`recordReturnCustodyExpectation`) reuses an existing v2
-// row exactly as recorded rather than re-observing it, so these signing/recovery-focused fixtures
-// never need a `robinhood` balance-observation adapter at all.
-// Return's own custody-v2 writer (`recordReturnCustodyExpectation`) always obtains a real
-// finalized public/archive/public-recheck observation for a genuinely new leg (never merely
-// because a destination row happens to already be v2); it only ever skips that read when resuming
-// the exact same leg already durably RECORDED. `returnRobinhoodObservationClient` below supplies
-// that real observation once, then these signing/recovery-focused fixtures resume the same leg
-// with an untouchable Robinhood adapter to prove no re-observation happens on resume.
+// A new native return leg obtains one finalized public/archive/public-recheck balance
+// observation. A resumed leg keeps that same durable expectation and cannot re-observe it.
 function returnRobinhoodObservationClient() {
   return {
     client: {
@@ -637,7 +613,7 @@ function returnRobinhoodObservationClient() {
       },
     },
     historicalEvidenceClient: {
-      async readErc20BalanceAtBlock({ blockNumber, blockHash }) {
+      async readNativeBalanceAtBlock({ blockNumber, blockHash }) {
         return { value: 0n, blockNumber, blockHash };
       },
     },
@@ -737,6 +713,8 @@ function returnSolanaClient(blockhash, state = { blockHeight: 10, balance: 10_00
         getLatestBlockhash: { context: { slot: 10 }, value: { blockhash, lastValidBlockHeight: 100 } },
         isBlockhashValid: { context: { slot: 10 }, value: true },
         getBlockHeight: state.blockHeight,
+        getSlot: 11,
+        getMultipleAccounts: state.observation,
       };
       if (!Object.hasOwn(resultByMethod, body.method)) throw new Error(`unexpected Solana RPC ${body.method}`);
       return response({ jsonrpc: '2.0', id: body.id, result: resultByMethod[body.method] });
@@ -744,18 +722,19 @@ function returnSolanaClient(blockhash, state = { blockHeight: 10, balance: 10_00
   });
 }
 
-function returnSourceFinalityClient({ owner, amountAtomic }) {
+function returnSourceFinalityClient({ owner, amountAtomic, signedBytes = null, observation = null }) {
   return createSolanaRpcClient({
     fetchImpl: async (_url, options) => {
       const body = JSON.parse(options.body);
+      if (body.method === 'getMultipleAccounts') return response({ jsonrpc: '2.0', id: body.id, result: observation });
       assert.equal(body.method, 'getTransaction');
       return response({
         jsonrpc: '2.0',
         id: body.id,
         result: {
-          slot: 52,
+          slot: 10,
           blockTime: 1_700_000_080,
-          transaction: {
+          transaction: body.params[1].encoding === 'base64' ? [signedBytes, 'base64'] : {
             message: {
               accountKeys: [{ pubkey: owner, signer: false, writable: true }],
               instructions: [],
@@ -792,15 +771,19 @@ function returnReconciliationConfig() {
 
 function returnDestinationReceiptClient({
   transactionHash,
-  observedToken = '0x5fc5360d0400a0fd4f2af552add042d716f1d168',
+  observedToken = '0x0000000000000000000000000000000000000000',
   observedRecipient = EVM_ACCOUNT,
-  observedAmountAtomic = '16',
+  observedAmountAtomic = '42',
   timestampUnixSeconds = '1700000100',
   finalized = true,
 } = {}) {
+  transactionHash = transactionHash.toLowerCase();
   const receiptBlockHash = `0x${'a'.repeat(64)}`;
   const finalizedBlockHash = `0x${'b'.repeat(64)}`;
+  const orderId = nativeQuoteFixture.protocol.v2.orderId;
   return {
+    async getChainId() { return 4663; },
+    async getCode() { return '0x6000'; },
     async getTransactionReceipt({ hash }) {
       assert.equal(hash, transactionHash);
       return {
@@ -809,10 +792,11 @@ function returnDestinationReceiptClient({
         blockHash: receiptBlockHash,
         status: 'success',
         logs: [{
-          address: observedToken,
-          topics: [ERC20_TRANSFER_TOPIC, addressTopic(`0x${'1'.repeat(40)}`), addressTopic(observedRecipient)],
-          data: `0x${BigInt(observedAmountAtomic).toString(16).padStart(64, '0')}`,
-          logIndex: 0n,
+          address: '0x1111111111111111111111111111111111111111',
+          transactionHash, blockHash: receiptBlockHash, blockNumber: 100n,
+          topics: encodeEventTopics({ abi: parseAbi(['event FundsMovement(address from, address to, address currency, uint256 amount, bytes metadata)']), eventName: 'FundsMovement' }),
+          data: encodeAbiParameters([{ type: 'address' }, { type: 'address' }, { type: 'address' }, { type: 'uint256' }, { type: 'bytes' }], ['0x1111111111111111111111111111111111111111', observedRecipient, observedToken, BigInt(observedAmountAtomic), orderId]),
+          logIndex: 0,
         }],
       };
     },
@@ -833,34 +817,24 @@ function returnDestinationReceiptClient({
 }
 
 test('return destination proof rejects a case-altered Solana source signature while accepting a canonicalized EVM destination hash', async () => {
-  const sourceTxHash = 'A'.repeat(88);
+  const native = await producedReturnSigningFixture({ sender: SOLANA_ACCOUNT, recipient: EVM_ACCOUNT });
+  const signed = Transaction.from(Buffer.from(native.transaction, 'base64')); signed.sign(RETURN_OPERATOR);
+  const signedBytes = signed.serialize().toString('base64');
+  const sourceTxHash = signedSolanaTransactionSignature(signedBytes);
+  const sourceProof = await readReleaseBoundRelaySourceDebit({ client: returnSourceFinalityClient({ owner: SOLANA_ACCOUNT, amountAtomic: '17', signedBytes, observation: native.observation }),
+    binding: native.nativePaymentBinding, signature: sourceTxHash, owner: SOLANA_ACCOUNT, mint: SOLANA_MINT, amountAtomic: '17', signedTransactionBase64: signedBytes });
   const destinationTxHash = `0x${'C'.repeat(64)}`;
   const proof = await readReturnLegDestinationProof({
     client: returnDestinationReceiptClient({ transactionHash: destinationTxHash }),
-    pointer: {
-      schema: 'hookemon.relay-terminal-destination-pointer.v1',
-      relayRequestId: 'relay-return-byte-exact-source',
-      status: 'SUCCESS',
-      destinationTxHash,
-    },
-    leg: {
-      relayRequestId: 'relay-return-byte-exact-source',
-      sourceTxHash,
-    },
-    sourceFinality: {
-      height: '52',
-      hash: 'solana-finality-hash',
-      timestampUnixSeconds: '1700000080',
-    },
+    pointer: { schema: 'hookemon.relay-terminal-destination-pointer.v1', relayRequestId: native.request.intent.requestId, status: 'SUCCESS', destinationTxHash },
+    leg: { schema: 'hookemon.relay-leg.v2', relayRequestId: native.request.intent.requestId, sourceTxHash,
+      sourceAssetId: SOLANA_MINT, sourceAmountAtomic: '17', destinationAssetId: 'native', destinationDecimals: 18,
+      returnAttribution: { intent: native.request.intent } },
+    sourceProof, nativePaymentBinding: native.nativePaymentBinding,
   });
-
-  assert.equal(isProcessRpcReturnLegDestinationProof(proof, {
-    sourceTxHash,
-    destinationTxHash: destinationTxHash.toLowerCase(),
-  }), true);
-  assert.equal(isProcessRpcReturnLegDestinationProof(proof, {
-    sourceTxHash: sourceTxHash.toLowerCase(),
-  }), false);
+  assert.notEqual(sourceTxHash.toLowerCase(), sourceTxHash);
+  assert.equal(isProcessRpcReturnLegDestinationProof(proof, { sourceTxHash, destinationTxHash: destinationTxHash.toLowerCase() }), true);
+  assert.equal(isProcessRpcReturnLegDestinationProof(proof, { sourceTxHash: sourceTxHash.toLowerCase() }), false);
 });
 
 function terminalReturnPointerClient({ intent, destinationTxHash }) {
@@ -886,23 +860,20 @@ async function seededReturnReconciliation(t, {
   lease,
 } = {}) {
   const directory = await tempDirectory(t);
-  const cycleRepository = await CycleRepository.open(directory);
-  const { cycleId } = await cycleRepository.createCycle({ releaseAmount: '1', mode: 'production' });
-  const relayRequestId = `relay-return-${cycleId}`;
-  const intent = {
-    ...returnIntent(),
-    requestId: relayRequestId,
-    originAmount: '17',
-    quotedDestinationAmount: '16',
-    quotedDestinationMinimumAmount: '16',
-    deadlineUnixSeconds: 1800000000,
-  };
+  const nowMs = lease?.acquiredAt ?? 1700000000000;
+  const cycleRepository = await CycleRepository.open(directory, () => nowMs, { testAuthority: TEST_PREFLIGHT_AUTHORITY });
+  const cycleId = randomUUID();
+  const admission = await nativeProducedAdmissionFixture(cycleId, { nowMs });
+  await cycleRepository.createCycle({ cycleId, releaseAmount: '42', mode: 'production', admission });
+  const native = await producedReturnSigningFixture({ cycleId, nowMs, sender: SOLANA_ACCOUNT, recipient: EVM_ACCOUNT });
+  const { intent } = native.request;
+  const relayRequestId = intent.requestId;
   const recorded = await cycleRepository.recordReturnRelayLegExpectation(cycleId, {
-    schema: 'hookemon.relay-leg.v1',
+    schema: 'hookemon.relay-leg.v2',
     cycleId,
     direction: 'return',
     relayRequestId,
-    quoteDigest: `sha256:${'9'.repeat(64)}`,
+    quoteDigest: intent.quoteDigest,
     sourceChainId: '792703809',
     sourceTxHash: null,
     sourceAssetId: SOLANA_MINT,
@@ -910,25 +881,28 @@ async function seededReturnReconciliation(t, {
     sourceAmountAtomic: '17',
     destinationChainId: '4663',
     destinationTxHash: null,
-    destinationAssetId: '0x5fc5360d0400a0fd4f2af552add042d716f1d168',
-    destinationDecimals: 6,
-    destinationAmountAtomic: '16',
+    destinationAssetId: 'native',
+    destinationDecimals: 18,
+    destinationAmountAtomic: '42',
     finalizedAtSource: null,
     finalizedAtDestination: null,
     netDeltaAtomic: null,
     state: 'RECORDED',
     returnAttribution: {
-      schema: 'hookemon.return-leg-attribution-context.v1',
+      schema: 'hookemon.return-leg-attribution-context.v2',
+      destinationUsd: native.request.destinationUsd, destinationUsdEvidence: native.request.destinationUsdEvidence,
       intent,
       requestCreatedAtUnixSeconds,
       maxSettlementWindowSeconds,
     },
   }, {
-    schema: 'hookemon.custody-ledger.v2',
+    schema: 'hookemon.custody-ledger.v3',
     cycleId,
-    chainId: 'eip155:4663',
-    assetId: 'eip155:4663/erc20:0x5fc5360d0400a0fd4f2af552add042d716f1d168',
-    decimals: 6,
+    chainId: '4663',
+    assetId: 'native',
+    decimals: 18,
+    gasReserve: { chainId: '4663', assetId: 'native', decimals: 18, amountAtomic: '0' },
+    gasSpent: { chainId: '4663', assetId: 'native', decimals: 18, amountAtomic: '0' }, gasPayments: [],
     claimed: '0', bridgeOut: '0', bridgeIn: '0', packCost: '0', buybackProceeds: '0',
     returnInput: '0', returnReceived: '0', refunds: '0', residual: '0', heldAssets: '0',
     heldPositions: '0', payoutLiability: '0', dust: '0', unattributed: '0',
@@ -936,21 +910,23 @@ async function seededReturnReconciliation(t, {
       schema: 'hookemon.custody-balance-observation.v1',
       account: EVM_ACCOUNT.toLowerCase(),
       balance: {
-        chainId: 'eip155:4663',
-        assetId: 'eip155:4663/erc20:0x5fc5360d0400a0fd4f2af552add042d716f1d168',
-        decimals: 6,
+        chainId: '4663',
+        assetId: 'native',
+        decimals: 18,
         amountAtomic: '0',
       },
       finality: { height: '1', hash: `0x${'a'.repeat(64)}`, timestampUnixSeconds: '1700000000' },
     },
     expectedCycleAsset: {
-      chainId: 'eip155:4663',
-      assetId: 'eip155:4663/erc20:0x5fc5360d0400a0fd4f2af552add042d716f1d168',
-      decimals: 6,
-      amountAtomic: '16',
+      chainId: '4663',
+      assetId: 'native',
+      decimals: 18,
+      amountAtomic: '42',
     },
-  });
-  const sourceTxHash = `return-source-${cycleId}`;
+  }, { destinationUsd: native.request.destinationUsd });
+  const signed = Transaction.from(Buffer.from(native.transaction, 'base64')); signed.sign(RETURN_OPERATOR);
+  const signedBytes = signed.serialize().toString('base64');
+  const sourceTxHash = signedSolanaTransactionSignature(signedBytes);
   const leg = await cycleRepository.recordRelayLegSource(cycleId, recorded.relayRequestId, sourceTxHash);
   const requestDigest = `sha256:${'7'.repeat(64)}`;
   await cycleRepository.prepareChainTransactionAttempt(cycleId, 'return', {
@@ -965,9 +941,9 @@ async function seededReturnReconciliation(t, {
     hash: null,
   });
   await cycleRepository.recordSignedTransaction(cycleId, 'return', requestDigest, {
-    rawBytes: 'return-signed-bytes',
+    rawBytes: signedBytes,
     nonce: null,
-    blockhash: 'return-blockhash',
+    blockhash: '11111111111111111111111111111111',
     hash: `sha256:${'6'.repeat(64)}`,
   });
   await cycleRepository.recordBroadcast(cycleId, 'return', requestDigest, { transactionHash: sourceTxHash });
@@ -984,18 +960,18 @@ async function seededReturnReconciliation(t, {
     leaseAcquiredAtMs: lease?.acquiredAt ?? 0,
     leaseExpiresAtMs: lease?.expiresAt ?? Number.MAX_SAFE_INTEGER,
   });
-  return { directory, cycleRepository, cycleId, context, intent, leg, requestDigest };
+  return { native, signedBytes, directory, cycleRepository, cycleId, context, intent, leg, requestDigest };
 }
 
 async function reconcileSeededReturn(fixture, receipt) {
   const destinationTxHash = receipt.transactionHash;
   return reconcileLiveReturn({
     adapters: {
-      solana: { client: returnSourceFinalityClient({ owner: SOLANA_ACCOUNT, amountAtomic: fixture.leg.sourceAmountAtomic }) },
+      solana: { client: returnSourceFinalityClient({ owner: SOLANA_ACCOUNT, amountAtomic: fixture.leg.sourceAmountAtomic, signedBytes: fixture.signedBytes, observation: fixture.native.observation }) },
       relay: terminalReturnPointerClient({ intent: fixture.intent, destinationTxHash }),
       robinhood: { client: receipt.client },
     },
-    config: returnReconciliationConfig(),
+    config: { ...returnReconciliationConfig(), nativePaymentBinding: fixture.native.nativePaymentBinding },
     cycleRepository: fixture.cycleRepository,
     context: fixture.context,
   });
@@ -1009,14 +985,14 @@ test('reconcileLiveReturn settles an exact terminal Relay pointer through a fina
     client: returnDestinationReceiptClient({ transactionHash }),
   });
 
-  assert.equal(result.schema, 'hookemon.return-relay-settlement-evidence.v1');
+  assert.equal(result.schema, 'hookemon.return-relay-settlement-evidence.v2');
   assert.equal(result.relayLeg.state, 'SETTLED');
   const reopened = await CycleRepository.open(fixture.directory);
   const state = await reopened.describeCycle(fixture.cycleId);
   assert.equal(state.terminalState, null);
   assert.equal(state.relayLegs.get(fixture.leg.relayRequestId).state, 'SETTLED');
-  const canonicalRow = state.custodyLedgers.get('eip155:4663 eip155:4663/erc20:0x5fc5360d0400a0fd4f2af552add042d716f1d168');
-  assert.equal(canonicalRow.returnReceived, '16');
+  const canonicalRow = state.custodyLedgers.get('4663\u0000native');
+  assert.equal(canonicalRow.returnReceived, '42');
   assert.equal(canonicalRow.expectedCycleAsset, null);
   assert.equal((await reopened.readChainTransactionAttempt(fixture.cycleId, 'return', fixture.requestDigest)).attempt.state, 'FINALIZED');
 });
@@ -1049,7 +1025,7 @@ test('reconcileLiveReturn holds a late return receipt as HELD_RELAY_LATE after r
   assert.equal((await reopened.describeCycle(fixture.cycleId)).terminalState, 'HELD_RELAY_LATE');
 });
 
-test('reconcileLiveReturn holds a wrong-token or wrong-recipient return receipt as HELD_RELAY_WRONG_ASSET after reopen', async t => {
+test('reconcileLiveReturn refuses a wrong-token or wrong-recipient native payment before settlement after reopen', async t => {
   for (const [index, receiptFields] of [
     { observedToken: `0x${'1'.repeat(40)}` },
     { observedRecipient: `0x${'2'.repeat(40)}` },
@@ -1063,29 +1039,34 @@ test('reconcileLiveReturn holds a wrong-token or wrong-recipient return receipt 
     assert.equal(result, null);
 
     const reopened = await CycleRepository.open(fixture.directory);
-    assert.equal((await reopened.describeCycle(fixture.cycleId)).terminalState, 'HELD_RELAY_WRONG_ASSET');
+    const state = await reopened.describeCycle(fixture.cycleId);
+    assert.equal(state.terminalState, null);
+    assert.equal(state.relayLegs.get(fixture.leg.relayRequestId).state, 'RECORDED');
+    assert.equal(state.custodyLedgers.get('4663\u0000native').returnReceived, '0');
   }
 });
 
 test('reconcileLiveReturn leaves an unfinalized return source without payout custody after reopen', async t => {
   const fixture = await seededReturnReconciliation(t);
   let pointerCalls = 0;
+  let sourceCalls = 0;
   const result = await reconcileLiveReturn({
     adapters: {
-      solana: { client: { async request() { throw new Error('source finality is unavailable'); } } },
+      solana: { client: createSolanaRpcClient({ fetchImpl: async () => { sourceCalls += 1; throw new Error('source finality is unavailable'); } }) },
       relay: {
         restoreIntent() { pointerCalls += 1; },
         async getTerminalDestinationTransactionPointer() { pointerCalls += 1; return null; },
       },
       robinhood: { client: new Proxy({}, { get() { throw new Error('destination receipt must not be read'); } }) },
     },
-    config: returnReconciliationConfig(),
+    config: { ...returnReconciliationConfig(), nativePaymentBinding: fixture.native.nativePaymentBinding },
     cycleRepository: fixture.cycleRepository,
     context: fixture.context,
   });
 
   assert.equal(result, null);
   assert.equal(pointerCalls, 0);
+  assert.equal(sourceCalls, 1);
   const reopened = await CycleRepository.open(fixture.directory);
   const state = await reopened.describeCycle(fixture.cycleId);
   assert.equal(state.terminalState, null);
@@ -1112,41 +1093,24 @@ test('reconcileLiveReturn leaves a Relay pointer unsettled until the process-RPC
 
 test('mutateReturn preserves the configured lamport reserve after the maximum priority fee', async () => {
   const operator = Keypair.fromSeed(Uint8Array.from({ length: 32 }, (_unused, index) => index + 11));
-  const source = Keypair.fromSeed(Uint8Array.from({ length: 32 }, (_unused, index) => index + 43));
-  const destination = Keypair.fromSeed(Uint8Array.from({ length: 32 }, (_unused, index) => index + 75));
   const blockhash = '11111111111111111111111111111111';
   const cycleId = 'cycle-return-reserve-after-fee';
   const cycleRepository = returnChainRepository({ operator: operator.publicKey.toBase58() });
-  const request = {
-    schema: 'hookemon.return-relay-request.v1',
-    cycleId,
-    inputAmount: { chainId: '792703809', assetId: SOLANA_MINT, decimals: 6, amountAtomic: '17' },
-    destinationAmount: { chainId: '4663', assetId: '0x5fc5360d0400a0fd4f2af552add042d716f1d168', decimals: 6, amountAtomic: '16' },
-    requestCreatedAtUnixSeconds: '1700000000',
-    maxSettlementWindowSeconds: '600',
-    intent: {
-      ...returnIntent(),
-      requestId: 'relay-return-reserve-after-fee',
-      sender: operator.publicKey.toBase58(),
-      originAmount: '17',
-      quotedDestinationAmount: '16',
-      quotedDestinationMinimumAmount: '16',
-      deadlineUnixSeconds: 2_000_000_000,
-    },
-    solanaInstructionPlan: priorityFeeReturnPlan({
-      owner: operator.publicKey.toBase58(),
-      source: source.publicKey.toBase58(),
-      destination: destination.publicKey.toBase58(),
-      amountAtomic: '17',
-    }),
-  };
+  const native = await producedReturnSigningFixture({ sender: operator.publicKey.toBase58(), recipient: EVM_ACCOUNT, blockhash });
+  native.request.solanaInstructionPlan.instructions.unshift(
+    { ...computeBudgetInstruction({ tag: 2, value: 1_000_000 }), keys: [] },
+    { ...computeBudgetInstruction({ tag: 3, value: '2' }), keys: [] },
+  );
+  const request = { ...native.request, schema: 'hookemon.return-relay-request.v2', cycleId: 'cycle-return-reserve-after-fee',
+    destinationAmount: { chainId: '4663', assetId: 'native', decimals: 18, amountAtomic: '42' },
+    requestCreatedAtUnixSeconds: '1700000000', maxSettlementWindowSeconds: '600' };
   let signCalls = 0;
 
   await assert.rejects(
     () => mutateReturn({
       liveMode: true,
       adapters: {
-        solana: { client: returnSolanaClient(blockhash, { blockHeight: 10, balance: 1_001 }) },
+        solana: { client: returnSolanaClient(blockhash, { blockHeight: 10, balance: 1_001, observation: native.observation }) },
         robinhood: returnRobinhoodObservationClient(),
       },
       signerClient: { solana: { async sign() { signCalls += 1; throw new Error('signer must not be reached'); }, async broadcast() {} } },
@@ -1155,6 +1119,7 @@ test('mutateReturn preserves the configured lamport reserve after the maximum pr
         accounts: { evm: EVM_ACCOUNT, solana: operator.publicKey.toBase58() },
         relay: { solanaMint: SOLANA_MINT, maxSettlementWindowSeconds: '600' },
         moneyConfiguration: moneyConfiguration(),
+        nativePaymentBinding: native.nativePaymentBinding,
         ...nativeSolanaSettlementFields(),
       },
       cycleRepository,
@@ -1175,34 +1140,13 @@ test('mutateReturn preserves the configured lamport reserve after the maximum pr
 
 test('mutateReturn records a Relay leg before signing, resumes signed bytes, and leaves a broadcast attempt untouched on restart', async () => {
   const operator = Keypair.fromSeed(Uint8Array.from({ length: 32 }, (_unused, index) => index + 11));
-  const source = Keypair.fromSeed(Uint8Array.from({ length: 32 }, (_unused, index) => index + 43));
-  const destination = Keypair.fromSeed(Uint8Array.from({ length: 32 }, (_unused, index) => index + 75));
   const blockhash = '11111111111111111111111111111111';
   const rpcState = { blockHeight: 10 };
   const cycleRepository = returnChainRepository({ operator: operator.publicKey.toBase58() });
-  const request = {
-    schema: 'hookemon.return-relay-request.v1',
-    cycleId: 'cycle-return-durable',
-    inputAmount: { chainId: '792703809', assetId: SOLANA_MINT, decimals: 6, amountAtomic: '17' },
-    destinationAmount: { chainId: '4663', assetId: '0x5fc5360d0400a0fd4f2af552add042d716f1d168', decimals: 6, amountAtomic: '16' },
-    requestCreatedAtUnixSeconds: '1700000000',
-    maxSettlementWindowSeconds: '600',
-    intent: {
-      ...returnIntent(),
-      requestId: 'relay-return-durable',
-      sender: operator.publicKey.toBase58(),
-      originAmount: '17',
-      quotedDestinationAmount: '16',
-      quotedDestinationMinimumAmount: '16',
-      deadlineUnixSeconds: 2_000_000_000,
-    },
-    solanaInstructionPlan: splTransferCheckedPlan({
-      owner: operator.publicKey.toBase58(),
-      source: source.publicKey.toBase58(),
-      destination: destination.publicKey.toBase58(),
-      amountAtomic: '17',
-    }),
-  };
+  const native = await producedReturnSigningFixture({ sender: operator.publicKey.toBase58(), recipient: EVM_ACCOUNT, blockhash });
+  const request = { ...native.request, schema: 'hookemon.return-relay-request.v2', cycleId: 'cycle-return-durable',
+    destinationAmount: { chainId: '4663', assetId: 'native', decimals: 18, amountAtomic: '42' },
+    requestCreatedAtUnixSeconds: '1700000000', maxSettlementWindowSeconds: '600' };
   const context = {
     cycleId: request.cycleId,
     stage: 'return',
@@ -1214,6 +1158,7 @@ test('mutateReturn records a Relay leg before signing, resumes signed bytes, and
     accounts: { evm: EVM_ACCOUNT, solana: operator.publicKey.toBase58() },
     relay: { solanaMint: SOLANA_MINT, maxSettlementWindowSeconds: '600' },
     moneyConfiguration: moneyConfiguration(),
+        nativePaymentBinding: native.nativePaymentBinding,
     ...nativeSolanaSettlementFields(),
   };
   let signCalls = 0;
@@ -1243,7 +1188,7 @@ test('mutateReturn records a Relay leg before signing, resumes signed bytes, and
     },
   };
   const adapters = {
-    solana: { client: returnSolanaClient(blockhash, rpcState) },
+    solana: { client: returnSolanaClient(blockhash, Object.assign(rpcState, { observation: native.observation })) },
     robinhood: returnRobinhoodObservationClient(),
   };
 
@@ -1296,7 +1241,7 @@ test('mutateReturn records a Relay leg before signing, resumes signed bytes, and
   assert.equal(broadcastCalls, 2);
 
   const reconciliation = await reconcileLiveReturn({
-    adapters: { solana: { client: returnSourceFinalityClient({ owner: operator.publicKey.toBase58(), amountAtomic: '17' }) } },
+    adapters: { solana: { client: returnSourceFinalityClient({ owner: operator.publicKey.toBase58(), amountAtomic: '17', signedBytes: persistedBytes, observation: native.observation }) } },
     config,
     cycleRepository,
     context,
