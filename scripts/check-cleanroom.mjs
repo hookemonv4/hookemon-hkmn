@@ -56,6 +56,17 @@ const REGEX_RULES = [
   },
 ];
 
+// Review-bound exact bytes only. Manifest edits require a new checker/control review.
+const NATIVE_RECOGNITION_SHA256 = 'e140a71d61108629cbeaaf9fbd273d7e6b190b2cef1361051909d1431495eb7f';
+const nativeRecognitionBytes = readFileSync(new URL('./native-cleanroom-recognition.json', import.meta.url));
+if (hash('sha256', nativeRecognitionBytes) !== NATIVE_RECOGNITION_SHA256) {
+  throw new Error('native clean-room recognition manifest integrity mismatch');
+}
+const nativeRecognition = JSON.parse(nativeRecognitionBytes);
+if (nativeRecognition.schema !== 'hookemon.cleanroom-recognition.v1' || nativeRecognition.requirementsRevision !== 71) {
+  throw new Error('native clean-room recognition manifest revision mismatch');
+}
+
 const boundaryCharacter = /[\s/?#.,;:'"`\)\]}]/;
 const DIGEST_CACHE_LIMIT = 100_000;
 const DYNAMIC_RECONSTRUCTION_RULE = 'dynamic-protected-reconstruction';
@@ -303,6 +314,19 @@ function scanText(text, digestRules, file = null) {
   return findings.sort((a, b) => a.offset - b.offset || a.rule.localeCompare(b.rule));
 }
 
+/** No caller-provided recognition table: authority is the reviewed module manifest. */
+export function scanFileContent(text, file, digestRules = DEFAULT_DIGEST_RULES) {
+  const findings = scanText(text, digestRules, file);
+  const entry = Object.hasOwn(nativeRecognition.files, file) ? nativeRecognition.files[file] : null;
+  if (!entry || sha256Text(text) !== entry.sha256) return findings;
+  return findings.filter(finding => !entry.matches.some(recognition => {
+    if (!['historical-architecture', 'historical-repository', 'private-email'].includes(recognition.rule)
+      || recognition.rule !== finding.rule || recognition.offset !== finding.offset) return false;
+    return sha256Text(text.slice(finding.offset, finding.offset + recognition.length).toLowerCase()) === recognition.sha256
+      && sha256Text(text.slice(recognition.tokenStart, recognition.tokenStart + recognition.tokenLength)) === recognition.tokenSha256;
+  }));
+}
+
 function isPreviousChainArtifactPath(file) {
   return file.length === PREVIOUS_CHAIN_ARTIFACT_PATH_LENGTH
     && sha256Text(file) === PREVIOUS_CHAIN_ARTIFACT_PATH_DIGEST;
@@ -367,7 +391,7 @@ export function scanTree(rootPath, options = {}) {
     for (const match of scanText(entry.file, digestRules)) findings.push({ file: entry.file, ...match });
     // The provider's required address-validation enum is permitted only as a JSON value
     // in the direct Phase 3 package files; all other marker contexts remain rejected.
-    for (const match of scanText(text, digestRules, entry.file)) {
+    for (const match of scanFileContent(text, entry.file, digestRules)) {
       if (historicalEvidence && match.rule === 'historical-architecture') continue;
       findings.push({ file: entry.file, ...match });
     }

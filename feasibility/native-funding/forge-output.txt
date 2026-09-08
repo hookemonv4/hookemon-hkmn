@@ -1,19 +1,20 @@
+# Public redacted view; original hash and exact substitutions: public-view-transformations.json
 Missing dependencies found. Installing now...
 
-fatal: destination path '/Users/kerim/Documents/ChatGPT/gacha/.worktrees/launch-repair/.worktrees/eth-funding-20260908/packages/contracts/lib/liquidity-launcher' already exists and is not an empty directory.
-fatal: clone of 'https://github.com/Uniswap/liquidity-launcher.git' into submodule path '/Users/kerim/Documents/ChatGPT/gacha/.worktrees/launch-repair/.worktrees/eth-funding-20260908/packages/contracts/lib/liquidity-launcher' failed
+fatal: destination path '<local-home>/Documents/ChatGPT/gacha/.worktrees/launch-repair/.worktrees/eth-funding-20260908/packages/contracts/lib/liquidity-launcher' already exists and is not an empty directory.
+fatal: clone of 'https://github.com/Uniswap/liquidity-launcher.git' into submodule path '<local-home>/Documents/ChatGPT/gacha/.worktrees/launch-repair/.worktrees/eth-funding-20260908/packages/contracts/lib/liquidity-launcher' failed
 Failed to clone 'packages/contracts/lib/liquidity-launcher'. Retry scheduled
-fatal: destination path '/Users/kerim/Documents/ChatGPT/gacha/.worktrees/launch-repair/.worktrees/eth-funding-20260908/packages/contracts/lib/uerc20-factory' already exists and is not an empty directory.
-fatal: clone of 'https://github.com/Uniswap/uerc20-factory.git' into submodule path '/Users/kerim/Documents/ChatGPT/gacha/.worktrees/launch-repair/.worktrees/eth-funding-20260908/packages/contracts/lib/uerc20-factory' failed
+fatal: destination path '<local-home>/Documents/ChatGPT/gacha/.worktrees/launch-repair/.worktrees/eth-funding-20260908/packages/contracts/lib/uerc20-factory' already exists and is not an empty directory.
+fatal: clone of 'https://github.com/Uniswap/uerc20-factory.git' into submodule path '<local-home>/Documents/ChatGPT/gacha/.worktrees/launch-repair/.worktrees/eth-funding-20260908/packages/contracts/lib/uerc20-factory' failed
 Failed to clone 'packages/contracts/lib/uerc20-factory'. Retry scheduled
-fatal: destination path '/Users/kerim/Documents/ChatGPT/gacha/.worktrees/launch-repair/.worktrees/eth-funding-20260908/packages/contracts/lib/v4-core' already exists and is not an empty directory.
-fatal: clone of 'https://github.com/Uniswap/v4-core.git' into submodule path '/Users/kerim/Documents/ChatGPT/gacha/.worktrees/launch-repair/.worktrees/eth-funding-20260908/packages/contracts/lib/v4-core' failed
+fatal: destination path '<local-home>/Documents/ChatGPT/gacha/.worktrees/launch-repair/.worktrees/eth-funding-20260908/packages/contracts/lib/v4-core' already exists and is not an empty directory.
+fatal: clone of 'https://github.com/Uniswap/v4-core.git' into submodule path '<local-home>/Documents/ChatGPT/gacha/.worktrees/launch-repair/.worktrees/eth-funding-20260908/packages/contracts/lib/v4-core' failed
 Failed to clone 'packages/contracts/lib/v4-core'. Retry scheduled
-fatal: destination path '/Users/kerim/Documents/ChatGPT/gacha/.worktrees/launch-repair/.worktrees/eth-funding-20260908/packages/contracts/lib/v4-periphery' already exists and is not an empty directory.
-fatal: clone of 'https://github.com/Uniswap/v4-periphery.git' into submodule path '/Users/kerim/Documents/ChatGPT/gacha/.worktrees/launch-repair/.worktrees/eth-funding-20260908/packages/contracts/lib/v4-periphery' failed
+fatal: destination path '<local-home>/Documents/ChatGPT/gacha/.worktrees/launch-repair/.worktrees/eth-funding-20260908/packages/contracts/lib/v4-periphery' already exists and is not an empty directory.
+fatal: clone of 'https://github.com/Uniswap/v4-periphery.git' into submodule path '<local-home>/Documents/ChatGPT/gacha/.worktrees/launch-repair/.worktrees/eth-funding-20260908/packages/contracts/lib/v4-periphery' failed
 Failed to clone 'packages/contracts/lib/v4-periphery'. Retry scheduled
-fatal: destination path '/Users/kerim/Documents/ChatGPT/gacha/.worktrees/launch-repair/.worktrees/eth-funding-20260908/packages/contracts/lib/liquidity-launcher' already exists and is not an empty directory.
-fatal: clone of 'https://github.com/Uniswap/liquidity-launcher.git' into submodule path '/Users/kerim/Documents/ChatGPT/gacha/.worktrees/launch-repair/.worktrees/eth-funding-20260908/packages/contracts/lib/liquidity-launcher' failed
+fatal: destination path '<local-home>/Documents/ChatGPT/gacha/.worktrees/launch-repair/.worktrees/eth-funding-20260908/packages/contracts/lib/liquidity-launcher' already exists and is not an empty directory.
+fatal: clone of 'https://github.com/Uniswap/liquidity-launcher.git' into submodule path '<local-home>/Documents/ChatGPT/gacha/.worktrees/launch-repair/.worktrees/eth-funding-20260908/packages/contracts/lib/liquidity-launcher' failed
 Failed to clone 'packages/contracts/lib/liquidity-launcher' a second time, aborting
 Warning: Your project has missing dependencies that could not be installed.
 Compiling 148 files with Solc 0.8.26
@@ -86,4 +87,4 @@ Logs:
 Suite result: ok. 3 passed; 0 failed; 0 skipped; finished in 81.22ms (158.58ms CPU time)
 
 Ran 1 test suite in 86.92ms (81.22ms CPU time): 3 tests passed, 0 failed, 0 skipped (3 total tests)
-2026-09-08T10:19:03.146490Z  WARN evm::traces: failed to flush signature cache err=failed to create file "/Users/kerim/.foundry/cache/signatures": Operation not permitted (os error 1)
+2026-09-08T10:19:03.146490Z  WARN evm::traces: failed to flush signature cache err=failed to create file "<local-home>/.foundry/cache/signatures": Operation not permitted (os error 1)

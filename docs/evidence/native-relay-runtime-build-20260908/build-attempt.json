@@ -8,8 +8,13 @@
   ],
   "exitCode": 1,
   "stdout": "",
-  "stderr": "Cannot connect to the Docker daemon at unix:///Users/kerim/.docker/run/docker.sock. Is the docker daemon running?\n",
+  "stderr": "Cannot connect to the Docker daemon at unix://<local-home>/.docker/run/docker.sock. Is the docker daemon running?\n",
   "compiled": false,
   "localExecutableHash": null,
-  "runtimeMatch": null
+  "runtimeMatch": null,
+  "publicView": {
+    "schema": "hookemon.redacted-evidence-view.v1",
+    "originalRawSha256": "0c180f5bf854f29adb3a262b564c0f4c39d50a014bdd514a0e05bf9f59246f26",
+    "transformation": "Replace only local home path prefixes with <local-home>; execution facts otherwise unchanged."
+  }
 }

@@ -1,0 +1,27 @@
+# Native clean-room failure audit
+
+The retained CI log reports 640 findings in 63 files. A single targeted scan of those files at base `26f757b761e8d9ea349d21f24d47c863952619ed` reproduces all 640 findings, including the per-file/rule multiplicities. No full-tree scan or test suite was repeated. This audit changes no checker, evidence bytes, runtime code, release input or control pin.
+
+| Classification | Findings | Meaning |
+| --- | ---: | --- |
+| Public upstream chain-name references | 446 | Provider schemas, discovery, capabilities and retained public source use their real wire names and descriptions. The OpenAPI alone contains 385. These are not evidence of a reverted project chain choice. |
+| Authorized Collector settlement symbol | 108 | Native conversion leaves the Solana settlement currency unchanged. Provider response strings, exact fixtures and authored descriptions contain that currency symbol. |
+| Accidental identifier substring matches | 24 | Case-insensitive matching joins a USD suffix to the first letter of Cost, Controls or Ceil. These are current valuation identifiers, not a token choice. |
+| Approved native pair name | 22 | The detector's retired-name digest also matches the newly authorized native pool label in revision 71, its retained proposals, release builder and module cards. |
+| Local paths plus personal-name duplication | 32 | Sixteen home-path occurrences each trigger two rules. These genuinely expose local workspace identity and need a redacted public representation. |
+| Public upstream contact addresses | 7 | Five source author credits and two verifier author/security contacts. They are public upstream text, not project owner identity. Preserve their provenance. |
+| Synthetic test address | 1 | The web accounting test uses the owner role on a reserved example domain. It is not evidence of an actual owner email, but still violates the checker. |
+
+`findings.json` records exact file, line, offset, rule and matching hashes without reproducing private values or protected spellings. `token-classes.json` distinguishes the three detector digests and exact enclosing identifier hashes. `sources.json` pins the CI log, checker, base and all 63 examined files. The inventory describes the recorded CI failure, not files introduced after this base.
+
+The smallest truthful remediation is split by ownership and provenance:
+
+1. Replace the synthetic email fixture with a non-address sentinel such as `private-contact-sentinel` while retaining the assertion that private identity never enters the public bootstrap. No detector exemption is needed.
+2. Remove machine-specific Docker endpoints from the authored build script: use the current public environment/context or an explicit command argument rather than a saved account path. Publish deterministically redacted views of the build-attempt record, build-command record and funding output. Preserve original raw hashes and every nonprivate byte, label the transformation and distinguish original hashes from public-view hashes. Do not claim edited logs are raw observations. If retaining originals locally, keep them outside committed/public evidence; any evidence index referring to bytes must be updated by its owner.
+3. For accidental source identifiers, narrowly rename to semantic names such as `collectorOnlyPackCostMicroUsd`, `initialCapitalScenarioCostRoundedUpMicroUsd`, `policyControlsUsd` and `exactOutputSettlementAtoms`, with their owned consumers and tests. These are proposed authored-name remedies, not permission to change captured provider fields. Alternatively a reviewed exact full-identifier digest exception can preserve the frozen interface. Avoid string concatenation or encoding as detector evasion.
+4. For current approved economic terms, the coordinator can define revision-bound exact token/context recognition, or update authored prose to the explicit settlement-currency/native-pool description. The native pair and settlement asset must remain economically identical. Frozen owner revisions and their historical patches cannot be silently rewritten merely to satisfy a substring ban.
+5. Retain exact public provider responses, schemas and verified source. A narrowly reviewed exception may bind the exact repository path, complete content hash, specific detector rule and expected token offsets/hashes, with official URL/revision provenance. Unknown bytes, new paths, added contacts and unrelated rules must still fail. The existing checker already demonstrates content-addressed historical evidence and exact identifier recognition; extending that pattern requires a deliberate control change, not a blanket evidence-directory, token or email exemption.
+
+Specific privacy repairs are limited to `apps/web/tests/native-accounting.test.mjs:10`, the runtime-build `build-candidate.py:5`, `build-attempt.json:11`, `candidate-build.json:5,7,13`, and funding `forge-output.txt:3,4,6,7,9,10,12,13,15,16,89`. Public contacts are in the retained Multicall source at lines 23–27, verifier README at line 72 and verifier Rust source at line 114. Exact raw values are deliberately absent here.
+
+After changes, test new accepted cases and one-character/path/content mutations against the checker. Retain rejection of real personal paths, unapproved email addresses and genuinely retired identifiers. Then update the coordinator-owned checker/workflow dependency closure and let the required CI perform the one full-tree verification. This report does not grant an override, waive a rule or claim a clean tree.

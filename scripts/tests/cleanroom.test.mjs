@@ -618,3 +618,39 @@ test('identity gate checks commit identity from base-defined workflow code', () 
   assert.match(gatesWorkflow, /Remove this step only after the owner registers identity-gate and control-gate as required statuses on main\./);
   assert.match(gatesWorkflow, /append_only_options=\(--require-ancestor\)/);
 });
+
+test('native recognition binds exact reviewed file bytes, path, rule and token', async () => {
+  const { scanFileContent } = await import('../check-cleanroom.mjs');
+  const manifest = JSON.parse(readFileSync(join(repoRoot, 'scripts/native-cleanroom-recognition.json'), 'utf8'));
+  const selected = [
+    'architecture/interfaces.json',
+    'docs/evidence/native-provider-20260908/verified-Multicall3.sol.txt',
+    'packages/adapters/src/app/compose.mjs',
+  ];
+  for (const file of selected) {
+    const text = readFileSync(join(repoRoot, file), 'utf8');
+    assert.equal(scanFileContent(text, file).length, 0, file);
+    assert.ok(scanFileContent(text, `unknown/${file}`).length > 0, 'a copied path is not recognized');
+    assert.ok(scanFileContent(`${text}\n`, file).length > 0, 'unknown content invalidates all recognition');
+    const match = manifest.files[file].matches[0];
+    const changed = text.slice(0, match.offset) + '_' + text.slice(match.offset + 1);
+    assert.ok(scanFileContent(changed, file).length > 0, 'one changed marker cannot preserve other recognition');
+    const privatePath = ['/ho', 'me/private-fixture/file'].join('');
+    assert.ok(scanFileContent(`${text}\n${privatePath}`, file).some(row => row.rule === 'local-home-path'));
+  }
+});
+
+test('native recognition manifest tampering fails before scanning', () => {
+  const root = fixture();
+  try {
+    mkdirSync(join(root, 'scripts'));
+    writeFileSync(join(root, 'scripts/check-cleanroom.mjs'), readFileSync(scanner));
+    const bytes = readFileSync(join(repoRoot, 'scripts/native-cleanroom-recognition.json'));
+    writeFileSync(join(root, 'scripts/native-cleanroom-recognition.json'), Buffer.concat([bytes, Buffer.from('\n')]));
+    const result = spawnSync(process.execPath, [join(root, 'scripts/check-cleanroom.mjs'), root], { encoding: 'utf8' });
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /manifest integrity mismatch/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

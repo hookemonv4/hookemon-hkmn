@@ -2,15 +2,15 @@
   "command": [
     "docker",
     "--config",
-    "/Users/kerim/Documents/ChatGPT/gacha/.worktrees/launch-repair/.worktrees/eth-relay-runtime-build-20260908/.session/relay-runtime/docker-public",
+    "<local-home>/Documents/ChatGPT/gacha/.worktrees/launch-repair/.worktrees/eth-relay-runtime-build-20260908/.session/relay-runtime/docker-public",
     "--host",
-    "unix:///Users/kerim/.docker/run/docker.sock",
+    "unix://<local-home>/.docker/run/docker.sock",
     "run",
     "--rm",
     "--platform",
     "linux/amd64",
     "-v",
-    "/Users/kerim/Documents/ChatGPT/gacha/.worktrees/launch-repair/.worktrees/eth-relay-runtime-build-20260908/.session/relay-runtime/relay-depository-458a64c310a3504aaf37e112af9a8707c9eb11ad/packages/solana-vm:/build",
+    "<local-home>/Documents/ChatGPT/gacha/.worktrees/launch-repair/.worktrees/eth-relay-runtime-build-20260908/.session/relay-runtime/relay-depository-458a64c310a3504aaf37e112af9a8707c9eb11ad/packages/solana-vm:/build",
     "-w",
     "/build/programs/relay-depository",
     "solanafoundation/solana-verifiable-build@sha256:ec2e20e1f80607150a71e4c72adfe64be24347ed0b4fb741c32b34eaf7549a25",
@@ -20,5 +20,10 @@
   ],
   "exitCode": 0,
   "elapsedSeconds": 113.498,
-  "compiled": true
+  "compiled": true,
+  "publicView": {
+    "schema": "hookemon.redacted-evidence-view.v1",
+    "originalRawSha256": "8d69786d2efd5a2aab4d3341d9e44dd19326523e3ec5559b07d8343f6a665751",
+    "transformation": "Replace only local home path prefixes with <local-home>; execution facts otherwise unchanged."
+  }
 }

@@ -1,0 +1,51 @@
+{
+  "schema": "hookemon.public-evidence-transformations.v1",
+  "sourceRevision": "a5a747aa",
+  "entries": [
+    {
+      "path": "build-attempt.json",
+      "originalRawSha256": "0c180f5bf854f29adb3a262b564c0f4c39d50a014bdd514a0e05bf9f59246f26",
+      "publicViewSha256": "7e8175fa7afc62a4c61aacf493d42b0d81e26fc31d3b264b2463291a0da802e8",
+      "redactions": [
+        {
+          "offset": 281,
+          "length": 12,
+          "sha256": "6145ccb162d243031746793fbf507230ee62aa8a6be07570030e4581da5ea745"
+        }
+      ],
+      "replacement": "<local-home>",
+      "nonprivatePayloadPreserved": true
+    },
+    {
+      "path": "candidate-build.json",
+      "originalRawSha256": "8d69786d2efd5a2aab4d3341d9e44dd19326523e3ec5559b07d8343f6a665751",
+      "publicViewSha256": "9a5bc57f07f336e18e67c8d67fc5c1ea4abf4140ffed0a639479415ec32d53d8",
+      "redactions": [
+        {
+          "offset": 52,
+          "length": 12,
+          "sha256": "6145ccb162d243031746793fbf507230ee62aa8a6be07570030e4581da5ea745"
+        },
+        {
+          "offset": 223,
+          "length": 12,
+          "sha256": "6145ccb162d243031746793fbf507230ee62aa8a6be07570030e4581da5ea745"
+        },
+        {
+          "offset": 337,
+          "length": 12,
+          "sha256": "6145ccb162d243031746793fbf507230ee62aa8a6be07570030e4581da5ea745"
+        }
+      ],
+      "replacement": "<local-home>",
+      "nonprivatePayloadPreserved": true
+    },
+    {
+      "path": "build-candidate.py",
+      "originalSourceSha256": "b48f8fdfe927328cb03ef9db32d1569c4031a8dcb5ab5c733e6d1f57842dd96d",
+      "publicSourceSha256": "7d90369d225ac45b7146d1815e6507fba0f0d41ce49f706a39bd04aa1f8087fe",
+      "transformation": "Authored reproducibility script now uses explicit DOCKER_HOST when supplied, otherwise current Docker context; not a raw execution record."
+    }
+  ],
+  "rawRetention": "Original bytes remain in the stated Git revision. These committed files are labeled public views; hashes of originals do not describe the views."
+}

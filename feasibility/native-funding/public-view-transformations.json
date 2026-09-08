@@ -1,0 +1,71 @@
+{
+  "schema": "hookemon.public-evidence-transformations.v1",
+  "sourceRevision": "a5a747aa",
+  "entries": [
+    {
+      "path": "forge-output.txt",
+      "originalRawSha256": "86fe4e33612180cd631cbbfa2b4333a9283cb7feaa139ed984e7663f1ea43f4a",
+      "publicViewSha256": "46119ddbc93f560e2168457d072920dd94f2438a78fe4d5c8d3354c58c0e7e85",
+      "redactions": [
+        {
+          "offset": 72,
+          "length": 12,
+          "sha256": "6145ccb162d243031746793fbf507230ee62aa8a6be07570030e4581da5ea745"
+        },
+        {
+          "offset": 344,
+          "length": 12,
+          "sha256": "6145ccb162d243031746793fbf507230ee62aa8a6be07570030e4581da5ea745"
+        },
+        {
+          "offset": 590,
+          "length": 12,
+          "sha256": "6145ccb162d243031746793fbf507230ee62aa8a6be07570030e4581da5ea745"
+        },
+        {
+          "offset": 854,
+          "length": 12,
+          "sha256": "6145ccb162d243031746793fbf507230ee62aa8a6be07570030e4581da5ea745"
+        },
+        {
+          "offset": 1092,
+          "length": 12,
+          "sha256": "6145ccb162d243031746793fbf507230ee62aa8a6be07570030e4581da5ea745"
+        },
+        {
+          "offset": 1342,
+          "length": 12,
+          "sha256": "6145ccb162d243031746793fbf507230ee62aa8a6be07570030e4581da5ea745"
+        },
+        {
+          "offset": 1566,
+          "length": 12,
+          "sha256": "6145ccb162d243031746793fbf507230ee62aa8a6be07570030e4581da5ea745"
+        },
+        {
+          "offset": 1826,
+          "length": 12,
+          "sha256": "6145ccb162d243031746793fbf507230ee62aa8a6be07570030e4581da5ea745"
+        },
+        {
+          "offset": 2060,
+          "length": 12,
+          "sha256": "6145ccb162d243031746793fbf507230ee62aa8a6be07570030e4581da5ea745"
+        },
+        {
+          "offset": 2332,
+          "length": 12,
+          "sha256": "6145ccb162d243031746793fbf507230ee62aa8a6be07570030e4581da5ea745"
+        },
+        {
+          "offset": 5167,
+          "length": 12,
+          "sha256": "6145ccb162d243031746793fbf507230ee62aa8a6be07570030e4581da5ea745"
+        }
+      ],
+      "replacement": "<local-home>",
+      "nonprivatePayloadPreserved": true
+    }
+  ],
+  "rawRetention": "Original bytes remain in the stated Git revision. These committed files are labeled public views; hashes of originals do not describe the views."
+}

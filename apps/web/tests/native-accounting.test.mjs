@@ -7,7 +7,7 @@ import { assertNativeAmount, formatNativeAmount } from '../lib/native-accounting
 
 const now = '2026-09-08T12:00:00.000Z';
 test('native bootstrap and decision contract use USD controls and reject executable USDG', () => {
-  const bootstrap = buildBootstrap({ authorityStatus: {}, identity: { subject: 'owner', email: 'owner@example.com', role: 'operator' } });
+  const bootstrap = buildBootstrap({ authorityStatus: {}, identity: { subject: 'owner', email: 'private-contact-sentinel', role: 'operator' } });
   assertBootstrap(bootstrap);
   assert.equal(bootstrap.hardCaps.maxUnitPriceMicroUsd, '55000000');
   assert.deepEqual(bootstrap.state.allowedPackIds, []);
