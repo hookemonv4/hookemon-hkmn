@@ -2841,7 +2841,7 @@ async function ensureDirectPayoutState({ cycleRepository, context, request, adap
     const observedNativeRaw = await admissionClient.getBalance({ address: config.accounts.evm });
     const observedNative = typeof observedNativeRaw === 'bigint' ? observedNativeRaw : BigInt(observedNativeRaw);
     const gasAdmission = evaluateDirectPayoutNativeGasAdmission({
-      requiredNativeAmount: requiredNativeAmount(preparedPlan.plan).toString(),
+      requiredNativeAmount: (requiredNativeAmount(preparedPlan.plan) + BigInt(preparedPlan.plan.distributablePool.amountAtomic)).toString(),
       observedNativeBalance: observedNative.toString(),
     });
     if (gasAdmission.outcome !== DIRECT_PAYOUT_ADMISSION_OUTCOME.OK) {

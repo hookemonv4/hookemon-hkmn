@@ -16,7 +16,7 @@ Distribute finalized native ETH returned to Operations among the frozen pre-clai
 
 Holder weights, exclusions, floor rounding, residual dust, and bounded in-flight windows remain frozen. Native payment sends exact value to each recipient with empty calldata. Successful finalized signed-transaction inclusion proves payment, including to forwarding contracts; token logs or recipient balance deltas cannot prove native payment.
 
-The first signature requires current native balance covering the distributable principal, frozen maximum payout fees, and gas reserve. Each signature uses exact transaction policy, Operations identity, approved bytes, nonce fencing, and fee bounds. Nonce interference and reverted transactions preserve unsent liability.
+Admission requires current native balance covering the distributable principal, frozen maximum payout fees, and gas reserve before consuming dust or persisting recipient state. The first signature rechecks the same combined requirement. Each signature uses exact transaction policy, Operations identity, approved bytes, nonce fencing, and fee bounds. Nonce interference and reverted transactions preserve unsent liability.
 
 Native custody keeps principal separate from `gasReserve`, `gasSpent`, and an append-only `gasPayments` transaction list. A freshly authenticated finalized transaction records gas before terminal recipient state. Replaying its hash preserves the total, including after a crash between those writes. A gas-only reverted-transaction capability cannot authorize a paid principal.
 
