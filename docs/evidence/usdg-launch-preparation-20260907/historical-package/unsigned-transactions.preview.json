@@ -1,0 +1,105 @@
+{
+  "signable": false,
+  "transactions": [
+    {
+      "id": "launch-graph",
+      "chainId": 4663,
+      "from": "0xfc82B0da6d487B97d7eA1AA0d51E00AfF4F3a729",
+      "to": null,
+      "call": "Provider launch and stamp: deploy token/custody/hook; allocate(hook); configureBindingHook(hook); initializeGraphLaunch(custody,sqrtPriceX96)",
+      "valueWei": "0",
+      "data": null,
+      "nonce": null,
+      "gasLimit": null,
+      "maxFeePerGas": null,
+      "status": "SEMANTIC_PREVIEW_ONLY",
+      "missing": [
+        "Current ready context",
+        "USDG route",
+        "Source identity convention",
+        "Derived salts/constructors/runtimes",
+        "Provider admission and exact wallet transaction"
+      ]
+    },
+    {
+      "id": "approve-usdg-permit2",
+      "chainId": 4663,
+      "from": "0xfc82B0da6d487B97d7eA1AA0d51E00AfF4F3a729",
+      "to": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
+      "call": "approve(0x000000000022D473030F116dDEE9F6B43aC78BA3, exact selected seed atomic amount)",
+      "valueWei": "0",
+      "data": null,
+      "nonce": null,
+      "gasLimit": null,
+      "maxFeePerGas": null,
+      "status": "SEMANTIC_PREVIEW_ONLY",
+      "missing": [
+        "Selected seed amount",
+        "Current allowance readback"
+      ]
+    },
+    {
+      "id": "approve-permit2-hook",
+      "chainId": 4663,
+      "from": "0xfc82B0da6d487B97d7eA1AA0d51E00AfF4F3a729",
+      "to": "0x000000000022D473030F116dDEE9F6B43aC78BA3",
+      "call": "approve(USDG, resolved hook, exact selected seed atomic amount, fresh expiration)",
+      "valueWei": "0",
+      "data": null,
+      "nonce": null,
+      "gasLimit": null,
+      "maxFeePerGas": null,
+      "status": "SEMANTIC_PREVIEW_ONLY",
+      "missing": [
+        "Resolved hook",
+        "Selected seed",
+        "Fresh expiration"
+      ]
+    },
+    {
+      "id": "seed-canonical-liquidity",
+      "chainId": 4663,
+      "from": "0xfc82B0da6d487B97d7eA1AA0d51E00AfF4F3a729",
+      "to": null,
+      "call": "seedCanonicalLiquidity((-887220,887220,selected liquidity,amount0Max,amount1Max,fresh deadline,launch wallet,resolved custody))",
+      "valueWei": "0",
+      "data": null,
+      "nonce": null,
+      "gasLimit": null,
+      "maxFeePerGas": null,
+      "status": "SEMANTIC_PREVIEW_ONLY",
+      "missing": [
+        "Resolved hook/custody",
+        "Selected seed and currency ordering",
+        "Liquidity calculation",
+        "Fresh deadline within recorded 900-second ceiling"
+      ]
+    }
+  ],
+  "embeddedInitializers": [
+    {
+      "target": "token",
+      "signature": "allocate(address)",
+      "arguments": [
+        "resolved hook"
+      ]
+    },
+    {
+      "target": "custody",
+      "signature": "configureBindingHook(address)",
+      "arguments": [
+        "resolved hook"
+      ]
+    },
+    {
+      "target": "hook",
+      "signature": "initializeGraphLaunch(address,uint160)",
+      "arguments": [
+        "resolved custody",
+        "selected sqrtPriceX96"
+      ]
+    }
+  ],
+  "subsequentCycle": "Acquisition/funding, trading, process claim, bridge, Collector, return and holder payout depend on quotes and bot/Collector acceptance owned by the original task. No executable previews exist for those unresolved steps.",
+  "approvalPolicy": "Exact seed allowance. No unlimited approval. Any unexpected existing allowance must be reconciled before final wallet review."
+}

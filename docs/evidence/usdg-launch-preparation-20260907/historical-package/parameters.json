@@ -1,0 +1,232 @@
+{
+  "status": "PREPARATION_INCOMPLETE_NOT_SIGNABLE",
+  "sourceCommit": "9b5161749dbbf50a92c4b17e96e3f2102deb9898",
+  "inspectedMain": "e5ffd4a4d5297ad8a5d8b8e6abe10b5cf9e9260f",
+  "sourceParity": "git diff found no changes in packages/contracts/src, release/phase3 or owner inputs between sourceCommit and inspectedMain",
+  "chain": {
+    "chainId": 4663,
+    "caip2": "eip155:4663",
+    "activeProviderContext": {
+      "readiness": {
+        "status": "ready",
+        "reasonCodes": []
+      },
+      "sourceFile": "evidence/provider-capabilities-resume.json",
+      "runtimeRelease": {
+        "schemaVersion": "programmable.multi-role-runtime-release-instance.v2",
+        "sourceCommit": "19e07aa548a6365a51fa2cf4275b8cab8505aa53",
+        "sourceTree": "8fe3383c95bfeff2687d427530fa1ba7dba7a495"
+      },
+      "chainBindings": {
+        "chainId": "4663",
+        "graphFactory": "0x0B6b3F40f84Df25D3bd69238f937096177DD09Bd",
+        "graphFactoryRuntimeCodeHash": "0xd23692fae59331592048e71a96d4963e170ee56e449683dc9f7fa3f9470018b8",
+        "permitAuthority": "0xeD617CE7f82e2AB589aDeFFD319D1D872Bc8De06",
+        "permitAuthorityRuntimeCodeHash": "0xd7d408ebcd99b2b70be43e20253d6d92a8ea8fab29bd3be7f55b10032331fb4c",
+        "poolManager": "0x8366a39CC670B4001A1121B8F6A443A643e40951",
+        "poolManagerRuntimeCodeHash": "0xbd3881180b547f5fe817545743cfb4343e96b1bc6640dcd70c106b0066e95626",
+        "router": "0x9Fd629Cd1EB47fb20813c2403153714B523f681E",
+        "routerProtocol": "programmable.multi-role-launch-stamp-router.v2",
+        "routerRuntimeCodeHash": "0x25ef1342d79010b4ce10f6ce6ad321206d92165cd6ee280295357ce68d28e491"
+      }
+    }
+  },
+  "roles": {
+    "launchWallet": "0xfc82B0da6d487B97d7eA1AA0d51E00AfF4F3a729",
+    "treasury": "0xfc82B0da6d487B97d7eA1AA0d51E00AfF4F3a729",
+    "operations": "0xB54AAF746eb1e80AFDb5eb0992a75b08DB2E4384",
+    "programmablePlatform": "0x4957f49620AFf3Adbbe8195a4f633E49cc93376c",
+    "poolManager": "0x8366a39CC670B4001A1121B8F6A443A643e40951",
+    "positionManager": "0x58daec3116aae6D93017bAAea7749052E8a04fA7",
+    "permit2": "0x000000000022D473030F116dDEE9F6B43aC78BA3",
+    "usdg": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
+    "launchAuthority": "0xfc82B0da6d487B97d7eA1AA0d51E00AfF4F3a729",
+    "issuanceAuthority": "0x0B6b3F40f84Df25D3bd69238f937096177DD09Bd"
+  },
+  "token": {
+    "name": "Hookemon",
+    "symbol": "HKMN",
+    "decimals": 18,
+    "totalSupply": {
+      "chainId": "4663",
+      "assetId": "hkmn",
+      "decimals": 18,
+      "amountAtomic": "1000000000000000000000000000"
+    },
+    "allocation": {
+      "canonicalPoolBps": 10000,
+      "remainderCustodyBps": 0,
+      "canonicalPool": {
+        "chainId": "4663",
+        "assetId": "hkmn",
+        "decimals": 18,
+        "amountAtomic": "1000000000000000000000000000"
+      },
+      "remainderCustody": {
+        "chainId": "4663",
+        "assetId": "hkmn",
+        "decimals": 18,
+        "amountAtomic": "0"
+      }
+    },
+    "sourceCompatibility": {
+      "status": "VERIFIED",
+      "compiledSupplyAtomic": "1000000000000000000000000000",
+      "reason": "The pinned launch compiler profile confirms the Requirements revision 65 supply baseline: the owner's 2026-09-05 decision allocates the complete supply to the canonical market with zero other allocations. The DRAFT_UNSIGNED baseline records current subject hashes and is not transaction authorization."
+    }
+  },
+  "pool": {
+    "model": "Seeded full-range Uniswap v4 USDG/HKMN pool; no separate issuance/redemption bonding curve",
+    "fee": 0,
+    "tickSpacing": 60,
+    "ticks": [
+      -887220,
+      887220
+    ],
+    "hookFeeBps": {
+      "total": 300,
+      "process": 250,
+      "treasury": 40,
+      "programmable": 10
+    },
+    "feeBasis": "Gross executed USDG side with carried fractional remainders",
+    "priceCandidatesHistorical": {
+      "usdgCurrency0": {
+        "sqrtPriceX96": "161723809515207654588927258648643645224",
+        "liquidity": "489897948556635619",
+        "amount0Max": "240000000",
+        "amount1Max": "1000000000000000000000000000",
+        "consumedHkmn": "1000000000000000000000000000",
+        "swapFeeQuadrants": {
+          "zeroForOneExactInput": {
+            "currency": "currency0",
+            "basis": "gross-input",
+            "collectionPath": "before-swap-return-delta"
+          },
+          "zeroForOneExactOutput": {
+            "currency": "currency0",
+            "basis": "gross-input",
+            "collectionPath": "after-swap-return-delta"
+          },
+          "oneForZeroExactInput": {
+            "currency": "currency0",
+            "basis": "gross-output",
+            "collectionPath": "after-swap-return-delta"
+          },
+          "oneForZeroExactOutput": {
+            "currency": "currency0",
+            "basis": "gross-output",
+            "collectionPath": "before-swap-return-delta"
+          }
+        },
+        "sqrtLowerX96": "4306310044",
+        "sqrtUpperX96": "1457652066949847389969617340386294118487833376468",
+        "consumedAmount0": "240000000",
+        "consumedAmount1": "1000000000000000000000000000"
+      },
+      "hkmnCurrency0": {
+        "sqrtPriceX96": "38813714284914462669",
+        "liquidity": "489897948572597439",
+        "amount0Max": "1000000000000000000000000000",
+        "amount1Max": "240000000",
+        "consumedHkmn": "1000000000000000000000000000",
+        "swapFeeQuadrants": {
+          "zeroForOneExactInput": {
+            "currency": "currency1",
+            "basis": "gross-output",
+            "collectionPath": "after-swap-return-delta"
+          },
+          "zeroForOneExactOutput": {
+            "currency": "currency1",
+            "basis": "gross-output",
+            "collectionPath": "before-swap-return-delta"
+          },
+          "oneForZeroExactInput": {
+            "currency": "currency1",
+            "basis": "gross-input",
+            "collectionPath": "before-swap-return-delta"
+          },
+          "oneForZeroExactOutput": {
+            "currency": "currency1",
+            "basis": "gross-input",
+            "collectionPath": "after-swap-return-delta"
+          }
+        },
+        "sqrtLowerX96": "4306310044",
+        "sqrtUpperX96": "1457652066949847389969617340386294118487833376468",
+        "consumedAmount0": "1000000000000000000000000000",
+        "consumedAmount1": "240000000"
+      },
+      "selection": {
+        "status": "OPEN_FACT",
+        "rule": "Compare the resolved HKMN CREATE2 address with the fixed USDG address. The lower address is currency0.",
+        "selectedOrdering": null,
+        "selectedSqrtPriceX96": null,
+        "poolKey": null,
+        "poolId": null
+      }
+    },
+    "selectedPoolKey": null,
+    "selectedPoolId": null
+  },
+  "capital": {
+    "ceilingUsd": 250,
+    "spendAuthorized": false,
+    "selectedSeedUsdgAtomic": null,
+    "historicalReleaseSeedUsdgAtomic": "240000000",
+    "localCandidate": {
+      "seedUsdgAtomic": "100000000",
+      "traderUsdgAtomic": "50000000",
+      "approvedReplacement": false
+    },
+    "usdgUsdPrice": null
+  },
+  "ownerDecisionRequired": {
+    "processClaimMaxCount": {
+      "candidate": 24,
+      "reason": "Recorded as coordinator suggestion and owner did not object; no affirmative approval evidenced."
+    },
+    "seed": "Confirm intended seed only after full acquisition and fee budget is available"
+  },
+  "claimCaps": {
+    "sixHoursUsdgAtomic": "50000000000",
+    "immutableMaxUsdgAtomic": "500000000000",
+    "operationsRotationDelaySeconds": 43200
+  },
+  "targets": [
+    {
+      "id": "token",
+      "roles": [
+        "token"
+      ],
+      "address": null,
+      "salt": null,
+      "initializerCalldata": null,
+      "expectedRuntimeCodeHash": null
+    },
+    {
+      "id": "custody",
+      "roles": [],
+      "address": null,
+      "salt": null,
+      "initializerCalldata": null,
+      "expectedRuntimeCodeHash": null
+    },
+    {
+      "id": "hook",
+      "roles": [
+        "hook"
+      ],
+      "address": null,
+      "salt": null,
+      "initializerCalldata": null,
+      "expectedRuntimeCodeHash": null
+    }
+  ],
+  "permit": {
+    "nonce": null,
+    "validAfter": null,
+    "deadline": null
+  },
+  "historicalAuthorityWarning": "roles.issuanceAuthority and provider addresses are recorded inputs, not a current admitted V2 context; rebind through official context when available"
+}

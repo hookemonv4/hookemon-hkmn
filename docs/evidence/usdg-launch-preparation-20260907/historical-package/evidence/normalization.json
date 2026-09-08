@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "sourceCommit": "3895d77e4344347de57472dd426641701cc33115",
+  "scope": "Review derivatives only; not exact provider downloads or executable request inputs.",
+  "originals": "Original bytes remain in the source commit at the same paths and in the local backup. Original hashes below allow independent verification.",
+  "operations": [
+    "Provider labels are replaced with explicit redaction markers; no schema admission is inferred from redacted fields.",
+    "CI URL is omitted; run and job identities remain unchanged.",
+    "Image bytes remain unchanged in the existing PNG; the base64 wire envelope is replaced by an explicit reference descriptor.",
+    "Candidate image URL is unset pending restoration and review; the candidate remains non-executable.",
+    "One public dependency source digest is redacted because the secret scanner treats its field name and value as a credential. The exact original digest remains in the original snapshot bound above."
+  ],
+  "files": [
+    {
+      "path": "evidence/provider-capabilities-resume.json",
+      "originalSha256": "47c3b3da35376eb1a84af003a092526390f6e7c15de4d3ee86117b6e2bbd17ca",
+      "originalByteLength": 20058
+    },
+    {
+      "path": "evidence/provider-guide.md",
+      "originalSha256": "6296b66b41b46f555885082409bb314db5044c4b6a9a65fa49ec0e77c24b60e9",
+      "originalByteLength": 34993
+    },
+    {
+      "path": "evidence/ci-bytecode-evidence.json",
+      "originalSha256": "f648bdb64c2bdb3cf05f635ad8cc2fa71ac627c1bacd1cbf9d898757f8b60c8e",
+      "originalByteLength": 3206
+    },
+    {
+      "path": "projectMetadata.candidate.json",
+      "originalSha256": "9c8f56137eff4e5436771dd80f434ada5930c82c6777f0d40b3eaf24d9ba88eb",
+      "originalByteLength": 1186
+    },
+    {
+      "path": "projectMetadataImageArtifact.candidate.json",
+      "originalSha256": "8e7d8302ac44b4afd0ce5e0866c724491e3c9fd486b8f89215f5e4bdcf1fd068",
+      "originalByteLength": 230307
+    }
+  ]
+}
