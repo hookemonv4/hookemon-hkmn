@@ -756,21 +756,46 @@ function relayInstruction(value, index) {
   });
 }
 
-/**
- * Builds a legacy unsigned transaction from one frozen Relay instruction plan. A plan carrying an
- * address lookup table is a v0 layout, so this function deliberately refuses instead of guessing
- * which lookup accounts the provider intended.
- */
+/** Compile complete unsigned Relay instructions with inline addresses; never rewrite signed messages. */
 export function buildRelayLegacyTransaction({ feePayer, recentBlockhash, instructionPlan }) {
   invariant(instructionPlan && typeof instructionPlan === 'object' && !Array.isArray(instructionPlan), SolanaAdapterError, 'Relay instruction plan is required');
-  invariant(Array.isArray(instructionPlan.instructions) && instructionPlan.instructions.length > 0, SolanaAdapterError, 'Relay instruction plan requires instructions');
+  invariant(Array.isArray(instructionPlan.instructions) && instructionPlan.instructions.length > 0 && instructionPlan.instructions.length <= 16, SolanaAdapterError, 'Relay instruction plan requires bounded instructions');
   invariant(Array.isArray(instructionPlan.addressLookupTableAddresses), SolanaAdapterError, 'Relay instruction plan requires address lookup table addresses');
-  invariant(instructionPlan.addressLookupTableAddresses.length === 0, SolanaAdapterError, 'Relay instruction plan has address lookup tables and cannot be reconstructed as a legacy transaction');
-  return buildUnsignedTransaction({
-    feePayer,
-    recentBlockhash,
-    instructions: instructionPlan.instructions.map(relayInstruction),
+  invariant(instructionPlan.addressLookupTableAddresses.length <= 16, SolanaAdapterError, 'Relay lookup table metadata exceeds bound');
+  // Metadata remains on the original plan. No table is fetched, inferred, mutated or used to
+  // fill absent accounts; every instruction must independently carry its full public keys.
+  for (const table of instructionPlan.addressLookupTableAddresses) assertPublicKey(table, 'Relay lookup table');
+  const payer = assertPublicKey(feePayer, 'feePayer').toBase58();
+  const instructions = instructionPlan.instructions.map((item, index) => {
+    invariant(Array.isArray(item?.keys) && item.keys.length <= 64, SolanaAdapterError, 'Relay account list exceeds bound');
+    const instruction = relayInstruction(item, index);
+    invariant(instruction.keys.every(key => !key.isSigner || key.pubkey.toBase58() === payer), SolanaAdapterError, 'Relay instruction requests an unexpected signer');
+    return instruction;
   });
+  const wire = buildUnsignedTransaction({ feePayer, recentBlockhash, instructions });
+  const bytes = Buffer.from(wire, 'base64');
+  invariant(bytes.length <= 1232, SolanaAdapterError, 'Relay legacy transaction exceeds packet limit');
+  const decoded = Transaction.from(bytes);
+  invariant(decoded.feePayer.toBase58() === payer && decoded.recentBlockhash === recentBlockhash
+    && decoded.signatures.length === 1 && decoded.signatures[0].signature === null
+    && decoded.instructions.length === instructions.length, SolanaAdapterError, 'Relay legacy envelope round-trip mismatch');
+  const privileges = new Map([[payer, { isSigner: true, isWritable: true }]]);
+  for (const ix of instructions) for (const key of ix.keys) {
+    const name = key.pubkey.toBase58();
+    const previous = privileges.get(name) ?? { isSigner: false, isWritable: false };
+    privileges.set(name, { isSigner: previous.isSigner || key.isSigner, isWritable: previous.isWritable || key.isWritable });
+  }
+  decoded.instructions.forEach((actual, i) => {
+    const expected = instructions[i];
+    invariant(actual.programId.equals(expected.programId) && actual.data.equals(expected.data)
+      && actual.keys.length === expected.keys.length, SolanaAdapterError, 'Relay instruction round-trip mismatch');
+    actual.keys.forEach((key, j) => {
+      const privilege = privileges.get(expected.keys[j].pubkey.toBase58());
+      invariant(key.pubkey.equals(expected.keys[j].pubkey) && key.isSigner === privilege.isSigner
+        && key.isWritable === privilege.isWritable, SolanaAdapterError, 'Relay account/privilege round-trip mismatch');
+    });
+  });
+  return wire;
 }
 
 /**

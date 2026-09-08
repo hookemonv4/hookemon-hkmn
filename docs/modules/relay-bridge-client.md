@@ -342,3 +342,11 @@ Quotes request explicit deposit, refund-to-sender and protocol data. The frozen 
 scenario fixture is copied unchanged from provider evidence acce05b4, SHA-256
 `7b1b5a871f7db31b8ad708df47cdbdde73ba9c0905d25c55d69f96c90af03176`.
 It proves an observed quote shape, not current execution or provider approval.
+
+Unsigned Relay instructions with complete public-key metas can be compiled by
+`buildRelayLegacyTransaction` with addresses inline. The original lookup-table list remains
+on the persisted provider plan. The compiler bounds instructions/accounts, refuses extra signers,
+serializes within 1232 bytes, and decodes to verify exact programs, data, ordered accounts and
+effective transaction-wide privileges. Incomplete/index-only plans and oversized packets refuse.
+This capability does not imply provider route approval and never recompiles Collector co-signed
+messages. The captured complete return plan measures 483 bytes with pinned SDK 1.98.4.
