@@ -2121,7 +2121,7 @@ test('buyback crash before response persistence recovers a batch card by its dur
   assert.equal(cycleRepository.heldPositions.length, 0);
 });
 
-for (const failure of ['no-transports', 'outgoing-finalized', 'owner-changed']) {
+for (const failure of ['no-transports', 'outgoing-finalized', 'owner-changed', 'fetch-failed']) {
   test(`overdue buyback ${failure} holds the cycle without inventing held card custody`, async () => {
     const amount = { ...settlementAsset(), amountAtomic: '85' };
     const submitted = { packIndex: 0, decision: 'submitted', memo: MEMO, mint: CARD_ASSET,
@@ -2132,7 +2132,7 @@ for (const failure of ['no-transports', 'outgoing-finalized', 'owner-changed']) 
     });
     const adapters = failure === 'no-transports' ? {} : {
       collectorCrypt: { async getBuybackCheck() { return { exists: false }; } },
-      solana: { client: rpcClient({ cardOwner: failure === 'owner-changed' ? COLLECTOR_RECIPIENT : OPERATOR,
+      solana: { client: rpcClient({ cardOwner: failure === 'fetch-failed' ? () => { throw new TypeError('fetch failed'); } : failure === 'owner-changed' ? COLLECTOR_RECIPIENT : OPERATOR,
         entries: failure === 'outgoing-finalized' ? [
           { tokenAccount: deriveAssociatedTokenAddress(OPERATOR, CARD_ASSET).toBase58(), owner: OPERATOR, mint: CARD_ASSET, preAmount: '1', postAmount: '0' },
           { tokenAccount: deriveAssociatedTokenAddress(OPERATOR, SETTLEMENT_ASSET).toBase58(), owner: OPERATOR, mint: SETTLEMENT_ASSET, preAmount: '7', postAmount: '92' },
@@ -2144,14 +2144,14 @@ for (const failure of ['no-transports', 'outgoing-finalized', 'owner-changed']) 
     assert.equal(cycleRepository.held.length, 1);
     assert.equal(cycleRepository.held[0].terminalState, 'HELD_DATA_UNVERIFIED');
     assert.equal(cycleRepository.held[0].evidence.verificationStep, {
-      'no-transports': 'transports', 'owner-changed': 'finalized-ownership',
-      'outgoing-finalized': 'finalized-signature-and-transfer',
+      'no-transports': 'transports', 'owner-changed': 'finalized-ownership', 'fetch-failed': 'finalized-ownership',
+      'outgoing-finalized': 'confirmed-outgoing-transfer',
     }[failure]);
     assert.equal(cycleRepository.ledgers.length, 0);
   });
 }
 
-for (const errorName of ['AbortError', 'TypeError']) {
+for (const errorName of ['AbortError']) {
   test(`overdue buyback propagates ${errorName} without a custody mutation`, async () => {
     const amount = { ...settlementAsset(), amountAtomic: '85' };
     const submitted = { packIndex: 0, decision: 'submitted', memo: MEMO, mint: CARD_ASSET,

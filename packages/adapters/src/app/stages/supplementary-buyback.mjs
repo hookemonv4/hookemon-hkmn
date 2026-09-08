@@ -256,13 +256,24 @@ async function heldPositionOpenEvidence(cycleRepository, position) {
 }
 
 /**
- * Independently confirms the operator's real, finalized on-chain MPL Core custody of the held
+ * Independently confirms the operator's real, finalized on-chain card custody of the held
  * asset -- never assumed from the position record or the configured operator address alone.
  * Called once before the provider is ever asked to generate a resale transaction, and again after
  * that provider call returns (see `signAndRecordBuyback`), so a transfer landing during the
  * ambiguous provider round-trip is caught before signing rather than trusted from a stale read.
  */
-async function verifiedHeldAssetOwner({ adapters, config, mint }) {
+async function verifiedHeldAssetOwner({ adapters, config, mint, assetKind }) {
+  if (assetKind === 'spl') {
+    if (adapters.solana.client.commitment !== 'finalized') {
+      throw new Error('supplementary buyback requires finalized SPL ownership evidence');
+    }
+    const account = await readAssociatedTokenAccount(adapters.solana.client, config.accounts.solana, mint);
+    if (!account.exists || account.amount <= 0n) {
+      throw new Error('supplementary buyback requires a positive finalized card balance');
+    }
+    return config.accounts.solana;
+  }
+  if (assetKind !== 'mpl-core') throw new Error('supplementary buyback cannot verify the held asset kind');
   const owner = await readMplCoreAssetOwner(adapters.solana.client, mint, { commitment: 'finalized' });
   if (owner !== config.accounts.solana) {
     throw new Error('supplementary buyback production binding requires the operator to currently hold the finalized on-chain asset');
@@ -307,7 +318,7 @@ function resolveHeldProductionBinding(config) {
 /**
  * Preflight-only (money-safe) resolution of the production binding for one held resale: resolves
  * the registered buyback binding, requires the held position's identity to match the finalized
- * original open evidence and be a verifiable MPL Core asset, performs the first on-chain ownership
+ * original open evidence and use a verifiable card representation, performs the first on-chain ownership
  * verification, and binds the independently configured settlement mint/decimals/account to the
  * approved binding's own `proceeds` fields -- all before the provider is ever asked to generate a
  * transaction. Returns `null` when no production binding is configured (the legacy static policy
@@ -317,10 +328,7 @@ async function prepareHeldProductionBinding({ adapters, config, cycleRepository,
   const resolvedBinding = resolveHeldProductionBinding(config);
   if (resolvedBinding === null) return null;
   const openPack = await heldPositionOpenEvidence(cycleRepository, position);
-  if (openPack.assetKind !== 'mpl-core') {
-    throw new Error('supplementary buyback production binding requires a finalized MPL Core held asset');
-  }
-  await verifiedHeldAssetOwner({ adapters, config, mint: position.mint });
+  await verifiedHeldAssetOwner({ adapters, config, mint: position.mint, assetKind: openPack.assetKind });
   // Binds the independently configured settlement mint/decimals to the approved binding's own
   // pinned proceeds identity -- `binding.proceeds.source` is Collector's own fixed vault account
   // (the transfer's source role), never the operator's own settlement account, so it is not
@@ -335,7 +343,7 @@ async function prepareHeldProductionBinding({ adapters, config, cycleRepository,
   if (typeof prepared.settlementAccount !== 'string' || prepared.settlementAccount.length === 0) {
     throw new Error('supplementary buyback production binding requires a verified operator settlement account');
   }
-  return { resolvedBinding };
+  return { resolvedBinding, assetKind: openPack.assetKind };
 }
 
 /** Fetches a fresh Solana blockhash/height context for the production binding factory -- never the
@@ -527,7 +535,7 @@ async function signAndRecordBuyback({
   if (productionBinding !== null) {
     // Recheck after the provider await, before signing: a transfer landing during the round-trip
     // above is caught here, not trusted from the preflight read in prepareHeldProductionBinding.
-    const verifiedOwner = await verifiedHeldAssetOwner({ adapters, config, mint: position.mint });
+    const verifiedOwner = await verifiedHeldAssetOwner({ adapters, config, mint: position.mint, assetKind: productionBinding.assetKind });
     const cycleFacts = Object.freeze({
       operatorFeePayer: config.accounts.solana,
       proceedsDestination: settlementAccount,
@@ -580,7 +588,7 @@ async function signAndRecordBuyback({
         const refreshed = await adapters.collectorCrypt.getBuybackAvailable({ nft: position.mint, wallet: config.accounts.solana });
         const refreshedOffer = typedBuybackAmount(refreshed.amount, 'supplementary buyback offer');
         if (!sameAmount(refreshedOffer, offer)) throw new Error('supplementary buyback offer changed before signing');
-        if (productionBinding !== null) await verifiedHeldAssetOwner({ adapters, config, mint: position.mint });
+        if (productionBinding !== null) await verifiedHeldAssetOwner({ adapters, config, mint: position.mint, assetKind: productionBinding.assetKind });
         return signerClient.solana.sign(signRequest);
       },
     },
