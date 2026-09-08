@@ -6,6 +6,7 @@ import test from 'node:test';
 import { keccak256Hex } from '../programmable/lib/keccak.mjs';
 import {
   parseInvocation,
+  validateSolidityForkPinBinding,
   verifyForkPin,
   verifyForkPinAndCurrentHead,
 } from '../verify-fork-pin.mjs';
@@ -282,6 +283,24 @@ test('verifyForkPin rejects an unexpected runtime entry before making an RPC req
     /required contract entries/i,
   );
   assert.equal(calls, 0, 'unexpected entry validation made an RPC request');
+});
+
+test('native fork fixture retains every historical chain pin and requires a zero quote', () => {
+  const committed = JSON.parse(readFileSync(resolve(root, 'release/phase3/fork-pin.json'), 'utf8'));
+  const source = readFileSync(ARCHIVE_FORK_SOURCE, 'utf8');
+  assert.doesNotThrow(() => validateSolidityForkPinBinding({ pin: committed, source }));
+  assert.throws(() => validateSolidityForkPinBinding({
+    pin: committed,
+    source: source.replace('USDG = address(0);', 'USDG = address(1);'),
+  }), /native fixture quote must be address\(0\)/);
+  assert.throws(() => validateSolidityForkPinBinding({
+    pin: committed,
+    source: source.replace('HISTORICAL_USDG =', 'MISSING_HISTORICAL_USDG ='),
+  }), /Solidity fork pin binding mismatch/);
+  const historicalSource = source
+    .replace('address private constant USDG = address(0);', '')
+    .replace('address private constant HISTORICAL_USDG =', 'address private constant USDG =');
+  assert.doesNotThrow(() => validateSolidityForkPinBinding({ pin: committed, source: historicalSource }));
 });
 
 test('verifyForkPin rejects every JSON-to-Solidity pin binding mismatch before RPC', async () => {

@@ -26,11 +26,11 @@
     },
     "forkProof": {
       "path": ".github/workflows/fork-proof.yml",
-      "sha256": "653b730bf55aba2f5959e61828af1d142e8ebbc5871b972b0e4819bb0b37b60b"
+      "sha256": "91c577eef93fea366099a885ecd2940916b975bd889dc5a378ba18fdcbd51083"
     },
     "forkPinCanary": {
       "path": ".github/workflows/fork-pin-canary.yml",
-      "sha256": "d96801f9885587e84ffc390acbee7f2b973aff1ad42e4b98b5d25d31aa5cca2a"
+      "sha256": "e3447ec6f2f9e2ee3f516a6e6ff9694d6a2f318a0e6ba39de72a8a1cccd43f4c"
     },
     "identityGate": {
       "path": ".github/workflows/identity-gate.yml",
@@ -69,11 +69,11 @@
     },
     "forkPinVerifier": {
       "path": "scripts/verify-fork-pin.mjs",
-      "sha256": "09249c50f08b092305e497b6a9430d3acab0131c689ce58862f1f700668ef94a",
+      "sha256": "3fdd2565969a6f0e49af1fbae974409fa71a48e600cf555d9daee7d23b24db50",
       "closure": [
         {
           "path": "scripts/verify-fork-pin.mjs",
-          "sha256": "09249c50f08b092305e497b6a9430d3acab0131c689ce58862f1f700668ef94a"
+          "sha256": "3fdd2565969a6f0e49af1fbae974409fa71a48e600cf555d9daee7d23b24db50"
         },
         {
           "path": "scripts/programmable/lib/keccak.mjs",
@@ -84,11 +84,11 @@
     },
     "controlDependencyVerifier": {
       "path": "scripts/verify-control-dependencies.mjs",
-      "sha256": "c94c01acc879e86a8b41df5e30650fe69dcb9559fbe3443820b207c5ee56ff69",
+      "sha256": "53ad0eff9c73a75cbce85e9e9a01c2180dd3fef6baebc33b388aef18e83aa5c0",
       "closure": [
         {
           "path": "scripts/verify-control-dependencies.mjs",
-          "sha256": "c94c01acc879e86a8b41df5e30650fe69dcb9559fbe3443820b207c5ee56ff69"
+          "sha256": "53ad0eff9c73a75cbce85e9e9a01c2180dd3fef6baebc33b388aef18e83aa5c0"
         },
         {
           "path": "scripts/lib/util.mjs",

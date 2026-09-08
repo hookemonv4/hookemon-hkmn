@@ -178,7 +178,19 @@ export function validateSolidityForkPinBinding({ pin, source }) {
     contracts.permit2.runtimeCodeHash,
     'contracts.permit2.runtimeCodeHash',
   );
-  assertSolidityPinAddress(source, 'USDG', contracts.usdg.address, 'contracts.usdg.address');
+  const nativeFixture = /\baddress\s+private\s+constant\s+HISTORICAL_USDG\s*=/.test(source);
+  if (nativeFixture) {
+    invariant(
+      /\baddress\s+private\s+constant\s+USDG\s*=\s*address\(0\)\s*;/.test(source),
+      'Solidity fork pin binding mismatch: native fixture quote must be address(0)',
+    );
+  }
+  assertSolidityPinAddress(
+    source,
+    nativeFixture ? 'HISTORICAL_USDG' : 'USDG',
+    contracts.usdg.address,
+    'contracts.usdg.address',
+  );
   assertSolidityPinHash(
     source,
     'USDG_PROXY_RUNTIME_CODEHASH',
