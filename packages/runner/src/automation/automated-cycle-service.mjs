@@ -79,7 +79,7 @@ export class AutomatedCycleService {
   #providerMode;
   #packId;
   #policyEngine;
-  #policyCapUsdg;
+  #policyCapMicroUsd;
   #recoveryGuard;
   #rehearsalSessionId;
   #runnerFactory;
@@ -101,7 +101,7 @@ export class AutomatedCycleService {
       'feeSettlementObserver',
       'liveMode',
     ];
-    const optionalFields = ['packId', 'policyEngine', 'mode', 'providerMode', 'dryRun', 'policyCapUsdg', 'recoveryGuard', 'beforeComplete', 'beforeMutation', 'rehearsalSessionId', 'admissionPlanner', 'quoteRefreshPlanner', 'operationsAccounts'];
+    const optionalFields = ['packId', 'policyEngine', 'mode', 'providerMode', 'dryRun', 'policyCapMicroUsd', 'recoveryGuard', 'beforeComplete', 'beforeMutation', 'rehearsalSessionId', 'admissionPlanner', 'quoteRefreshPlanner', 'operationsAccounts'];
     const keys = Object.keys(config);
     if (!requiredFields.every(field => Object.hasOwn(config, field)) || keys.some(field => !requiredFields.includes(field) && !optionalFields.includes(field))) {
       throw new Error('automated cycle service configuration must use the exact schema');
@@ -155,8 +155,8 @@ export class AutomatedCycleService {
     if (config.beforeMutation !== undefined && typeof config.beforeMutation !== 'function') {
       throw new Error('automated cycle service beforeMutation must be a function');
     }
-    if (config.policyCapUsdg !== undefined && (typeof config.policyCapUsdg !== 'string' || !decimalPattern.test(config.policyCapUsdg))) {
-      throw new Error('automated cycle service policyCapUsdg must be a canonical unsigned decimal string');
+    if (config.policyCapMicroUsd !== undefined && (typeof config.policyCapMicroUsd !== 'string' || !decimalPattern.test(config.policyCapMicroUsd))) {
+      throw new Error('automated cycle service policyCapMicroUsd must be a canonical unsigned decimal string');
     }
     if (liveMode && policyEngine === null) throw new Error('live automated cycle service requires a policyEngine');
     if (liveMode && (typeof config.packId !== 'string' || config.packId.length === 0)) {
@@ -171,7 +171,7 @@ export class AutomatedCycleService {
     this.#providerMode = providerMode;
     this.#packId = config.packId ?? null;
     this.#policyEngine = policyEngine;
-    this.#policyCapUsdg = config.policyCapUsdg ?? null;
+    this.#policyCapMicroUsd = config.policyCapMicroUsd ?? null;
     this.#recoveryGuard = config.recoveryGuard ?? null;
     this.#beforeComplete = config.beforeComplete ?? null;
     this.#beforeMutation = config.beforeMutation ?? null;
@@ -276,11 +276,12 @@ export class AutomatedCycleService {
     assertLease();
     const decision = await this.#policyEngine.evaluateQuoteRefresh({
       cycleId: cycle.cycleId,
-      releaseAmountMicroUsdg: cycle.releaseAmount,
+      releaseAmountWei: cycle.releaseAmount,
+      releaseCostMicroUsd: cycle.admission?.aggregateFundingUsd?.amountMicroUsd ?? cycle.releaseCostMicroUsd,
       packId: this.#packId,
       liveMode: this.#liveMode,
       mode: this.#mode,
-      capUsdg: this.#policyCapUsdg ?? undefined,
+      capMicroUsd: this.#policyCapMicroUsd ?? undefined,
       admission: cycle.admission,
       replacement,
       operations: this.#operationsAccounts ?? undefined,
@@ -352,12 +353,12 @@ export class AutomatedCycleService {
           return { status: 'NO_ACTIVE_CYCLE', cycleId: null, stage: null };
         }
         const budget = await this.#budgetReader.read();
-        if (budget?.packPriceUsdg === '0') {
+        if (budget?.packPriceWei === '0') {
           return {
             status: 'WAITING_FOR_PROCESS_BUDGET',
             cycleId: null,
             stage: null,
-            requiredProcessUsdg: '0',
+            requiredProcessWei: '0',
           };
         }
         // Every existing refusal is settled against the configured budget FIRST, while planning is
@@ -371,16 +372,17 @@ export class AutomatedCycleService {
             status: gate.reason === 'ACTIVE_CYCLE' ? 'ACTIVE_CYCLE_NOT_RECONCILED' : 'WAITING_FOR_PROCESS_BUDGET',
             cycleId: null,
             stage: null,
-            requiredProcessUsdg: gate.requiredProcessUsdg,
+            requiredProcessWei: gate.requiredProcessWei,
           };
         }
         if (this.#policyEngine) {
           const gateDecision = await this.#policyEngine.evaluate({
             boundary: 'cycle-start',
-            releaseAmountMicroUsdg: gate.releaseAmount,
+            releaseAmountWei: gate.releaseAmount,
+            releaseCostMicroUsd: '0',
             liveMode: this.#liveMode,
             mode: this.#mode,
-            capUsdg: this.#policyCapUsdg ?? undefined,
+            capMicroUsd: this.#policyCapMicroUsd ?? undefined,
           });
           if (!gateDecision?.allowed) {
             return {
@@ -402,7 +404,7 @@ export class AutomatedCycleService {
             nowMs: this.#now(),
           });
         if (this.#admissionPlanner !== null && admission === null) {
-          return { status: 'WAITING_FOR_ADMISSION', cycleId: null, stage: null, requiredProcessUsdg: '0' };
+          return { status: 'WAITING_FOR_ADMISSION', cycleId: null, stage: null, requiredProcessWei: '0' };
         }
         assertLeaseCurrent({ store: this.#leaseStore, lease, now: this.#now() });
         // The attributable finalized process liability is established by the planner, which refuses
@@ -410,24 +412,25 @@ export class AutomatedCycleService {
         // figure for that proof. This only re-checks the quoted principal against the operator's own
         // configured ceiling.
         const decision = admission === null ? gate : decideCycleBudget(budget, {
-          admittedAggregateFundingUsdg: admission.aggregateFundingQuote.amountAtomic,
+          admittedAggregateFundingWei: admission.aggregateFundingQuote.amountAtomic,
         });
         if (!decision.ready) {
           return {
             status: decision.reason === 'ACTIVE_CYCLE' ? 'ACTIVE_CYCLE_NOT_RECONCILED' : 'WAITING_FOR_PROCESS_BUDGET',
             cycleId: null,
             stage: null,
-            requiredProcessUsdg: decision.requiredProcessUsdg,
+            requiredProcessWei: decision.requiredProcessWei,
           };
         }
         // Re-evaluated against the quoted principal, which is the amount the caps actually apply to.
         if (this.#policyEngine && admission !== null) {
           const policyDecision = await this.#policyEngine.evaluate({
             boundary: 'cycle-start',
-            releaseAmountMicroUsdg: decision.releaseAmount,
+            releaseAmountWei: decision.releaseAmount,
+            releaseCostMicroUsd: admission.aggregateFundingUsd.amountMicroUsd,
             liveMode: this.#liveMode,
             mode: this.#mode,
-            capUsdg: this.#policyCapUsdg ?? undefined,
+            capMicroUsd: this.#policyCapMicroUsd ?? undefined,
             admission,
             cycleId: reservedCycleId,
             packId: this.#packId,
@@ -500,13 +503,13 @@ export class AutomatedCycleService {
       const assertMutationAllowed = async ({
         boundary = 'mutation',
         cycleId = cycle.cycleId,
-        releaseAmountMicroUsdg = cycle.releaseAmount,
+        releaseAmountWei = cycle.releaseAmount,
         packId = this.#packId,
         requestDigest = null,
         fencingToken = lease.fencingToken,
         stage = activeContext?.stage ?? null,
       } = {}) => {
-        if (cycleId !== cycle.cycleId || releaseAmountMicroUsdg !== cycle.releaseAmount || packId !== this.#packId) {
+        if (cycleId !== cycle.cycleId || releaseAmountWei !== cycle.releaseAmount || packId !== this.#packId) {
           throw new Error('automated cycle mutation guard context does not match the active cycle');
         }
         if (stage !== activeContext?.stage) throw new Error('automated cycle mutation guard stage does not match the active stage');
@@ -519,14 +522,15 @@ export class AutomatedCycleService {
           const policyDecision = await this.#policyEngine.assertExecutionAllowed({
             boundary,
             cycleId,
-            releaseAmountMicroUsdg,
+            releaseAmountWei,
+            releaseCostMicroUsd: cycle.admission?.aggregateFundingUsd?.amountMicroUsd ?? cycle.releaseCostMicroUsd,
             packId,
             requestDigest,
             fencingToken,
             stage,
             liveMode: this.#liveMode,
             mode: this.#mode,
-            capUsdg: this.#policyCapUsdg ?? undefined,
+            capMicroUsd: this.#policyCapMicroUsd ?? undefined,
             // Re-presented at every execution boundary because the recorded cycle digest includes it.
             ...(cycle.admission ? { admission: cycle.admission } : {}),
           });
@@ -559,7 +563,8 @@ export class AutomatedCycleService {
           runner,
           lease: { ...lease },
           fencingToken: lease.fencingToken,
-          releaseAmountMicroUsdg: cycle.releaseAmount,
+          releaseAmountWei: cycle.releaseAmount,
+          releaseCostMicroUsd: cycle.admission?.aggregateFundingUsd?.amountMicroUsd ?? cycle.releaseCostMicroUsd,
           packId: this.#packId,
           nowMs: this.#now(),
           assertLease,
@@ -576,11 +581,12 @@ export class AutomatedCycleService {
             const policyDecision = await this.#policyEngine.admit({
               boundary: 'claim-process',
               cycleId: cycle.cycleId,
-              releaseAmountMicroUsdg: cycle.releaseAmount,
+              releaseAmountWei: cycle.releaseAmount,
+              releaseCostMicroUsd: cycle.admission?.aggregateFundingUsd?.amountMicroUsd ?? cycle.releaseCostMicroUsd,
               packId: this.#packId,
               liveMode: this.#liveMode,
               mode: this.#mode,
-              capUsdg: this.#policyCapUsdg ?? undefined,
+              capMicroUsd: this.#policyCapMicroUsd ?? undefined,
               ...(cycle.admission ? { admission: cycle.admission } : {}),
             });
             assertPolicyDecision(policyDecision);
@@ -589,11 +595,12 @@ export class AutomatedCycleService {
             const policyDecision = await this.#policyEngine.evaluatePurchase({
               boundary: 'purchase',
               cycleId: cycle.cycleId,
-              releaseAmountMicroUsdg: cycle.releaseAmount,
+              releaseAmountWei: cycle.releaseAmount,
+              releaseCostMicroUsd: cycle.admission?.aggregateFundingUsd?.amountMicroUsd ?? cycle.releaseCostMicroUsd,
               packId: this.#packId,
               liveMode: this.#liveMode,
               mode: this.#mode,
-              capUsdg: this.#policyCapUsdg ?? undefined,
+              capMicroUsd: this.#policyCapMicroUsd ?? undefined,
               ...(cycle.admission ? { admission: cycle.admission } : {}),
             });
             assertPolicyDecision(policyDecision);
@@ -605,7 +612,8 @@ export class AutomatedCycleService {
               stage,
               mode: cycle.mode,
               providerMode: cycle.providerMode ?? null,
-              releaseAmountMicroUsdg: cycle.releaseAmount,
+              releaseAmountWei: cycle.releaseAmount,
+              releaseCostMicroUsd: cycle.admission?.aggregateFundingUsd?.amountMicroUsd ?? cycle.releaseCostMicroUsd,
               assertLease,
             }));
             assertLease();

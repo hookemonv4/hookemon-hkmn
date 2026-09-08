@@ -9,13 +9,20 @@ import { assertPolicyAdmission, createTestOnlyAdmissionIdentity } from '../../sr
 
 const OPERATIONS_EVM = '0xB54AAF746eb1e80AFDb5eb0992a75b08DB2E4384';
 const OPERATIONS_SOLANA = 'BrvhPB9EeAukw8g3jibQDFBYY5abu3Vchdm9ri3PHZNE';
-const USDG = '0x5fc5360d0400a0fd4f2af552add042d716f1d168';
+const NATIVE_WIRE = '0x0000000000000000000000000000000000000000';
 const CIRCLE_USD_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
-const FUNDING = Object.freeze({ chainId: '4663', assetId: USDG, decimals: 6 });
+const FUNDING = Object.freeze({ chainId: '4663', assetId: 'native', decimals: 18 });
 const SETTLEMENT = Object.freeze({ chainId: '792703809', assetId: CIRCLE_USD_MINT, decimals: 6 });
 const DEADLINE = 2_000_000_000;
 const HOOK_ADDRESS = `0x${'7'.repeat(40)}`;
 const EVIDENCE_CEILING_ATOMIC = '1000000';
+
+function valuation(quote, amountAtomic) {
+  return { schema: 'hookemon.quote-usd-valuation.v1', quoteDigest: quote.quoteDigest,
+    requestDigest: `sha256:${'9'.repeat(64)}`, quoteRequestId: quote.requestId,
+    sourcePath: 'details.currencyIn.amountUsd', amount: typed(FUNDING, amountAtomic),
+    amountMicroUsd: '1000000', rounding: 'up', observedAtMs: 0, validUntilMs: DEADLINE * 1000 };
+}
 
 function typed(asset, amountAtomic) {
   return { ...asset, amountAtomic };
@@ -34,7 +41,7 @@ function onchainCycleIdFor(cycleId) {
  */
 function processLiabilityEvidenceFor(cycleId, operationsEvm = OPERATIONS_EVM.toLowerCase()) {
   return {
-    schema: 'hookemon.process-liability-evidence.v1',
+    schema: 'hookemon.process-liability-evidence.v2',
     chainId: FUNDING.chainId,
     assetId: FUNDING.assetId,
     decimals: FUNDING.decimals,
@@ -50,7 +57,7 @@ function processLiabilityEvidenceFor(cycleId, operationsEvm = OPERATIONS_EVM.toL
     processClaimCycleUsed: false,
     activeProcessClaimLimit: EVIDENCE_CEILING_ATOMIC,
     totalLiability: EVIDENCE_CEILING_ATOMIC,
-    hookUsdgBalance: EVIDENCE_CEILING_ATOMIC,
+    hookNativeBalance: EVIDENCE_CEILING_ATOMIC,
     isSolvent: true,
     operations: operationsEvm,
     ceilingAtomic: EVIDENCE_CEILING_ATOMIC,
@@ -64,7 +71,7 @@ function rawQuote({ requestId, orderId, originAmount, destinationAmount, sender,
     details: {
       sender,
       recipient,
-      currencyIn: { currency: { chainId: 4663, address: USDG, symbol: 'USDG', decimals: 6 }, amount: originAmount },
+      currencyIn: { currency: { chainId: 4663, address: NATIVE_WIRE, symbol: 'ETH', decimals: 18 }, amount: originAmount },
       currencyOut: {
         currency: { chainId: 792703809, address: CIRCLE_USD_MINT, symbol: 'CIRCLE_USD', decimals: 6 },
         amount: destinationAmount,
@@ -82,8 +89,8 @@ function rawQuote({ requestId, orderId, originAmount, destinationAmount, sender,
             payments: [{ recipient, currency: CIRCLE_USD_MINT, expectedAmount: destinationAmount, minimumAmount: destinationAmount }],
           },
           inputs: [{
-            payment: { chainId: 'robinhood', currency: USDG, amount: originAmount },
-            refunds: [{ chainId: 'robinhood', currency: USDG, recipient: sender, deadline: DEADLINE }],
+            payment: { chainId: 'robinhood', currency: NATIVE_WIRE, amount: originAmount },
+            refunds: [{ chainId: 'robinhood', currency: NATIVE_WIRE, recipient: sender, deadline: DEADLINE }],
           }],
         },
       },
@@ -106,7 +113,7 @@ function parsedQuote({ requestId, orderId, originAmount, destinationAmount, send
     sender,
     recipient,
     deadlineUnixSeconds: DEADLINE,
-    origin: { chainId: 4663, address: USDG, symbol: 'USDG', decimals: 6, amount: originAmount, amountFormatted: null, minimumAmount: null },
+    origin: { chainId: 4663, address: NATIVE_WIRE, symbol: 'ETH', decimals: 18, amount: originAmount, amountFormatted: null, minimumAmount: null },
     destination: {
       chainId: 792703809, address: CIRCLE_USD_MINT, symbol: 'CIRCLE_USD', decimals: 6,
       amount: destinationAmount, amountFormatted: null, minimumAmount: destinationAmount,
@@ -156,7 +163,7 @@ function admissionFor({
     quote.quoteDigest = probeDigest(quote, identity);
   }
   return {
-    schema: 'hookemon.policy-admission.v2',
+    schema: 'hookemon.policy-admission.v3',
     cycleId: 'cycle-admission-identity-1',
     packId: 'return-fixture',
     quantity: 2,
@@ -165,6 +172,8 @@ function admissionFor({
     aggregatePurchase: typed(SETTLEMENT, '16'),
     unitFundingQuote: typed(FUNDING, '17'),
     aggregateFundingQuote: typed(FUNDING, '33'),
+    unitFundingUsd: valuation(unit, '17'),
+    aggregateFundingUsd: valuation(aggregate, '33'),
     relay: relayIdentity(aggregate, '16'),
     unitRelay: relayIdentity(unit, '8'),
     unitRelayQuote: unit,
@@ -181,7 +190,7 @@ function admissionFor({
 function probeDigest(quote, identity) {
   const probe = { ...quote, quoteDigest: `sha256:${'0'.repeat(64)}` };
   const candidate = {
-    schema: 'hookemon.policy-admission.v2',
+    schema: 'hookemon.policy-admission.v3',
     cycleId: 'cycle-admission-identity-1',
     packId: 'return-fixture',
     quantity: 1,

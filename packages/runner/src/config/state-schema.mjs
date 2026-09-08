@@ -5,7 +5,7 @@
 // plain JSON document and rejects anything that carries a secret-material field.
 import { canonicalJson } from '../cycle/journal.mjs';
 
-export const OPERATOR_CONFIGURATION_SCHEMA = 'hookemon.operator-configuration.v3';
+export const OPERATOR_CONFIGURATION_SCHEMA = 'hookemon.operator-configuration.v4';
 
 const configurationFields = [
   'schema',
@@ -13,17 +13,17 @@ const configurationFields = [
   'allowedPackIds',
   'requestedOrders',
   'maxBoostersPerCycle',
-  'maxUnitPriceMicroUsdg',
-  'maxCycleBudgetMicroUsdg',
-  'max24HourBudgetMicroUsdg',
+  'maxUnitPriceMicroUsd',
+  'maxCycleBudgetMicroUsd',
+  'max24HourBudgetMicroUsd',
   'paused',
   'liveMode',
   'maxCyclesPerDay',
-  'perCycleCapMicroUsdg',
-  'lossCapMicroUsdg',
-  'maxOutstandingCustodyMicroUsdg',
+  'perCycleCapMicroUsd',
+  'lossCapMicroUsd',
+  'maxOutstandingCustodyMicroUsd',
   'maxHeldPositions',
-  'maxHeldValueMicroUsdg',
+  'maxHeldValueMicroUsd',
   'unresolvedCardDeadlineMinutes',
   'executionPaused',
   'killSwitch',
@@ -34,46 +34,28 @@ const configurationFields = [
   'cycleLedger',
   'configurationRevision',
 ];
-const unversionedConfigurationFields = configurationFields.filter(field => field !== 'schema');
-const preDeadlineConfigurationFields = configurationFields.filter(field => field !== 'unresolvedCardDeadlineMinutes');
-const unversionedPreDeadlineConfigurationFields = preDeadlineConfigurationFields.filter(field => field !== 'schema');
-const versionTwoConfigurationFields = configurationFields.filter(field => !['maxHeldPositions', 'maxHeldValueMicroUsdg', 'unresolvedCardDeadlineMinutes'].includes(field));
-const unversionedVersionTwoConfigurationFields = versionTwoConfigurationFields.filter(field => field !== 'schema');
-const legacyConfigurationFields = [
-  'intervalMinutes',
-  'allowedPackIds',
-  'requestedOrders',
-  'maxBoostersPerCycle',
-  'maxUnitPriceMicroUsdg',
-  'maxCycleBudgetMicroUsdg',
-  'max24HourBudgetMicroUsdg',
-  'paused',
-  'liveMode',
-  'configurationRevision',
-];
-
 // The same field list the policy-wallet module (packages/runner/src/automation/policy-wallets.mjs)
 // rejects on any configuration object; kept here too so this schema independently refuses to ever
 // accept or round-trip secret material, even if it were ever merged with a wallet configuration.
 const prohibitedSecretFields = new Set(['privateKey', 'secretKey', 'mnemonic', 'seed', 'keypair']);
 
 const packCodePattern = /^[a-z0-9][a-z0-9_-]{1,63}$/;
-const microUsdgPattern = /^(0|[1-9][0-9]*)$/;
+const microUsdPattern = /^(0|[1-9][0-9]*)$/;
 const cycleIdPattern = /^[A-Za-z0-9][A-Za-z0-9:._-]{1,127}$/;
 const digestPattern = /^sha256:[0-9a-f]{64}$/;
-const maxSafeMicroUsdg = BigInt(Number.MAX_SAFE_INTEGER);
+const maxSafeMicroUsd = BigInt(Number.MAX_SAFE_INTEGER);
 
 const minimumIntervalMinutes = 5;
 const maximumIntervalMinutes = 1440;
 const minimumUnresolvedCardDeadlineMinutes = 5;
 const maximumUnresolvedCardDeadlineMinutes = 1440;
 const maximumBoostersPerCycle = 1000;
-const maximumHeldPositions = 1000;
+const maximumHeldPositions = 10;
 
 export const DEFAULT_INTERVAL_MINUTES = 20;
 export const DEFAULT_LIVE_MODE = false;
 export const DEFAULT_MAX_HELD_POSITIONS = 10;
-export const DEFAULT_MAX_HELD_VALUE_MICRO_USDG = '5000000000';
+export const DEFAULT_MAX_HELD_VALUE_MICRO_USD = '5000000000';
 export const DEFAULT_UNRESOLVED_CARD_DEADLINE_MINUTES = 30;
 
 function assertExactPlainObject(value, fields, label) {
@@ -107,12 +89,12 @@ function assertBoolean(value, label) {
   return value;
 }
 
-function assertMicroUsdgAmount(value, label) {
-  if (typeof value !== 'string' || !microUsdgPattern.test(value)) {
+function assertMicroUsdAmount(value, label) {
+  if (typeof value !== 'string' || !microUsdPattern.test(value)) {
     throw new Error(`${label} must be a canonical unsigned decimal string`);
   }
   const amount = BigInt(value);
-  if (amount > maxSafeMicroUsdg) throw new Error(`${label} exceeds the maximum representable micro-USDG amount`);
+  if (amount > maxSafeMicroUsd) throw new Error(`${label} exceeds the maximum representable micro-USD amount`);
   return amount;
 }
 
@@ -187,12 +169,13 @@ function assertCycleLedger(value) {
   const seenDigests = new Set();
   let previousOpenedAtMs = -1;
   const ledger = value.map((entry, index) => {
-    assertExactRecord(entry, ['cycleId', 'cycleDigest', 'mode', 'openedAtMs', 'releaseAmountMicroUsdg'], `operator configuration cycleLedger[${index}]`);
+    assertExactRecord(entry, ['cycleId', 'cycleDigest', 'mode', 'openedAtMs', 'releaseAmountWei', 'releaseCostMicroUsd'], `operator configuration cycleLedger[${index}]`);
     assertCycleId(entry.cycleId, `operator configuration cycleLedger[${index}] cycleId`);
     assertDigest(entry.cycleDigest, `operator configuration cycleLedger[${index}] cycleDigest`);
     if (entry.mode !== 'production' && entry.mode !== 'rehearsal') throw new Error(`operator configuration cycleLedger[${index}] mode is invalid`);
     assertTimestamp(entry.openedAtMs, `operator configuration cycleLedger[${index}] openedAtMs`);
-    assertMicroUsdgAmount(entry.releaseAmountMicroUsdg, `operator configuration cycleLedger[${index}] releaseAmountMicroUsdg`);
+    if (typeof entry.releaseAmountWei !== 'string' || !microUsdPattern.test(entry.releaseAmountWei) || BigInt(entry.releaseAmountWei) >= 2n ** 256n) throw new Error('operator cycleLedger releaseAmountWei is invalid');
+    assertMicroUsdAmount(entry.releaseCostMicroUsd, `operator configuration cycleLedger[${index}] releaseCostMicroUsd`);
     if (seenCycleIds.has(entry.cycleId) || seenDigests.has(entry.cycleDigest)) throw new Error('operator configuration cycleLedger cycle identity is duplicated');
     if (entry.openedAtMs < previousOpenedAtMs) throw new Error('operator configuration cycleLedger must be ordered by openedAtMs');
     seenCycleIds.add(entry.cycleId);
@@ -209,10 +192,10 @@ function assertSpendLedger(value, cycleLedger) {
   const seenCycleDigests = new Set();
   let previousReservedAtMs = -1;
   const ledger = value.map((entry, index) => {
-    assertExactRecord(entry, ['cycleId', 'cycleDigest', 'amountMicroUsdg', 'reservedAtMs'], `operator configuration spendLedger[${index}]`);
+    assertExactRecord(entry, ['cycleId', 'cycleDigest', 'amountMicroUsd', 'reservedAtMs'], `operator configuration spendLedger[${index}]`);
     assertCycleId(entry.cycleId, `operator configuration spendLedger[${index}] cycleId`);
     assertDigest(entry.cycleDigest, `operator configuration spendLedger[${index}] cycleDigest`);
-    assertMicroUsdgAmount(entry.amountMicroUsdg, `operator configuration spendLedger[${index}] amountMicroUsdg`);
+    assertMicroUsdAmount(entry.amountMicroUsd, `operator configuration spendLedger[${index}] amountMicroUsd`);
     assertTimestamp(entry.reservedAtMs, `operator configuration spendLedger[${index}] reservedAtMs`);
     if (!cycleDigests.has(entry.cycleDigest)) throw new Error('operator configuration spendLedger must bind a recorded cycle digest');
     if (seenCycleDigests.has(entry.cycleDigest)) throw new Error('operator configuration spendLedger cycle digest is duplicated');
@@ -247,14 +230,14 @@ export function assertOperatorConfiguration(value) {
     min: 0,
     max: maxBoostersPerCycle,
   });
-  const maxUnitPriceMicroUsdg = assertMicroUsdgAmount(value.maxUnitPriceMicroUsdg, 'operator configuration maxUnitPriceMicroUsdg');
-  const maxCycleBudgetMicroUsdg = assertMicroUsdgAmount(value.maxCycleBudgetMicroUsdg, 'operator configuration maxCycleBudgetMicroUsdg');
-  const max24HourBudgetMicroUsdg = assertMicroUsdgAmount(value.max24HourBudgetMicroUsdg, 'operator configuration max24HourBudgetMicroUsdg');
-  if (maxUnitPriceMicroUsdg > maxCycleBudgetMicroUsdg) {
-    throw new Error('operator configuration maxUnitPriceMicroUsdg must not exceed maxCycleBudgetMicroUsdg');
+  const maxUnitPriceMicroUsd = assertMicroUsdAmount(value.maxUnitPriceMicroUsd, 'operator configuration maxUnitPriceMicroUsd');
+  const maxCycleBudgetMicroUsd = assertMicroUsdAmount(value.maxCycleBudgetMicroUsd, 'operator configuration maxCycleBudgetMicroUsd');
+  const max24HourBudgetMicroUsd = assertMicroUsdAmount(value.max24HourBudgetMicroUsd, 'operator configuration max24HourBudgetMicroUsd');
+  if (maxUnitPriceMicroUsd > maxCycleBudgetMicroUsd) {
+    throw new Error('operator configuration maxUnitPriceMicroUsd must not exceed maxCycleBudgetMicroUsd');
   }
-  if (maxCycleBudgetMicroUsdg > max24HourBudgetMicroUsdg) {
-    throw new Error('operator configuration maxCycleBudgetMicroUsdg must not exceed max24HourBudgetMicroUsdg');
+  if (maxCycleBudgetMicroUsd > max24HourBudgetMicroUsd) {
+    throw new Error('operator configuration maxCycleBudgetMicroUsd must not exceed max24HourBudgetMicroUsd');
   }
   const paused = assertBoolean(value.paused, 'operator configuration paused');
   const liveMode = assertBoolean(value.liveMode, 'operator configuration liveMode');
@@ -262,17 +245,18 @@ export function assertOperatorConfiguration(value) {
     min: 0,
     max: Number.MAX_SAFE_INTEGER,
   });
-  const perCycleCapMicroUsdg = assertMicroUsdgAmount(value.perCycleCapMicroUsdg, 'operator configuration perCycleCapMicroUsdg');
-  if (perCycleCapMicroUsdg !== maxCycleBudgetMicroUsdg) {
-    throw new Error('operator configuration perCycleCapMicroUsdg must equal maxCycleBudgetMicroUsdg');
+  const perCycleCapMicroUsd = assertMicroUsdAmount(value.perCycleCapMicroUsd, 'operator configuration perCycleCapMicroUsd');
+  if (perCycleCapMicroUsd !== maxCycleBudgetMicroUsd) {
+    throw new Error('operator configuration perCycleCapMicroUsd must equal maxCycleBudgetMicroUsd');
   }
-  const lossCapMicroUsdg = assertMicroUsdgAmount(value.lossCapMicroUsdg, 'operator configuration lossCapMicroUsdg');
-  const maxOutstandingCustodyMicroUsdg = assertMicroUsdgAmount(value.maxOutstandingCustodyMicroUsdg, 'operator configuration maxOutstandingCustodyMicroUsdg');
+  const lossCapMicroUsd = assertMicroUsdAmount(value.lossCapMicroUsd, 'operator configuration lossCapMicroUsd');
+  const maxOutstandingCustodyMicroUsd = assertMicroUsdAmount(value.maxOutstandingCustodyMicroUsd, 'operator configuration maxOutstandingCustodyMicroUsd');
   const maxHeldPositions = assertIntegerInRange(value.maxHeldPositions, 'operator configuration maxHeldPositions', {
     min: 0,
     max: maximumHeldPositions,
   });
-  const maxHeldValueMicroUsdg = assertMicroUsdgAmount(value.maxHeldValueMicroUsdg, 'operator configuration maxHeldValueMicroUsdg');
+  const maxHeldValueMicroUsd = assertMicroUsdAmount(value.maxHeldValueMicroUsd, 'operator configuration maxHeldValueMicroUsd');
+  if (maxHeldValueMicroUsd > 5000000000n) throw new Error('operator configuration maxHeldValueMicroUsd exceeds the fixed hard cap');
   const unresolvedCardDeadlineMinutes = assertIntegerInRange(
     value.unresolvedCardDeadlineMinutes,
     'operator configuration unresolvedCardDeadlineMinutes',
@@ -299,17 +283,17 @@ export function assertOperatorConfiguration(value) {
     allowedPackIds: Object.freeze(allowedPackIds),
     requestedOrders,
     maxBoostersPerCycle,
-    maxUnitPriceMicroUsdg: value.maxUnitPriceMicroUsdg,
-    maxCycleBudgetMicroUsdg: value.maxCycleBudgetMicroUsdg,
-    max24HourBudgetMicroUsdg: value.max24HourBudgetMicroUsdg,
+    maxUnitPriceMicroUsd: value.maxUnitPriceMicroUsd,
+    maxCycleBudgetMicroUsd: value.maxCycleBudgetMicroUsd,
+    max24HourBudgetMicroUsd: value.max24HourBudgetMicroUsd,
     paused,
     liveMode,
     maxCyclesPerDay,
-    perCycleCapMicroUsdg: value.perCycleCapMicroUsdg,
-    lossCapMicroUsdg: value.lossCapMicroUsdg,
-    maxOutstandingCustodyMicroUsdg: value.maxOutstandingCustodyMicroUsdg,
+    perCycleCapMicroUsd: value.perCycleCapMicroUsd,
+    lossCapMicroUsd: value.lossCapMicroUsd,
+    maxOutstandingCustodyMicroUsd: value.maxOutstandingCustodyMicroUsd,
     maxHeldPositions,
-    maxHeldValueMicroUsdg: value.maxHeldValueMicroUsdg,
+    maxHeldValueMicroUsd: value.maxHeldValueMicroUsd,
     unresolvedCardDeadlineMinutes,
     executionPaused,
     killSwitch,
@@ -334,17 +318,17 @@ export function createDefaultOperatorConfiguration() {
     allowedPackIds: [],
     requestedOrders: 0,
     maxBoostersPerCycle: 1,
-    maxUnitPriceMicroUsdg: '0',
-    maxCycleBudgetMicroUsdg: '0',
-    max24HourBudgetMicroUsdg: '0',
+    maxUnitPriceMicroUsd: '0',
+    maxCycleBudgetMicroUsd: '0',
+    max24HourBudgetMicroUsd: '0',
     paused: false,
     liveMode: DEFAULT_LIVE_MODE,
     maxCyclesPerDay: 0,
-    perCycleCapMicroUsdg: '0',
-    lossCapMicroUsdg: '0',
-    maxOutstandingCustodyMicroUsdg: '0',
+    perCycleCapMicroUsd: '0',
+    lossCapMicroUsd: '0',
+    maxOutstandingCustodyMicroUsd: '0',
     maxHeldPositions: DEFAULT_MAX_HELD_POSITIONS,
-    maxHeldValueMicroUsdg: DEFAULT_MAX_HELD_VALUE_MICRO_USDG,
+    maxHeldValueMicroUsd: DEFAULT_MAX_HELD_VALUE_MICRO_USD,
     unresolvedCardDeadlineMinutes: DEFAULT_UNRESOLVED_CARD_DEADLINE_MINUTES,
     executionPaused: false,
     killSwitch: false,
@@ -357,98 +341,17 @@ export function createDefaultOperatorConfiguration() {
   });
 }
 
-function hasExactFields(value, fields) {
-  return value
-    && typeof value === 'object'
-    && !Array.isArray(value)
-    && Object.getPrototypeOf(value) === Object.prototype
-    && Object.keys(value).length === fields.length
-    && fields.every(field => Object.hasOwn(value, field));
-}
-
-/**
- * Converts persisted pre-versioned configuration records to the current exact schema. Legacy
- * records preserve their original budget controls but add every newly introduced control in a
- * fail-closed state. Invalid shapes remain unmodified so the normal validator refuses them.
- */
+// Persisted historical money schemas never migrate into executable native state.
 export function migrateOperatorConfiguration(value) {
   if (value === null) return Object.freeze({ configuration: null, migrated: false });
-  if (hasExactFields(value, configurationFields) && value.schema === OPERATOR_CONFIGURATION_SCHEMA) {
-    return Object.freeze({ configuration: assertOperatorConfiguration(value), migrated: false });
-  }
-  if (hasExactFields(value, preDeadlineConfigurationFields) && value.schema === OPERATOR_CONFIGURATION_SCHEMA) {
-    return Object.freeze({
-      configuration: assertOperatorConfiguration({
-        ...value,
-        unresolvedCardDeadlineMinutes: DEFAULT_UNRESOLVED_CARD_DEADLINE_MINUTES,
-      }),
-      migrated: true,
-    });
-  }
-  if (hasExactFields(value, versionTwoConfigurationFields) && value.schema === 'hookemon.operator-configuration.v2') {
-    return Object.freeze({
-      configuration: assertOperatorConfiguration({
-        ...value,
-        schema: OPERATOR_CONFIGURATION_SCHEMA,
-        maxHeldPositions: DEFAULT_MAX_HELD_POSITIONS,
-        maxHeldValueMicroUsdg: DEFAULT_MAX_HELD_VALUE_MICRO_USDG,
-        unresolvedCardDeadlineMinutes: DEFAULT_UNRESOLVED_CARD_DEADLINE_MINUTES,
-      }),
-      migrated: true,
-    });
-  }
-  if (hasExactFields(value, unversionedConfigurationFields)) {
-    return Object.freeze({
-      configuration: assertOperatorConfiguration({ schema: OPERATOR_CONFIGURATION_SCHEMA, ...value }),
-      migrated: true,
-    });
-  }
-  if (hasExactFields(value, unversionedPreDeadlineConfigurationFields)) {
-    return Object.freeze({
-      configuration: assertOperatorConfiguration({
-        schema: OPERATOR_CONFIGURATION_SCHEMA,
-        ...value,
-        unresolvedCardDeadlineMinutes: DEFAULT_UNRESOLVED_CARD_DEADLINE_MINUTES,
-      }),
-      migrated: true,
-    });
-  }
-  if (hasExactFields(value, unversionedVersionTwoConfigurationFields)) {
-    return Object.freeze({
-      configuration: assertOperatorConfiguration({
-        ...value,
-        schema: OPERATOR_CONFIGURATION_SCHEMA,
-        maxHeldPositions: DEFAULT_MAX_HELD_POSITIONS,
-        maxHeldValueMicroUsdg: DEFAULT_MAX_HELD_VALUE_MICRO_USDG,
-        unresolvedCardDeadlineMinutes: DEFAULT_UNRESOLVED_CARD_DEADLINE_MINUTES,
-      }),
-      migrated: true,
-    });
-  }
-  if (hasExactFields(value, legacyConfigurationFields)) {
-    return Object.freeze({
-      configuration: assertOperatorConfiguration({
-        schema: OPERATOR_CONFIGURATION_SCHEMA,
-        ...value,
-        maxCyclesPerDay: 0,
-        perCycleCapMicroUsdg: value.maxCycleBudgetMicroUsdg,
-        lossCapMicroUsdg: '0',
-        maxOutstandingCustodyMicroUsdg: '0',
-        maxHeldPositions: DEFAULT_MAX_HELD_POSITIONS,
-        maxHeldValueMicroUsdg: DEFAULT_MAX_HELD_VALUE_MICRO_USDG,
-        unresolvedCardDeadlineMinutes: DEFAULT_UNRESOLVED_CARD_DEADLINE_MINUTES,
-        executionPaused: true,
-        killSwitch: false,
-        manualApprovalCycles: 0,
-        pendingEpicDecisions: [],
-        approvalsByCycleDigest: {},
-        spendLedger: [],
-        cycleLedger: [],
-      }),
-      migrated: true,
-    });
-  }
-  return Object.freeze({ configuration: value, migrated: false });
+  return Object.freeze({ configuration: assertOperatorConfiguration(value), migrated: false });
+}
+
+export function decodeHistoricalOperatorConfiguration(value) {
+  canonicalJson(value);
+  if (!value || !['hookemon.operator-configuration.v1', 'hookemon.operator-configuration.v2', 'hookemon.operator-configuration.v3'].includes(value.schema)) throw new Error('historical operator schema is invalid');
+  assertNoSecretMaterial(value, 'historical operator configuration');
+  return Object.freeze({ executable: false, configuration: JSON.parse(canonicalJson(value)) });
 }
 
 /**
@@ -468,11 +371,11 @@ export function applyOperatorConfiguration(current, patch) {
     if (Object.hasOwn(patch, field)) throw new Error(`operator configuration patch must not set ${field} directly`);
   }
   const next = { ...base, ...patch };
-  if (Object.hasOwn(patch, 'maxCycleBudgetMicroUsdg') && !Object.hasOwn(patch, 'perCycleCapMicroUsdg')) {
-    next.perCycleCapMicroUsdg = patch.maxCycleBudgetMicroUsdg;
+  if (Object.hasOwn(patch, 'maxCycleBudgetMicroUsd') && !Object.hasOwn(patch, 'perCycleCapMicroUsd')) {
+    next.perCycleCapMicroUsd = patch.maxCycleBudgetMicroUsd;
   }
-  if (Object.hasOwn(patch, 'perCycleCapMicroUsdg') && !Object.hasOwn(patch, 'maxCycleBudgetMicroUsdg')) {
-    next.maxCycleBudgetMicroUsdg = patch.perCycleCapMicroUsdg;
+  if (Object.hasOwn(patch, 'perCycleCapMicroUsd') && !Object.hasOwn(patch, 'maxCycleBudgetMicroUsd')) {
+    next.maxCycleBudgetMicroUsd = patch.perCycleCapMicroUsd;
   }
   return assertOperatorConfiguration({ ...next, configurationRevision: base.configurationRevision + 1 });
 }

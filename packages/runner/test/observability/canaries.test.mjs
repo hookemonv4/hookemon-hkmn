@@ -31,6 +31,7 @@ function createContext(overrides = {}) {
   const resolved = [];
   const config = {
     chainId: 4663,
+    nativePrincipal: { chainId: '4663', assetId: 'native', decimals: 18 },
     contracts: {
       usdg: {
         proxy: { address: addresses.usdgProxy, runtimeHash: hashes.usdgProxy },
@@ -59,6 +60,7 @@ function createContext(overrides = {}) {
     [addresses.quoter, hashes.quoter],
   ]);
   const readers = {
+    readNativePrincipalIdentity: async () => ({ chainId: '4663', assetId: 'native', decimals: 18 }),
     readChainId: async () => 4663,
     readRuntimeCodeHash: async address => runtimeHashes.get(address),
     readProxyImplementation: async () => addresses.usdgImplementation,
@@ -77,6 +79,7 @@ function createContext(overrides = {}) {
   };
   return {
     config,
+    nativePrincipal: { chainId: '4663', assetId: 'native', decimals: 18, amountAtomic: '1' },
     readers,
     destinations: [addresses.destination],
     freshness: { kind: 'evm', account: addresses.operations, expectedNonce: '7' },
@@ -112,32 +115,12 @@ test('requires every persisted pause flag before permitting a signature', async 
   }
 });
 
-test('uses canonical USDG freeze keys for each unique freeze target', async () => {
-  const context = createContext({
-    destinations: [
-      `0x${addresses.destination.slice(2).toUpperCase()}`,
-      addresses.operations,
-      addresses.destination,
-    ],
-  });
-
-  const result = await runPreSignatureCanaries(context);
-
-  assert.equal(result.ok, true);
-  assert.deepEqual(context.resolved
-    .filter(item => item.key.startsWith('canary:usdg-frozen:'))
-    .map(item => item.key), [
-      `canary:usdg-frozen:${addresses.operations}`,
-      `canary:usdg-frozen:${addresses.destination}`,
-    ]);
-});
-
-test('requires at least one canonical signature destination for USDG freeze checks', async () => {
-  const result = await runPreSignatureCanaries(createContext({ destinations: [] }));
-
-  assert.equal(result.ok, false);
-  assert.deepEqual(result.drift.map(item => item.code), ['CONFIGURATION_UNVERIFIED']);
-  assert.equal(result.drift[0].target, 'USDG freeze targets');
+test('refuses a token principal identity and a balance that covers gas but not principal', async () => {
+  const wrong = createContext();
+  wrong.readers.readNativePrincipalIdentity = async () => ({ chainId: '4663', assetId: addresses.usdgProxy, decimals: 6 });
+  assert.equal((await runPreSignatureCanaries(wrong)).drift[0].code, 'NATIVE_PRINCIPAL_IDENTITY_MISMATCH');
+  const short = createContext({ nativePrincipal: { chainId: '4663', assetId: 'native', decimals: 18, amountAtomic: '2' } });
+  assert.ok((await runPreSignatureCanaries(short)).drift.some(item => item.code === 'NATIVE_GAS_BELOW_MINIMUM'));
 });
 
 test('requires one configured EVM reserve and one configured Solana reserve', async () => {
@@ -230,7 +213,8 @@ test('every unsafe canary observation blocks signing and requests one actionable
   const context = createContext({
     readers: {
       ...createContext().readers,
-      readChainId: async () => 1,
+      readNativePrincipalIdentity: async () => ({ chainId: '4663', assetId: 'native', decimals: 18 }),
+    readChainId: async () => 1,
       readRuntimeCodeHash: async address => address === addresses.router ? hashes.quoter : createContext().readers.readRuntimeCodeHash(address),
       readUsdgDecimals: async () => 18,
       readUsdgPaused: async () => true,
@@ -262,9 +246,6 @@ test('every unsafe canary observation blocks signing and requests one actionable
   assert.deepEqual(new Set(result.drift.map(item => item.code)), new Set([
     'CHAIN_ID_MISMATCH',
     'RUNTIME_HASH_MISMATCH',
-    'USDG_DECIMALS_MISMATCH',
-    'USDG_PAUSED',
-    'USDG_FROZEN',
     'HOOK_ROLES_MISMATCH',
     'POOL_FEE_NONZERO',
     'PROVIDER_POLICY_DIGEST_MISMATCH',
@@ -286,7 +267,7 @@ test('missing or failed evidence fails closed without exposing reader errors', a
   const result = await runPreSignatureCanaries(context);
 
   assert.equal(result.ok, false);
-  assert.equal(result.drift.filter(item => item.target.endsWith('runtime') && item.code.endsWith('_UNVERIFIED')).length, 6);
+  assert.equal(result.drift.filter(item => item.target.endsWith('runtime') && item.code.endsWith('_UNVERIFIED')).length, 4);
   assert.doesNotMatch(JSON.stringify(result), /value-that-must-not-escape/);
 });
 

@@ -20,7 +20,7 @@ const evmPolicy = () => ({
   chain: 'eip155:4663',
   allowedDestinations: ['0x000000000000000000000000000000000000beef'],
   allowedFunctions: ['0x12345678'],
-  allowedAssets: ['USDG'],
+  allowedAssets: ['native'],
   maxAmount: '55000000',
 });
 
@@ -30,7 +30,7 @@ const intent = (overrides = {}) => ({
   chain: 'eip155:4663',
   destination: '0x000000000000000000000000000000000000beef',
   functionOrProgram: '0x12345678',
-  asset: 'USDG',
+  asset: 'native',
   amount: '50000000',
   cap: '55000000',
   unsignedTransaction: transactionBytes,
@@ -148,14 +148,14 @@ test('applies the same boundary to a Solana policy wallet', async () => {
     chain: 'solana:mainnet',
     allowedDestinations: ['11111111111111111111111111111111'],
     allowedFunctions: ['buy-pack-v1'],
-    allowedAssets: ['USDG'],
+    allowedAssets: ['USDC'],
   };
   const wallet = new SolanaPolicyWallet({ policy, ...clients() });
   const action = intent({
     chain: policy.chain,
     destination: policy.allowedDestinations[0],
     functionOrProgram: policy.allowedFunctions[0],
-    asset: 'USDG',
+    asset: 'USDC',
   });
   const submission = await wallet.signAndBroadcast(action, authorizationFor(action));
   assert.equal(submission.transactionId, '0xtx1');
