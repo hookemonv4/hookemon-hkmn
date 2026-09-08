@@ -9,6 +9,8 @@ dashboard, CLI, and runner callers receive a frozen read client rather than a se
 
 ## Public interface
 
+`recordSupplementaryPayoutGas` records finalized native transaction gas against an existing supplementary manifest and its persisted signed recipient bytes. It accepts only process-authenticated payment or gas-only proofs, reserves each transaction globally, and replays idempotently after restart. This write changes gas accounting only, including for reverted transactions after the main cycle completes; it grants no principal and does not extend generic custody writes.
+
 - `CYCLE_REPOSITORY_CLIENT_INTERFACE` exposes `readActiveCycle`, `peekActiveCycle`, `readStage`,
   `describeCycle`, `readOperationalStageAttempt`,
   `readChainTransactionAttempt(cycleId, stage, requestDigest)`, `readClaimPreconditions`, and

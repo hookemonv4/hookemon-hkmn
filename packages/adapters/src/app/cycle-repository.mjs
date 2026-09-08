@@ -1,7 +1,7 @@
 import { isProcessQuoteUsdValuation, readProcessQuoteUsdProvenance, relayQuoteDigest, parseQuoteResponse } from '../relay-client.mjs';
 import { requireLiveMutationAuthority, createTestProfileMutationAuthority } from '../../../runner/src/cycle/preflight.mjs';
 import { createHash } from 'node:crypto';
-import { isProcessNativePaymentProof } from '../native-payment-proof.mjs';
+import { isProcessNativePaymentProof, applyNativeCustodyGasPayment } from '../native-payment-proof.mjs';
 // The durable authority for one operational cycle. `compose.mjs` injects this same instance into
 // the scheduler, CLI service, and in-process dashboard so they observe one append-only journal
 // rather than a placeholder runner or a second store. The exported client facade gives future
@@ -71,6 +71,7 @@ const POST_TERMINAL_RECORD_KINDS = new Set([
   'held-position-owner-decision-recorded',
   'held-position-resolved',
   'supplementary-settlement-advanced',
+  'supplementary-payout-gas-recorded',
   'supplementary-chain-attempt-prepared',
   'supplementary-chain-attempt-signed',
   'supplementary-chain-attempt-signed-with-recovery-context',
@@ -81,6 +82,7 @@ const POST_COMPLETION_RECORD_KINDS = new Set([
   'held-position-owner-decision-recorded',
   'held-position-resolved',
   'supplementary-settlement-advanced',
+  'supplementary-payout-gas-recorded',
   'supplementary-chain-attempt-prepared',
   'supplementary-chain-attempt-signed',
   'supplementary-chain-attempt-signed-with-recovery-context',
@@ -200,6 +202,7 @@ export const CYCLE_REPOSITORY_INTERFACE = Object.freeze([
   'persistPagedPayoutState',
   'consumePayoutDustAndPersistPagedPayoutState',
   'recordCustodyLedger',
+  'recordSupplementaryPayoutGas',
   'readPayoutDust',
   'readPayoutDustConsumption',
   'recordPayoutDust',
@@ -1268,6 +1271,23 @@ function returnRelayTerminalState(leg, proof) {
   const observedAt = BigInt(proof.destinationFinality.timestampUnixSeconds);
   if (observedAt < createdAt || observedAt > latest) return 'HELD_RELAY_LATE';
   return 'SETTLED';
+}
+
+function supplementaryGasLedger(previous, proof) {
+  const { evidenceDigest, ...facts } = proof ?? {};
+  if (!previous || previous.schema !== 'hookemon.custody-ledger.v3'
+    || !['hookemon.native-payment-proof.v1', 'hookemon.native-transaction-gas-proof.v1'].includes(proof?.schema)
+    || proof.chainId !== '4663' || proof.assetId !== 'native' || proof.decimals !== 18
+    || !['success', 'reverted'].includes(proof.receiptStatus)
+    || !evmTransactionHashPattern.test(proof.transactionHash) || !digestPattern.test(proof.transactionDigest)
+    || typeof proof.gasSpentWei !== 'string' || !decimalPattern.test(proof.gasSpentWei)
+    || digest(facts) !== evidenceDigest) throw new Error('supplementary payout gas evidence is invalid');
+  const existing = previous.gasPayments.find(item => item.transactionHash === proof.transactionHash);
+  if (existing && existing.amountWei !== proof.gasSpentWei) throw new Error('supplementary payout gas cost changed');
+  return assertCustodyLedger({ ...previous,
+    gasPayments: existing ? previous.gasPayments : [...previous.gasPayments, { transactionHash: proof.transactionHash, amountWei: proof.gasSpentWei }],
+    gasSpent: { ...previous.gasSpent, amountAtomic: (BigInt(previous.gasSpent.amountAtomic) + (existing ? 0n : BigInt(proof.gasSpentWei))).toString() },
+  });
 }
 
 function supplementaryNativeReturnCustody(state, amountAtomic) {
@@ -3887,6 +3907,15 @@ export class CycleRepository {
           custodyLedgers.set(key, ledger);
         }
         heldPositions.set(position.positionId, position);
+      } else if (entry.kind === 'supplementary-payout-gas-recorded') {
+        const { positionId, manifestId, planDigest, proof } = entry.payload;
+        const settlement = supplementarySettlements.get(positionId);
+        if (admission?.schema !== 'hookemon.policy-admission.v3' || !settlement
+          || settlement.manifestId !== manifestId || !digestPattern.test(planDigest)) {
+          throw new Error('stored supplementary gas does not bind its original position manifest');
+        }
+        const key = custodyLedgerKey({ chainId: '4663', assetId: 'native' });
+        custodyLedgers.set(key, supplementaryGasLedger(custodyLedgers.get(key), proof));
       } else if (entry.kind === 'custody-ledger-recorded') {
         const ledger = assertCustodyLedger(entry.payload.ledger, 'stored custody ledger', { allowLegacyBuckets: true });
         if (ledger.cycleId !== cycleId) throw new Error('stored custody ledger cycleId is invalid');
@@ -6759,6 +6788,62 @@ export class CycleRepository {
       },
     });
     return { ...current, attempt, reconciliationEvidence };
+  }
+
+  /** Accounts for finalized gas only; completed-cycle principal buckets remain immutable. */
+  async recordSupplementaryPayoutGas(cycleId, { planDigest, proof }) {
+    const state = await this.#replay(cycleId);
+    if (state.archived || state.admission?.schema !== 'hookemon.policy-admission.v3' || !digestPattern.test(planDigest)) {
+      throw new Error('supplementary payout gas requires an unarchived native cycle');
+    }
+    const key = custodyLedgerKey({ chainId: '4663', assetId: 'native' });
+    const previous = state.custodyLedgers.get(key);
+    // This private producer check also authenticates gas-only proofs from reverted transactions.
+    const gas = applyNativeCustodyGasPayment(previous, proof);
+    let matched = null;
+    for (const settlement of state.supplementarySettlements.values()) {
+      const stage = `supplementary-${settlement.positionId.slice(5, 53)}`;
+      const stored = await this.#store.readPagedPayoutState(cycleId, stage);
+      const payout = stored?.payoutState;
+      if (stored?.schema !== 'hookemon.supplementary-payout-state.v2' || stored.cycleId !== cycleId
+        || stored.positionId !== settlement.positionId || stored.manifestId !== settlement.manifestId
+        || stored.positionEvidenceDigest !== settlement.positionEvidenceDigest
+        || stored.eligibilitySnapshotEvidenceDigest !== settlement.eligibilitySnapshotEvidenceDigest
+        || stored.payoutSourceDigest !== settlement.payoutSourceDigest
+        || payout?.planDigest !== planDigest || payout.plan?.cycleId !== cycleId
+        || payout.operations !== (proof.source ?? proof.sender) || payout.assetId !== 'native') continue;
+      for (const recipient of stored.recipients ?? []) {
+        for (const candidate of [recipient, ...(recipient.replacementHistory ?? [])]) {
+          if (candidate.txHash !== proof.transactionHash || typeof candidate.rawSignedBytes !== 'string'
+            || digest(candidate.rawSignedBytes) !== proof.transactionDigest) continue;
+          if (proof.schema === 'hookemon.native-payment-proof.v1' && (proof.kind !== 'direct'
+            || proof.recipient !== recipient.recipient || proof.amountWei !== recipient.amount?.amountAtomic
+            || proof.nonce !== candidate.nonce || proof.receiptStatus !== 'success')) continue;
+          if (matched) throw new Error('supplementary payout gas has an ambiguous signed payment');
+          matched = settlement;
+        }
+      }
+    }
+    if (!matched) throw new Error('supplementary payout gas requires its persisted signed recipient payment');
+    const reservationKey = `native-supplementary-gas:${proof.transactionHash}`;
+    const owner = { cycleId, positionId: matched.positionId, planDigest, transactionHash: proof.transactionHash };
+    const existing = await this.#store.readGlobalKey(reservationKey);
+    if (existing && canonicalJson(existing) !== canonicalJson(owner)) throw new Error('supplementary gas transaction belongs to another payout');
+    if (previous.gasPayments.some(item => item.transactionHash === proof.transactionHash)) {
+      if (!existing) throw new Error('supplementary gas transaction is already attributed outside this payout');
+      return previous;
+    }
+    const next = supplementaryGasLedger(previous, proof);
+    if (canonicalJson(next.gasSpent) !== canonicalJson(gas.gasSpent)) throw new Error('supplementary gas projection differs');
+    await this.#append(cycleId, 'supplementary-payout-gas-recorded', {
+      positionId: matched.positionId, manifestId: matched.manifestId, planDigest, proof: structuredClone(proof),
+    }, { globalKeyReservations: [{ key: reservationKey, value: owner }], assertState: current => {
+      if (current.archived || canonicalJson(current.custodyLedgers.get(key)) !== canonicalJson(previous)
+        || canonicalJson(current.supplementarySettlements.get(matched.positionId)) !== canonicalJson(matched)) {
+        throw new Error('supplementary payout gas state changed before append');
+      }
+    } });
+    return next;
   }
 
   async recordCustodyLedger(cycleId, ledgerValue) {
