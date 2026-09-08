@@ -1,3 +1,4 @@
+import { nativeValidationSkeleton, requireNativeRound } from './native-accounting.mjs';
 // Clean-room re-implementation of GET /public/api/cycle-status's contract (readSet:
 // apps/web/lib/public-cycle-status.ts on the legacy codex/mainnet-cycle-canary branch,
 // `normalizePublicCycleStatus`/schemaVersion 5). Ported field-for-field, including the legacy
@@ -100,6 +101,14 @@ const EXECUTION_STATES = new Set(['active', 'paused', 'unknown']);
 const MAX_PUBLIC_CARDS = 60;
 
 export function normalizePublicCycleStatus(value, expectedProfile) {
+  if (value?.schemaVersion === 7) {
+    const round = value.cycle?.roundAccounting ?? null;
+    requireNativeRound(round);
+    const skeleton = nativeValidationSkeleton(value);
+    skeleton.schemaVersion = 6;
+    normalizePublicCycleStatus(skeleton, expectedProfile);
+    return structuredClone(value);
+  }
   try {
     return readPublicCycleStatus(value, expectedProfile);
   } catch (error) {

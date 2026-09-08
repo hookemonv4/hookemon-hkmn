@@ -1,3 +1,4 @@
+import { nativeValidationSkeleton, requireNativeRound } from "./native-accounting.mjs";
 import {
   readDashboardProfile,
   type DashboardNetwork,
@@ -97,7 +98,7 @@ export type PublicHeldPosition = {
 };
 
 export type PublicCycleStatus = {
-  schemaVersion: 3 | 4 | 5 | 6;
+  schemaVersion: 3 | 4 | 5 | 6 | 7;
   profile: DashboardProfileId;
   network: DashboardNetwork;
   executionState: "active" | "paused" | "unknown";
@@ -245,6 +246,15 @@ export function normalizePublicCycleStatus(
   value: unknown,
   expectedProfile?: DashboardProfileId,
 ): PublicCycleStatus {
+  if (value !== null && typeof value === "object" && "schemaVersion" in value && value.schemaVersion === 7) {
+    const source = value as Record<string, unknown>;
+    const cycle = source.cycle as Record<string, unknown> | null;
+    requireNativeRound(cycle?.roundAccounting ?? null);
+    const skeleton = nativeValidationSkeleton(source) as Record<string, unknown>;
+    skeleton.schemaVersion = 6;
+    normalizePublicCycleStatus(skeleton, expectedProfile);
+    return structuredClone(source) as unknown as PublicCycleStatus;
+  }
   try {
     return readPublicCycleStatus(value, expectedProfile);
   } catch {

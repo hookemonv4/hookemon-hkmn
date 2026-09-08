@@ -1,3 +1,4 @@
+import { nativeValidationSkeleton, requireNativeRound, formatNativeAmount } from './native-accounting.mjs';
 const UNAVAILABLE = '—';
 const MISSING_VALUE = '—';
 const FRESH_MS = 90_000;
@@ -246,6 +247,18 @@ export function normalizePublicCycleHistory(value, expectedProfile) {
 }
 
 export function validateDashboardPair(status, community) {
+  if (status?.schemaVersion === 7 || community?.schemaVersion === 9) {
+    const nativeStatus = status?.schemaVersion === 7;
+    const nativeCommunity = community?.schemaVersion === 9;
+    if (nativeStatus) requireNativeRound(status.cycle?.roundAccounting ?? null);
+    if (nativeCommunity) requireNativeRound(community.latestCycle?.roundAccounting ?? null);
+    const statusShape = nativeStatus ? nativeValidationSkeleton(status) : status;
+    const communityShape = nativeCommunity ? nativeValidationSkeleton(community) : community;
+    if (nativeStatus) statusShape.schemaVersion = 6;
+    if (nativeCommunity) communityShape.schemaVersion = 8;
+    validateDashboardPair(statusShape, communityShape);
+    return { status, community };
+  }
   if (!readStatusShape(status) || !readCommunityShape(community)
     || status.profile !== community.profile || community.badge !== status.profile.toUpperCase()
     || networkIdentity(status.network) !== identities[status.profile]
@@ -270,13 +283,16 @@ export function formatMicroUsdg(value) {
 }
 
 export function latestPayout(cycle) {
-  if (!cycle || !text(cycle.status) || cycle.status.toLowerCase() !== 'complete') return null;
+  const native = cycle?.roundAccounting?.schema === 'hookemon.native-round-accounting.v1';
+  if (!cycle || !text(cycle.status) || !['complete', ...(native ? ['paid-out'] : [])].includes(cycle.status.toLowerCase())) return null;
   const accounting = cycle.roundAccounting;
   if (accounting && !['reconciled', 'complete', 'paid', 'settled', 'legacy-settlement-recorded'].includes(accounting.distributionStatus.toLowerCase())) return null;
-  const paid = accounting?.paidHolderRewardsMicroUsdg ?? cycle.paidMicroUsdg;
+  const accountingPaid = native ? accounting.paidHolderRewardsWei : accounting?.paidHolderRewardsMicroUsdg;
+  const cyclePaid = native ? cycle.paidWei : cycle.paidMicroUsdg;
+  const paid = accountingPaid ?? cyclePaid;
   if (!money(paid) || !count(cycle.payoutRecipientCount) || cycle.payoutRecipientCount <= 0) return null;
-  if (money(accounting?.paidHolderRewardsMicroUsdg) && money(cycle.paidMicroUsdg) && accounting.paidHolderRewardsMicroUsdg !== cycle.paidMicroUsdg) return null;
-  return { paid, recipients: cycle.payoutRecipientCount, average: (BigInt(paid) / BigInt(cycle.payoutRecipientCount)).toString() };
+  if (money(accountingPaid) && money(cyclePaid) && accountingPaid !== cyclePaid) return null;
+  return { ...(native ? { unit: "ETH" } : {}), paid, recipients: cycle.payoutRecipientCount, average: (BigInt(paid) / BigInt(cycle.payoutRecipientCount)).toString() };
 }
 
 export function historyPresentation(community) {
@@ -284,7 +300,7 @@ export function historyPresentation(community) {
   const metrics = community?.metrics;
   const formatCount = (value) => complete && count(value) ? value.toLocaleString('en-US') : MISSING_VALUE;
   return {
-    totalPaid: formatMicroUsdg(complete ? metrics?.totalRewardsPaidMicroUsdg : null),
+    totalPaid: community?.schemaVersion === 9 ? formatNativeAmount(complete ? metrics?.totalRewardsPaidWei : null) : formatMicroUsdg(complete ? metrics?.totalRewardsPaidMicroUsdg : null),
     completedCycles: formatCount(metrics?.completedCycles),
     skippedCycles: formatCount(metrics?.skippedCycles),
     openedPacks: formatCount(metrics?.openedPacks),
@@ -378,9 +394,11 @@ export function processStep(id, status) {
       : complete ? 'complete' : cycle.status === 'skipped' ? 'skipped'
         : status.executionState === 'paused' ? 'paused'
           : actions.some((action) => action.status === 'pending') || (id === 'cards' && done) ? 'active' : 'waiting';
+  const native = status.schemaVersion === 7;
   const amounts = { packs: cycle.spentMicroUsdg, sales: cycle.roundAccounting?.buybackMicroUsdg, return: cycle.returnedMicroUsdg, holders: cycle.paidMicroUsdg };
+  const nativeAmounts = { packs: cycle.spentWei, sales: cycle.roundAccounting?.buybackMicroUsd, return: cycle.returnedWei ?? cycle.roundAccounting?.inboundBridgeProceeds?.units, holders: cycle.paidWei ?? cycle.roundAccounting?.paidHolderRewardsWei };
   const amount = id === 'budget' ? cycle.plannedBoosters > 0 ? `${cycle.plannedBoosters} planned` : cycle.selectedPackId ? 'Pack selected' : UNAVAILABLE
-    : id === 'cards' ? cycle.openedBoosters > 0 ? `${cycle.openedBoosters} opened` : UNAVAILABLE : formatMicroUsdg(amounts[id]);
+    : id === 'cards' ? cycle.openedBoosters > 0 ? `${cycle.openedBoosters} opened` : UNAVAILABLE : native ? formatNativeAmount(nativeAmounts[id], id === 'sales' ? 6 : 18, id === 'sales' ? 'USD' : 'ETH') : formatMicroUsdg(amounts[id]);
   return { state, amount };
 }
 
@@ -458,12 +476,12 @@ export function startDashboard(doc = document) {
     const { payout, note: payoutNote } = payoutPresentation(community);
     const history = historyPresentation(community);
     const cards = status?.cycle?.cards.length ? [...status.cycle.cards].reverse() : community?.cards ?? [];
-    setText('metricPool', formatMicroUsdg(community?.metrics.latestObservedProjectPoolMicroUsdg));
+    setText('metricPool', community?.schemaVersion === 9 ? formatNativeAmount(community.metrics.latestObservedProjectPoolWei) : formatMicroUsdg(community?.metrics.latestObservedProjectPoolMicroUsdg));
     setText('metricPoolNote', community?.poolObservedAt ? `Observed ${formatTime(community.poolObservedAt)}` : 'Awaiting a verified pool observation');
-    setText('metricPaid', formatMicroUsdg(payout?.paid));
-    setText('metricAverage', formatMicroUsdg(payout?.average));
+    setText('metricPaid', payout?.unit === 'ETH' ? formatNativeAmount(payout.paid) : formatMicroUsdg(payout?.paid));
+    setText('metricAverage', payout?.unit === 'ETH' ? formatNativeAmount(payout.average) : formatMicroUsdg(payout?.average));
     setText('metricPaidNote', payoutNote);
-    setText('metricAverageNote', payout ? 'Per actual recipient · rounded down to 0.000001 USDG' : payoutNote);
+    setText('metricAverageNote', payout ? payout.unit === 'ETH' ? 'Per actual recipient · rounded down to one wei' : 'Per actual recipient · rounded down to 0.000001 USDG' : payoutNote);
     setText('metricRecipients', payout ? payout.recipients.toLocaleString('en-US') : MISSING_VALUE);
     setText('metricPacks', history.openedPacks);
     setText('metricTotalPaid', history.totalPaid);

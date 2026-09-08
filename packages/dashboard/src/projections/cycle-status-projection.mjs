@@ -42,8 +42,11 @@ export function buildPublicCycleStatus({ profileId, internalStatus, configuratio
       : generatedAt);
   const countdownSeconds = Math.ceil(Math.max(0, Date.parse(nextCycleAt) - Date.parse(generatedAt)) / 1_000);
 
+  const native = internalStatus.activeCycle?.accounting
+    ? internalStatus.activeCycle.accounting.schema === 'hookemon.native-round-accounting.v1'
+    : configuration?.schema === 'hookemon.operator-configuration.v4';
   const status = {
-    schemaVersion: 6,
+    schemaVersion: native ? 7 : 6,
     profile: profile.id,
     network: profile.network,
     executionState,
@@ -51,7 +54,7 @@ export function buildPublicCycleStatus({ profileId, internalStatus, configuratio
     generatedAt,
     nextCycleAt,
     countdownSeconds,
-    cycle: internalStatus.activeCycle ? buildPublicActiveCycle(internalStatus.activeCycle, configuration) : null,
+    cycle: internalStatus.activeCycle ? buildPublicActiveCycle(internalStatus.activeCycle, configuration, native) : null,
     heldPositionCount: Array.isArray(internalStatus.heldPositions) ? internalStatus.heldPositions.length : 0,
     heldPositions: Array.isArray(internalStatus.heldPositions) ? internalStatus.heldPositions : [],
     scheduler: schedulerView ?? {
@@ -65,7 +68,7 @@ export function buildPublicCycleStatus({ profileId, internalStatus, configuratio
   return normalizePublicCycleStatus(status, profileId);
 }
 
-function buildPublicActiveCycle(activeCycle, configuration) {
+function buildPublicActiveCycle(activeCycle, configuration, native) {
   return {
     cycleId: activeCycle.cycleId,
     status: activeCycle.stage,
@@ -75,7 +78,7 @@ function buildPublicActiveCycle(activeCycle, configuration) {
     openedBoosters: 0,
     actions: [],
     cards: [],
-    returnedMicroUsdg: null,
+    [native ? 'returnedWei' : 'returnedMicroUsdg']: null,
     rewardStatus: activeCycle.accounting ? activeCycle.accounting.distributionStatus : null,
     // `activeCycle.accounting` is present only when `projectCycleStatus` was called with a
     // `readAccounting` function (see this module's own header) — its shape is already exactly

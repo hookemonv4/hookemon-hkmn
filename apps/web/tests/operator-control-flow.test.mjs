@@ -5,8 +5,8 @@ import test from "node:test";
 test("keeps German configuration controls separate from canonical decision payloads", async () => {
   const source = await readFile(new URL("../app/operator/OperatorControlPanel.tsx", import.meta.url), "utf8");
 
-  assert.match(source, /germanMoneyFormValue\(state\.maxUnitPriceMicroUsdg\)/);
-  assert.match(source, /parseGermanUsdg\(form\.maxUnitPriceMicroUsdg\)/);
+  assert.match(source, /germanMoneyFormValue\(state\.maxUnitPriceMicroUsd\)/);
+  assert.match(source, /parseGermanUsd\(form\.maxUnitPriceMicroUsd\)/);
   assert.match(source, /allowedPackIds:\s*\[\.\.\.form\.allowedPackIds\]\.sort\(\)/);
   assert.match(source, /requestedOrders:\s*Number\(form\.requestedOrders\)/);
   assert.match(source, /configurationSnapshotFromState\(bootstrap\.state\)/);

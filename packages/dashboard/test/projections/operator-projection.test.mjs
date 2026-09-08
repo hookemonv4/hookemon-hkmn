@@ -40,16 +40,16 @@ test('dashboard projection preserves policy cap usage and safety telemetry avail
       cap: {
         offChain24Hour: null,
         loss: {
-          realizedLossMicroUsdg: '7',
-          atRiskMicroUsdg: '8',
-          usedMicroUsdg: '15',
-          limitMicroUsdg: '100',
-          remainingMicroUsdg: '85',
+          realizedLossMicroUsd: '7',
+          atRiskMicroUsd: '8',
+          usedMicroUsd: '15',
+          limitMicroUsd: '100',
+          remainingMicroUsd: '85',
         },
         outstandingCustody: {
-          usedMicroUsdg: '19',
-          limitMicroUsdg: '100',
-          remainingMicroUsdg: '81',
+          usedMicroUsd: '19',
+          limitMicroUsd: '100',
+          remainingMicroUsd: '81',
         },
         onChainRemainingCapacity: null,
       },
@@ -62,9 +62,9 @@ test('dashboard projection preserves policy cap usage and safety telemetry avail
 
   const validated = assertDashboardResponse(dashboard);
 
-  assert.equal(validated.schemaVersion, 6);
-  assert.equal(validated.cap.loss.usedMicroUsdg, '15');
-  assert.equal(validated.cap.outstandingCustody.usedMicroUsdg, '19');
+  assert.equal(validated.schemaVersion, 7);
+  assert.equal(validated.cap.loss.usedMicroUsd, '15');
+  assert.equal(validated.cap.outstandingCustody.usedMicroUsd, '19');
   assert.deepEqual(validated.alertSources, { safetyTelemetry: true });
 });
 
@@ -81,6 +81,12 @@ test('dashboard contract continues to accept the prior cap-only response shape',
     },
     now: () => Date.UTC(2026, 0, 1),
   });
+  legacy.metrics = {
+    cycleStartProjectPoolMicroUsdg: null, totalCycleFundingMicroUsdg: '0', totalCollectorSpendMicroUsdg: '0',
+    totalBuybacksReturnedMicroUsdg: '0', totalBridgedBackMicroUsdg: '0', totalRewardsPaidMicroUsdg: '0',
+    totalRewardsDeferredMicroUsdg: '0', totalQuotedOperatingCostsMicroUsdg: '0', latestRetainedReserveMicroUsdg: '0',
+    latestCycleReserveTargetMicroUsdg: '0', completedCycles: 0, skippedCycles: 0, openedPacks: 0,
+  };
   legacy.schemaVersion = 5;
   delete legacy.alertSources;
   delete legacy.cap.loss;

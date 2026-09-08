@@ -1,3 +1,4 @@
+import { nativeUnknownFields } from '../contracts/native-accounting.mjs';
 // Maps the runner-owned operator-control status into the dashboard's compatibility read models.
 // The dashboard receives a snapshot from `operatorControl.status()` and does not inspect a state
 // file or a cycle repository itself. That keeps lifecycle facts on the one authority boundary.
@@ -11,9 +12,9 @@ export const REWARD_RECIPIENT_LIMITS = Object.freeze(
 
 export const HARD_CAPS = Object.freeze({
   maxBoostersPerCycle: OPERATOR_HARD_CAPS.maxBoostersPerCycle,
-  maxUnitPriceMicroUsdg: OPERATOR_HARD_CAPS.maxUnitPriceMicroUsdg,
-  maxCycleBudgetMicroUsdg: OPERATOR_HARD_CAPS.maxCycleBudgetMicroUsdg,
-  max24HourBudgetMicroUsdg: OPERATOR_HARD_CAPS.max24HourBudgetMicroUsdg,
+  maxUnitPriceMicroUsd: OPERATOR_HARD_CAPS.maxUnitPriceMicroUsd,
+  maxCycleBudgetMicroUsd: OPERATOR_HARD_CAPS.maxCycleBudgetMicroUsd,
+  max24HourBudgetMicroUsd: OPERATOR_HARD_CAPS.max24HourBudgetMicroUsd,
 });
 
 function effectiveConfiguration(configuration) {
@@ -29,8 +30,9 @@ function mapOperatorState(configuration, revision) {
   return {
     version: revision,
     desiredStatus: effective.killSwitch ? 'killed' : (isPaused(effective) ? 'paused' : 'active'),
-    mode: 'standard',
-    communityPackIds: [],
+    allowedPackIds: effective.allowedPackIds,
+    requestedOrders: effective.requestedOrders,
+    intervalMinutes: effective.intervalMinutes,
     manualPackOrders: effective.allowedPackIds.length === 1
       ? [{ productId: effective.allowedPackIds[0], quantity: effective.requestedOrders }]
       : [],
@@ -39,9 +41,9 @@ function mapOperatorState(configuration, revision) {
     cycleIntervalMinutes: effective.intervalMinutes,
     skipNextCycleSequence: 0,
     runNowSequence: 0,
-    maxUnitPriceMicroUsdg: effective.maxUnitPriceMicroUsdg,
-    maxCycleBudgetMicroUsdg: effective.maxCycleBudgetMicroUsdg,
-    max24HourBudgetMicroUsdg: effective.max24HourBudgetMicroUsdg,
+    maxUnitPriceMicroUsd: effective.maxUnitPriceMicroUsd,
+    maxCycleBudgetMicroUsd: effective.maxCycleBudgetMicroUsd,
+    max24HourBudgetMicroUsd: effective.max24HourBudgetMicroUsd,
     configurationComplete: configuration !== null && configuration !== undefined && configuration.allowedPackIds.length > 0,
     executionConnected: false,
     liveMode: effective.liveMode === true,
@@ -112,7 +114,7 @@ export function buildDashboardReadModel({ authorityStatus, now = Date.now, lastT
   const completedCycles = cycles.filter(cycle => cycle?.terminalState === 'COMPLETED').length;
 
   return {
-    schemaVersion: 6,
+    schemaVersion: 7,
     historyComplete: true,
     cardHistoryComplete: true,
     generatedAt: new Date(now()).toISOString(),
@@ -121,7 +123,7 @@ export function buildDashboardReadModel({ authorityStatus, now = Date.now, lastT
     execution: { connected: false, lastHeartbeatAt: null },
     cycleStartProjectPoolObservedAt: null,
     latestCompletedAllocationCycleId: null,
-    metrics: {
+    metrics: nativeUnknownFields({
       cycleStartProjectPoolMicroUsdg: null,
       totalCycleFundingMicroUsdg: '0',
       totalCollectorSpendMicroUsdg: '0',
@@ -135,7 +137,7 @@ export function buildDashboardReadModel({ authorityStatus, now = Date.now, lastT
       completedCycles,
       skippedCycles: 0,
       openedPacks: 0,
-    },
+    }),
     latestCycleTopAllocations: [],
     cards: [],
     activeCycle: current
@@ -145,13 +147,11 @@ export function buildDashboardReadModel({ authorityStatus, now = Date.now, lastT
         updatedAt: null,
         configurationRevision: configuration ? String(configuration.configurationRevision) : null,
         allowedPackIds: configuration ? configuration.allowedPackIds : [],
-        requestedOrders: configuration && configuration.allowedPackIds.length === 1
-          ? [{ productId: configuration.allowedPackIds[0], quantity: configuration.requestedOrders }]
-          : [],
+        requestedOrders: configuration?.requestedOrders ?? 0,
         maxBoostersPerCycle: configuration ? configuration.maxBoostersPerCycle : null,
-        maxUnitPriceMicroUsdg: configuration ? configuration.maxUnitPriceMicroUsdg : null,
-        maxCycleBudgetMicroUsdg: configuration ? configuration.maxCycleBudgetMicroUsdg : null,
-        max24HourBudgetMicroUsdg: configuration ? configuration.max24HourBudgetMicroUsdg : null,
+        maxUnitPriceMicroUsd: configuration ? configuration.maxUnitPriceMicroUsd : null,
+        maxCycleBudgetMicroUsd: configuration ? configuration.maxCycleBudgetMicroUsd : null,
+        max24HourBudgetMicroUsd: configuration ? configuration.max24HourBudgetMicroUsd : null,
         revealedCards: 0,
         rewardRecipientLimit: PLACEHOLDER_REWARD_RECIPIENT_LIMIT,
       }

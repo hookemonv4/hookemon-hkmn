@@ -1,5 +1,7 @@
 "use client";
 
+import { formatNativeAmount } from "../lib/native-accounting.mjs";
+import NativeAccounting from "./NativeAccounting";
 import {
   createContext,
   useCallback,
@@ -53,7 +55,7 @@ const PROCESS_LABELS: Record<PublicProcessStepId, string> = {
   packs: "Packs purchased",
   cards: "Cards revealed",
   sales: "Cards sold",
-  return: "USDG returned",
+  return: "Proceeds returned",
   holders: "Holders paid",
 };
 
@@ -407,7 +409,9 @@ export default function PublicCycleTracker() {
   const visibleCards = cards.slice(0, visibleCardCount);
   const processSteps = buildPublicCycleProcess({ status, community: dashboardCommunity });
   const latestCycle = dashboardCommunity?.latestCycle ?? null;
-  const roundAccounting = cycle?.roundAccounting ?? latestCycle?.roundAccounting ?? null;
+  const observedAccounting = cycle?.roundAccounting ?? latestCycle?.roundAccounting ?? null;
+  const nativeAccounting = observedAccounting && "schema" in observedAccounting && observedAccounting.schema === "hookemon.native-round-accounting.v1" ? observedAccounting : null;
+  const roundAccounting = nativeAccounting ? null : observedAccounting;
 
   return (
     <section className={`machine-section ${styles.section}`} id="live-machine">
@@ -461,10 +465,11 @@ export default function PublicCycleTracker() {
           </div>
         </div>
 
+        <NativeAccounting accounting={nativeAccounting} />
         <dl className={styles.primaryMetrics} aria-label="Public dashboard summary">
           <Metric
             label="Latest observed pool"
-            value={formatMicroUsdg(dashboardCommunity?.metrics.latestObservedProjectPoolMicroUsdg)}
+            value={dashboardCommunity?.schemaVersion === 9 ? formatNativeAmount((dashboardCommunity.metrics as unknown as Record<string, string | null>).latestObservedProjectPoolWei) : formatMicroUsdg(dashboardCommunity?.metrics.latestObservedProjectPoolMicroUsdg)}
             detail={formatObservationAge(dashboardCommunity?.poolObservedAt, dashboard.nowMs)}
           />
           <Metric
