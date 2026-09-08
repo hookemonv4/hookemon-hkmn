@@ -41,7 +41,7 @@
     {
       "id": "canonical-market",
       "path": "docs/modules/canonical-market.md",
-      "sha256": "3788a5d35284b01f29c4f3158d1b2e250ea8a216a8bc81c1ca421ef4506f6f43"
+      "sha256": "27e791b606be8e9a84fbe21671bb3c91db9f7c5c609fcd42dfdc523f8f1d100b"
     },
     {
       "id": "fee-accounting",

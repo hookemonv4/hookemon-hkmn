@@ -1,0 +1,37 @@
+{
+  "readAt": "2026-09-07T17:10:24.514511+00:00",
+  "sourceBase": "b8067b1e5acc02e0b8b60f6910333042ca4ea432",
+  "transactionCount": 32,
+  "allSucceeded": true,
+  "distinctBlocks": 32,
+  "receiptGas": 8381513,
+  "initialOwnerUsdgAtomic": "150000000",
+  "seedUsdgAtomic": "100000000",
+  "initialTraderUsdgAtomic": "50000000",
+  "initialManagerUsdgAtomic": "51769153716635",
+  "finalState": {
+    "traderUsdgAtomic": "18865368",
+    "traderHkmnAtomic": "0",
+    "hookUsdgAtomic": "31134616",
+    "managerUsdgAtomic": "51769153716651"
+  },
+  "transferDeltasAtomic": {
+    "trader": "-31134632",
+    "hook": "31134616",
+    "poolManager": "16"
+  },
+  "grossExecutedUsdgAtomic": "1037820588",
+  "processLiabilityAtomic": "25945514",
+  "onePackQuoteUsdgAtomic": "25298644",
+  "principalSurplusAtomic": "646870",
+  "gasEthAt423574000Wei": "0.003550190987462",
+  "claimReadOnlySimulation": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "error": {
+      "code": 3,
+      "message": "execution reverted: custom error 0xcd0f1c85",
+      "data": "0xcd0f1c85"
+    }
+  }
+}

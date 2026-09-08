@@ -1,0 +1,12 @@
+{
+  "custody": "0x9D6895a38e5D58C931837e74a41fD98E0daC32F8",
+  "hkmn": "0x9D79DC9A005980117C8E7F3fC14c53F32898087B",
+  "hook": "0x09EC14bfa800F9d349816df0A57912d79eee20cc",
+  "initialHookUsdgAtomic": "0",
+  "initialManagerUsdgAtomic": "51769153716635",
+  "initialTraderUsdgAtomic": "50000000",
+  "router": "0x06AfBA43Fd06227fA663b0DAecF536f6EaA6bf99",
+  "timestamp": 1788800514,
+  "trader": "0x000000000000000000000000000000000000cafE",
+  "usdg": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168"
+}
