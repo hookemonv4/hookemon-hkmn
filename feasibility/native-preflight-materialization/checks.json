@@ -1,0 +1,66 @@
+{
+  "checks": [
+    {
+      "id": "official-distribution-hash",
+      "result": "PASS"
+    },
+    {
+      "id": "chain-deployment-descriptor-recomputation",
+      "result": "PASS",
+      "hash": "0x4bde6e26b6630aa684b4ac2a987d6322755896b249a189843bd3a58fe313694c"
+    },
+    {
+      "id": "source-coverage-exact-git-bytes",
+      "result": "PASS",
+      "files": 14
+    },
+    {
+      "id": "custody-immutable-ast-identity-and-runtime-materialization",
+      "result": "PASS",
+      "immutableIds": {
+        "10893": "deployer",
+        "10895": "positionManager"
+      }
+    },
+    {
+      "id": "metadata-image-validation",
+      "result": "PASS",
+      "path": "apps/web/public/comic/coin.png"
+    },
+    {
+      "id": "full-request-structural-schema",
+      "result": "INCOMPLETE",
+      "originalErrors": 37,
+      "proposedErrors": 14
+    },
+    {
+      "id": "official-profile-custom-kernel-check",
+      "result": "REFUSED",
+      "code": "ROBINHOOD_NATIVE_FEE_KERNEL_REQUIRED"
+    }
+  ],
+  "notPerformed": [
+    "request POST",
+    "agent attestation signing",
+    "launch/create/deploy",
+    "live runtime proof",
+    "seed financing admission",
+    "source publication verification"
+  ],
+  "remainingSchemaPaths": [
+    "/graphBundle/targets/0/constructorArguments",
+    "/graphBundle/targets/0/initializerCalldata",
+    "/graphBundle/targets/0/expectedRuntimeCodeHash",
+    "/graphBundle/targets/1/initializerCalldata",
+    "/graphBundle/targets/2/applicantSalt",
+    "/graphBundle/targets/2/constructorArguments",
+    "/graphBundle/targets/2/initializerCalldata",
+    "/graphBundle/targets/2/expectedRuntimeCodeHash",
+    "/verificationBundle/components/0/constructorArguments",
+    "/verificationBundle/components/0/runtimeMaterialization",
+    "/verificationBundle/components/2/constructorArguments",
+    "/verificationBundle/components/2/runtimeMaterialization",
+    "/launchIntentHash",
+    "/agentAttestation"
+  ]
+}

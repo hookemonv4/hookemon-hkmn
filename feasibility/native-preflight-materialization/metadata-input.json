@@ -1,0 +1,24 @@
+{
+  "schemaVersion": "programmable.project-metadata-input.v1",
+  "token": {
+    "name": "Hookemon",
+    "symbol": "HKMN"
+  },
+  "presentation": {
+    "description": "Hookemon buys gacha card packs, opens them, sells the cards and pays the proceeds to HKMN holders. Trading fees fund the packs.",
+    "image": {
+      "sourcePath": "apps/web/public/comic/coin.png",
+      "uri": "https://hookemon.com/comic/coin.png"
+    },
+    "links": [
+      {
+        "kind": "website",
+        "uri": "https://hookemon.com/"
+      },
+      {
+        "kind": "x",
+        "uri": "https://x.com/hookemon4"
+      }
+    ]
+  }
+}

@@ -1,0 +1,26 @@
+# Native build-only preflight materialization
+
+The proposed request reduces the retained request's 37 full JSON Schema errors to 14. The earlier inventory counted 36 direct required-field gaps; full validation additionally detects the missing nested liquidity declaration. **This request is still incomplete and must not be POSTed.** No credential, signature, submission, upload, deployment or funding was used. Active release inputs remain untouched.
+
+The 14 remaining fields are not 14 provider decisions. Their economic prerequisites are the explicit native seed maximum (from which the initial price follows for the complete HKMN stock) and the two immutable positive, ordered wei claim ceilings. All three remain unset in the reviewed release. No budget, final-versus-test token, or sample monetary value is chosen here. Once those values exist, constructor encoding, permission salt search, addresses, initializer calldata, runtime materialization, graph hash, launch intent hash and unsigned agent attestation are local documented computations. The later wallet route topology hash is consumed from returned route input by the distributed CLI; its local derivation was not established and it is not a direct build-only create-request field. `preimage-map.json` records the exact dependency path.
+
+The candidate already binds the published chain deployment descriptor, the retained source/build files, public metadata, a valid existing image, zero-value build-only funding, and the empty initialized pool state. It reproduces custody runtime immutables from the artifact AST and the configured CREATE2 factory/PositionManager. Source coverage contains 14 files; every byte is checked against source revision `e21bccdf5b6af56742f1999255e334750d8e6efb`. This verifies local provenance, not public availability or external attestation.
+
+The nonce, lineage nonce and token/custody salts are explicitly proposed public build-only coordinates. They grant no wallet authority and select no live address. The permit window follows the official example's finalized timestamp minus 60 seconds, plus 3600 seconds; the captured window must be refreshed before a future request. `externalContracts: []` is a draft declaration consistent with the example's deployment trust roots; the final resolved graph must still pass the official locator and external-reference checks.
+
+The official 4.1.0 packer calls `assertRobinhoodNativeFeeKernelBuildV1` for profile 4.1 before packing, even for build-only funding. Hookemon's retained custom kernel fails with `ROBINHOOD_NATIVE_FEE_KERNEL_REQUIRED`. This establishes the local distributed CLI's enforced profile, not an exhaustive impossibility result for the actual API. A complete backend preflight or documented exception/composition path is still needed to establish whether the exact 250/40/10 bp model is admitted. Substituting the distributed fee kernel would change the model and is not performed. Zero-value build-only acceptance, if obtained, would still not admit or finance the later separate owner seed transaction.
+
+The existing public mark is byte-identical to the retained mark but the official image validator rejects its PNG chunks. The already-public `comic/coin.png` passes the validator (194 by 194, one frame) and matches the repository bytes. It is used only as a proposed read-only preflight image, without editing or uploading an asset or selecting final token branding. The website link is normalized to its canonical trailing-slash form.
+
+The current repository source-bundle helper hashes the manifest for `bundleContentSha256` and uses a different public-origin preimage. The current official CLI hashes canonical bundle content including file bytes, and domain-frames canonical `{url, revision}` for public origin. This preparation uses the official functions and makes no shared helper edit. The source origin names the exact local revision; public publication has not been verified.
+
+Remaining actions are narrowly separable: finish the budget-backed economic choices; publish/verify the exact source revision through the normal coordinator flow; run the documented local graph derivation and honest evidence checks; refresh the public checkpoint; then validate and review the complete request before the authorized read-only preflight. The agent attestation is unsigned evidence binding, not an owner approval or invented successful test. No field should claim successful checks that were not run.
+
+Reproduce from this worktree with the checksum-verified official tarball extracted and its shipped shrinkwrap installed in a temporary directory:
+
+```sh
+node feasibility/native-preflight-materialization/materialize.mjs /path/to/extracted/package
+node feasibility/native-preflight-materialization/validate.mjs /path/to/extracted/package
+```
+
+The scripts use pure local official modules and retained files; they do not submit requests. Validation uses Ajv 8.17.1, JSON Schema 2020-12 with patterns and allOf, with format annotations disabled. It does not check cryptographic consistency of the unfinished graph, provider admission, runtime deployment or funding. `sources.json` pins official provenance and source hashes. `checks.json` records the checks actually performed. The proposed request is evidence, never an active release input.

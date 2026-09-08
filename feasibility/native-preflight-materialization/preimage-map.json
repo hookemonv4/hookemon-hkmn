@@ -1,0 +1,255 @@
+{
+  "scope": "Unsigned build-only dependency map; null remains unresolved. Not an executable launch configuration.",
+  "economicInputs": [
+    {
+      "field": "native seed maximum / selectedSqrtPriceX96",
+      "source": "release/phase3/launch-inputs.json:pool.priceCandidates.selection and seed.nativeFunding",
+      "resolution": "Complete budget-backed native maximum selection; derive currency0 native price with full HKMN stock using the existing exact full-range seed math. No USD parity or sample seed."
+    },
+    {
+      "field": "processClaimLimit6hWei and processClaimLimitMaxWei",
+      "source": "HookemonHook.ConstructorConfig",
+      "resolution": "Select explicit positive ordered limits within reviewed process funding plan. USD risk caps remain separate."
+    }
+  ],
+  "tokenConstructor": {
+    "abi": [
+      "address",
+      "address",
+      "uint8",
+      "uint160"
+    ],
+    "arguments": [
+      "0x0B6b3F40f84Df25D3bd69238f937096177DD09Bd",
+      "0x0000000000000000000000000000000000000000",
+      18,
+      null
+    ],
+    "unresolvedIndex3": "selectedSqrtPriceX96"
+  },
+  "custodyConstructor": {
+    "abi": [
+      "address",
+      "uint256"
+    ],
+    "arguments": [
+      "0x58daec3116aae6D93017bAAea7749052E8a04fA7",
+      "0"
+    ],
+    "status": "Already encoded in retained request; runtime derived and AST checked"
+  },
+  "hookConstructor": [
+    {
+      "name": "manager",
+      "abiType": "address",
+      "byteOffset": 0,
+      "value": "0x8366a39CC670B4001A1121B8F6A443A643e40951",
+      "dependency": "existing release role or frozen policy"
+    },
+    {
+      "name": "positionManager",
+      "abiType": "address",
+      "byteOffset": 32,
+      "value": "0x58daec3116aae6D93017bAAea7749052E8a04fA7",
+      "dependency": "existing release role or frozen policy"
+    },
+    {
+      "name": "permit2",
+      "abiType": "address",
+      "byteOffset": 64,
+      "value": "0x000000000022D473030F116dDEE9F6B43aC78BA3",
+      "dependency": "existing release role or frozen policy"
+    },
+    {
+      "name": "quoteCurrency",
+      "abiType": "address",
+      "byteOffset": 96,
+      "value": "0x0000000000000000000000000000000000000000",
+      "dependency": "existing release role or frozen policy"
+    },
+    {
+      "name": "hkmn",
+      "abiType": "address",
+      "byteOffset": 128,
+      "value": null,
+      "dependency": "resolved token CREATE2 address"
+    },
+    {
+      "name": "tickSpacing",
+      "abiType": "int24",
+      "byteOffset": 160,
+      "value": 60,
+      "dependency": "existing release role or frozen policy"
+    },
+    {
+      "name": "programmable",
+      "abiType": "address",
+      "byteOffset": 192,
+      "value": "0x4957f49620AFf3Adbbe8195a4f633E49cc93376c",
+      "dependency": "existing release role or frozen policy"
+    },
+    {
+      "name": "treasury",
+      "abiType": "address",
+      "byteOffset": 224,
+      "value": "0xfc82B0da6d487B97d7eA1AA0d51E00AfF4F3a729",
+      "dependency": "existing release role or frozen policy"
+    },
+    {
+      "name": "operations",
+      "abiType": "address",
+      "byteOffset": 256,
+      "value": "0xB54AAF746eb1e80AFDb5eb0992a75b08DB2E4384",
+      "dependency": "existing release role or frozen policy"
+    },
+    {
+      "name": "launchAuthority",
+      "abiType": "address",
+      "byteOffset": 288,
+      "value": "0xfc82B0da6d487B97d7eA1AA0d51E00AfF4F3a729",
+      "dependency": "existing release role or frozen policy"
+    },
+    {
+      "name": "issuanceAuthority",
+      "abiType": "address",
+      "byteOffset": 320,
+      "value": "0x0B6b3F40f84Df25D3bd69238f937096177DD09Bd",
+      "dependency": "existing release role or frozen policy"
+    },
+    {
+      "name": "expectedDecimals",
+      "abiType": "uint8",
+      "byteOffset": 352,
+      "value": 18,
+      "dependency": "existing release role or frozen policy"
+    },
+    {
+      "name": "bindingDigest",
+      "abiType": "bytes32",
+      "byteOffset": 384,
+      "value": null,
+      "dependency": "derive binding/runtime digest through release binding helper from resolved native addresses and exact pinned runtime identities"
+    },
+    {
+      "name": "runtimeDigest",
+      "abiType": "bytes32",
+      "byteOffset": 416,
+      "value": null,
+      "dependency": "derive binding/runtime digest through release binding helper from resolved native addresses and exact pinned runtime identities"
+    },
+    {
+      "name": "processClaimLimit6hWei",
+      "abiType": "uint256",
+      "byteOffset": 448,
+      "value": null,
+      "dependency": "reviewed native wei ceiling selection"
+    },
+    {
+      "name": "processClaimLimitMaxWei",
+      "abiType": "uint256",
+      "byteOffset": 480,
+      "value": null,
+      "dependency": "reviewed native wei ceiling selection"
+    },
+    {
+      "name": "processClaimMaxCount",
+      "abiType": "uint256",
+      "byteOffset": 512,
+      "value": 24,
+      "dependency": "existing release role or frozen policy"
+    },
+    {
+      "name": "operationsRotationDelay",
+      "abiType": "uint256",
+      "byteOffset": 544,
+      "value": "43200",
+      "dependency": "existing release role or frozen policy"
+    }
+  ],
+  "initializers": [
+    {
+      "argumentBindings": [
+        "resolved HookemonHook address"
+      ],
+      "callId": "token-allocate",
+      "calldata": null,
+      "caller": "graph factory",
+      "function": "allocate(address)",
+      "reason": "The graph factory allocates the fixed supply after all target addresses are resolved.",
+      "selector": "0xffd7d983",
+      "targetId": "token"
+    },
+    {
+      "argumentBindings": [
+        "resolved HookemonHook address"
+      ],
+      "callId": "custody-bind-hook",
+      "calldata": null,
+      "caller": "graph factory",
+      "function": "configureBindingHook(address)",
+      "reason": "The custody binds the resolved hook before the launch graph is initialized.",
+      "selector": "0xc81cbd43",
+      "targetId": "custody"
+    },
+    {
+      "argumentBindings": [
+        "resolved PermanentPositionCustody address",
+        "selected address-order sqrtPriceX96 candidate"
+      ],
+      "callId": "hook-initialize-graph-launch",
+      "calldata": null,
+      "caller": "graph factory as graph initializer",
+      "function": "initializeGraphLaunch(address,uint160)",
+      "reason": "The graph initializer binds custody and initializes the canonical pool in one source-authorized call.",
+      "selector": "0x726bb4ae",
+      "targetId": "hook"
+    }
+  ],
+  "localDerivationSequence": [
+    {
+      "step": 1,
+      "operation": "Canonical source bundle and project metadata hashing",
+      "officialSource": "src/source-bundle.mjs; src/project-metadata.mjs",
+      "status": "derived"
+    },
+    {
+      "step": 2,
+      "operation": "Route namespace from source bundle hash, launchWallet, router and graphFactory; nonce from explicit request nonce",
+      "officialSource": "src/graph.mjs:44; src/pack-v4.mjs:129",
+      "status": "derived proposed coordinates"
+    },
+    {
+      "step": 3,
+      "operation": "Target ID domain-framed hashes, ABI constructors, initCode hash, effective CREATE2 salts and addresses; hook low14 permission-mask grind",
+      "officialSource": "src/graph.mjs:593-599,680-746,789-797",
+      "status": "constructor prerequisites still open; fixed token/custody salts proposed; hook permission mask retained0x20cc"
+    },
+    {
+      "step": 4,
+      "operation": "ABI initializer encoding in retained token/custody/hook order and exact target locators; materialize immutable runtime bytes from compiler references",
+      "officialSource": "src/graph.mjs buildGraphBundle; src/runtime-immutables.mjs",
+      "status": "custody runtime complete; resolved hook/token addresses and price still open"
+    },
+    {
+      "step": 5,
+      "operation": "Verification bundle hash, graph bundle hash, source build commitment and launch intent hash",
+      "officialSource": "src/pack-v4.mjs:129-186",
+      "status": "derive only from completed exact bundles; no arbitrary placeholder digest"
+    },
+    {
+      "step": 6,
+      "operation": "Unsigned agent attestation with subjectLaunchIntentHash, agentId, checkedAt and hashes of retained actual checks",
+      "officialSource": "src/pack-v4.mjs:188-198,372-383",
+      "status": "Not a signature. Must bind completed intent and only checks actually run; current gap inspection is not admission evidence."
+    }
+  ],
+  "laterWalletRoute": {
+    "topologyHash": "Not required as a direct create-request field. Distributed wallet-transaction-v4.mjs consumes it from route input; local derivation formula not verified in this investigation. Verify returned route against graph before any future signing.",
+    "permit": "No permit produced. Build-only preflight is not a funded launch or separate seed admission."
+  },
+  "providerOpenFact": {
+    "missing": "Exact 250/40/10 bp Hookemon custom kernel and separate financed full-range seed admission under actual API model",
+    "resolution": "Use complete exact build-only request on authorized read-only preflight to obtain specific rejection/admission evidence; seek documented compatible custom-module or exception path if required. Financial seed eligibility remains separately tested.",
+    "closestVerifiedAlternative": "Retain exact source-built custom kernel and local derivation evidence; official distributed fee-kernel example can test provider tooling separately but cannot stand in for Hookemon economics."
+  }
+}

@@ -1,0 +1,480 @@
+{
+  "original": {
+    "valid": false,
+    "errorCount": 37,
+    "errors": [
+      {
+        "instancePath": "/chainDeployment",
+        "schemaPath": "#/properties/chainDeployment/type",
+        "keyword": "type",
+        "params": {
+          "type": "object"
+        },
+        "message": "must be object"
+      },
+      {
+        "instancePath": "/chainDeploymentDescriptorDigest",
+        "schemaPath": "#/properties/chainDeploymentDescriptorDigest/type",
+        "keyword": "type",
+        "params": {
+          "type": "string"
+        },
+        "message": "must be string"
+      },
+      {
+        "instancePath": "/nonce",
+        "schemaPath": "#/properties/nonce/type",
+        "keyword": "type",
+        "params": {
+          "type": "string"
+        },
+        "message": "must be string"
+      },
+      {
+        "instancePath": "/permitWindow/validAfter",
+        "schemaPath": "#/properties/permitWindow/properties/validAfter/type",
+        "keyword": "type",
+        "params": {
+          "type": "string"
+        },
+        "message": "must be string"
+      },
+      {
+        "instancePath": "/permitWindow/deadline",
+        "schemaPath": "#/properties/permitWindow/properties/deadline/type",
+        "keyword": "type",
+        "params": {
+          "type": "string"
+        },
+        "message": "must be string"
+      },
+      {
+        "instancePath": "/sourceDescriptor",
+        "schemaPath": "#/properties/sourceDescriptor/type",
+        "keyword": "type",
+        "params": {
+          "type": "object"
+        },
+        "message": "must be object"
+      },
+      {
+        "instancePath": "/sourceBundleManifest",
+        "schemaPath": "#/properties/sourceBundleManifest/type",
+        "keyword": "type",
+        "params": {
+          "type": "object"
+        },
+        "message": "must be object"
+      },
+      {
+        "instancePath": "/externalContracts",
+        "schemaPath": "#/properties/externalContracts/type",
+        "keyword": "type",
+        "params": {
+          "type": "array"
+        },
+        "message": "must be array"
+      },
+      {
+        "instancePath": "/graphBundle/sourceBundleSha256",
+        "schemaPath": "#/properties/graphBundle/properties/sourceBundleSha256/type",
+        "keyword": "type",
+        "params": {
+          "type": "string"
+        },
+        "message": "must be string"
+      },
+      {
+        "instancePath": "/graphBundle/targets/0/applicantSalt",
+        "schemaPath": "#/properties/graphBundle/properties/targets/items/properties/applicantSalt/type",
+        "keyword": "type",
+        "params": {
+          "type": "string"
+        },
+        "message": "must be string"
+      },
+      {
+        "instancePath": "/graphBundle/targets/0/constructorArguments",
+        "schemaPath": "#/properties/graphBundle/properties/targets/items/properties/constructorArguments/type",
+        "keyword": "type",
+        "params": {
+          "type": "string"
+        },
+        "message": "must be string"
+      },
+      {
+        "instancePath": "/graphBundle/targets/0/initializerCalldata",
+        "schemaPath": "#/properties/graphBundle/properties/targets/items/properties/initializerCalldata/type",
+        "keyword": "type",
+        "params": {
+          "type": "string"
+        },
+        "message": "must be string"
+      },
+      {
+        "instancePath": "/graphBundle/targets/0/constructorAddressLocators",
+        "schemaPath": "#/properties/graphBundle/properties/targets/items/properties/constructorAddressLocators/type",
+        "keyword": "type",
+        "params": {
+          "type": "array"
+        },
+        "message": "must be array"
+      },
+      {
+        "instancePath": "/graphBundle/targets/0/initializerAddressLocators",
+        "schemaPath": "#/properties/graphBundle/properties/targets/items/properties/initializerAddressLocators/type",
+        "keyword": "type",
+        "params": {
+          "type": "array"
+        },
+        "message": "must be array"
+      },
+      {
+        "instancePath": "/graphBundle/targets/0/expectedRuntimeCodeHash",
+        "schemaPath": "#/properties/graphBundle/properties/targets/items/properties/expectedRuntimeCodeHash/type",
+        "keyword": "type",
+        "params": {
+          "type": "string"
+        },
+        "message": "must be string"
+      },
+      {
+        "instancePath": "/graphBundle/targets/1/applicantSalt",
+        "schemaPath": "#/properties/graphBundle/properties/targets/items/properties/applicantSalt/type",
+        "keyword": "type",
+        "params": {
+          "type": "string"
+        },
+        "message": "must be string"
+      },
+      {
+        "instancePath": "/graphBundle/targets/1/initializerCalldata",
+        "schemaPath": "#/properties/graphBundle/properties/targets/items/properties/initializerCalldata/type",
+        "keyword": "type",
+        "params": {
+          "type": "string"
+        },
+        "message": "must be string"
+      },
+      {
+        "instancePath": "/graphBundle/targets/1/initializerAddressLocators",
+        "schemaPath": "#/properties/graphBundle/properties/targets/items/properties/initializerAddressLocators/type",
+        "keyword": "type",
+        "params": {
+          "type": "array"
+        },
+        "message": "must be array"
+      },
+      {
+        "instancePath": "/graphBundle/targets/1/expectedRuntimeCodeHash",
+        "schemaPath": "#/properties/graphBundle/properties/targets/items/properties/expectedRuntimeCodeHash/type",
+        "keyword": "type",
+        "params": {
+          "type": "string"
+        },
+        "message": "must be string"
+      },
+      {
+        "instancePath": "/graphBundle/targets/2/applicantSalt",
+        "schemaPath": "#/properties/graphBundle/properties/targets/items/properties/applicantSalt/type",
+        "keyword": "type",
+        "params": {
+          "type": "string"
+        },
+        "message": "must be string"
+      },
+      {
+        "instancePath": "/graphBundle/targets/2/constructorArguments",
+        "schemaPath": "#/properties/graphBundle/properties/targets/items/properties/constructorArguments/type",
+        "keyword": "type",
+        "params": {
+          "type": "string"
+        },
+        "message": "must be string"
+      },
+      {
+        "instancePath": "/graphBundle/targets/2/initializerCalldata",
+        "schemaPath": "#/properties/graphBundle/properties/targets/items/properties/initializerCalldata/type",
+        "keyword": "type",
+        "params": {
+          "type": "string"
+        },
+        "message": "must be string"
+      },
+      {
+        "instancePath": "/graphBundle/targets/2/constructorAddressLocators",
+        "schemaPath": "#/properties/graphBundle/properties/targets/items/properties/constructorAddressLocators/type",
+        "keyword": "type",
+        "params": {
+          "type": "array"
+        },
+        "message": "must be array"
+      },
+      {
+        "instancePath": "/graphBundle/targets/2/initializerAddressLocators",
+        "schemaPath": "#/properties/graphBundle/properties/targets/items/properties/initializerAddressLocators/type",
+        "keyword": "type",
+        "params": {
+          "type": "array"
+        },
+        "message": "must be array"
+      },
+      {
+        "instancePath": "/graphBundle/targets/2/expectedRuntimeCodeHash",
+        "schemaPath": "#/properties/graphBundle/properties/targets/items/properties/expectedRuntimeCodeHash/type",
+        "keyword": "type",
+        "params": {
+          "type": "string"
+        },
+        "message": "must be string"
+      },
+      {
+        "instancePath": "/projectMetadata",
+        "schemaPath": "#/properties/projectMetadata/type",
+        "keyword": "type",
+        "params": {
+          "type": "object"
+        },
+        "message": "must be object"
+      },
+      {
+        "instancePath": "/projectMetadataHash",
+        "schemaPath": "#/properties/projectMetadataHash/type",
+        "keyword": "type",
+        "params": {
+          "type": "string"
+        },
+        "message": "must be string"
+      },
+      {
+        "instancePath": "/projectMetadataImageArtifact",
+        "schemaPath": "#/properties/projectMetadataImageArtifact/type",
+        "keyword": "type",
+        "params": {
+          "type": "object"
+        },
+        "message": "must be object"
+      },
+      {
+        "instancePath": "/verificationBundle/components/0/constructorArguments",
+        "schemaPath": "#/properties/verificationBundle/properties/components/items/properties/constructorArguments/type",
+        "keyword": "type",
+        "params": {
+          "type": "string"
+        },
+        "message": "must be string"
+      },
+      {
+        "instancePath": "/verificationBundle/components/0/runtimeMaterialization",
+        "schemaPath": "#/properties/verificationBundle/properties/components/items/properties/runtimeMaterialization/type",
+        "keyword": "type",
+        "params": {
+          "type": "object"
+        },
+        "message": "must be object"
+      },
+      {
+        "instancePath": "/verificationBundle/components/1/runtimeMaterialization",
+        "schemaPath": "#/properties/verificationBundle/properties/components/items/properties/runtimeMaterialization/type",
+        "keyword": "type",
+        "params": {
+          "type": "object"
+        },
+        "message": "must be object"
+      },
+      {
+        "instancePath": "/verificationBundle/components/2/constructorArguments",
+        "schemaPath": "#/properties/verificationBundle/properties/components/items/properties/constructorArguments/type",
+        "keyword": "type",
+        "params": {
+          "type": "string"
+        },
+        "message": "must be string"
+      },
+      {
+        "instancePath": "/verificationBundle/components/2/runtimeMaterialization",
+        "schemaPath": "#/properties/verificationBundle/properties/components/items/properties/runtimeMaterialization/type",
+        "keyword": "type",
+        "params": {
+          "type": "object"
+        },
+        "message": "must be object"
+      },
+      {
+        "instancePath": "/liquidityModel/declaredLaunchState",
+        "schemaPath": "#/properties/liquidityModel/properties/declaredLaunchState/enum",
+        "keyword": "enum",
+        "params": {
+          "allowedValues": [
+            "pool-not-initialized",
+            "pool-initialized-empty",
+            "liquidity-required",
+            "liquidity-provided-by-launch",
+            "custom-settlement"
+          ]
+        },
+        "message": "must be equal to one of the allowed values"
+      },
+      {
+        "instancePath": "/launchIntentHash",
+        "schemaPath": "#/properties/launchIntentHash/type",
+        "keyword": "type",
+        "params": {
+          "type": "string"
+        },
+        "message": "must be string"
+      },
+      {
+        "instancePath": "/agentAttestation",
+        "schemaPath": "#/properties/agentAttestation/type",
+        "keyword": "type",
+        "params": {
+          "type": "object"
+        },
+        "message": "must be object"
+      },
+      {
+        "instancePath": "/fundingPlan",
+        "schemaPath": "#/properties/fundingPlan/type",
+        "keyword": "type",
+        "params": {
+          "type": "object"
+        },
+        "message": "must be object"
+      }
+    ]
+  },
+  "proposed": {
+    "valid": false,
+    "errorCount": 14,
+    "errors": [
+      {
+        "instancePath": "/graphBundle/targets/0/constructorArguments",
+        "schemaPath": "#/properties/graphBundle/properties/targets/items/properties/constructorArguments/type",
+        "keyword": "type",
+        "params": {
+          "type": "string"
+        },
+        "message": "must be string"
+      },
+      {
+        "instancePath": "/graphBundle/targets/0/initializerCalldata",
+        "schemaPath": "#/properties/graphBundle/properties/targets/items/properties/initializerCalldata/type",
+        "keyword": "type",
+        "params": {
+          "type": "string"
+        },
+        "message": "must be string"
+      },
+      {
+        "instancePath": "/graphBundle/targets/0/expectedRuntimeCodeHash",
+        "schemaPath": "#/properties/graphBundle/properties/targets/items/properties/expectedRuntimeCodeHash/type",
+        "keyword": "type",
+        "params": {
+          "type": "string"
+        },
+        "message": "must be string"
+      },
+      {
+        "instancePath": "/graphBundle/targets/1/initializerCalldata",
+        "schemaPath": "#/properties/graphBundle/properties/targets/items/properties/initializerCalldata/type",
+        "keyword": "type",
+        "params": {
+          "type": "string"
+        },
+        "message": "must be string"
+      },
+      {
+        "instancePath": "/graphBundle/targets/2/applicantSalt",
+        "schemaPath": "#/properties/graphBundle/properties/targets/items/properties/applicantSalt/type",
+        "keyword": "type",
+        "params": {
+          "type": "string"
+        },
+        "message": "must be string"
+      },
+      {
+        "instancePath": "/graphBundle/targets/2/constructorArguments",
+        "schemaPath": "#/properties/graphBundle/properties/targets/items/properties/constructorArguments/type",
+        "keyword": "type",
+        "params": {
+          "type": "string"
+        },
+        "message": "must be string"
+      },
+      {
+        "instancePath": "/graphBundle/targets/2/initializerCalldata",
+        "schemaPath": "#/properties/graphBundle/properties/targets/items/properties/initializerCalldata/type",
+        "keyword": "type",
+        "params": {
+          "type": "string"
+        },
+        "message": "must be string"
+      },
+      {
+        "instancePath": "/graphBundle/targets/2/expectedRuntimeCodeHash",
+        "schemaPath": "#/properties/graphBundle/properties/targets/items/properties/expectedRuntimeCodeHash/type",
+        "keyword": "type",
+        "params": {
+          "type": "string"
+        },
+        "message": "must be string"
+      },
+      {
+        "instancePath": "/verificationBundle/components/0/constructorArguments",
+        "schemaPath": "#/properties/verificationBundle/properties/components/items/properties/constructorArguments/type",
+        "keyword": "type",
+        "params": {
+          "type": "string"
+        },
+        "message": "must be string"
+      },
+      {
+        "instancePath": "/verificationBundle/components/0/runtimeMaterialization",
+        "schemaPath": "#/properties/verificationBundle/properties/components/items/properties/runtimeMaterialization/type",
+        "keyword": "type",
+        "params": {
+          "type": "object"
+        },
+        "message": "must be object"
+      },
+      {
+        "instancePath": "/verificationBundle/components/2/constructorArguments",
+        "schemaPath": "#/properties/verificationBundle/properties/components/items/properties/constructorArguments/type",
+        "keyword": "type",
+        "params": {
+          "type": "string"
+        },
+        "message": "must be string"
+      },
+      {
+        "instancePath": "/verificationBundle/components/2/runtimeMaterialization",
+        "schemaPath": "#/properties/verificationBundle/properties/components/items/properties/runtimeMaterialization/type",
+        "keyword": "type",
+        "params": {
+          "type": "object"
+        },
+        "message": "must be object"
+      },
+      {
+        "instancePath": "/launchIntentHash",
+        "schemaPath": "#/properties/launchIntentHash/type",
+        "keyword": "type",
+        "params": {
+          "type": "string"
+        },
+        "message": "must be string"
+      },
+      {
+        "instancePath": "/agentAttestation",
+        "schemaPath": "#/properties/agentAttestation/type",
+        "keyword": "type",
+        "params": {
+          "type": "object"
+        },
+        "message": "must be object"
+      }
+    ]
+  },
+  "scope": "JSON Schema2020-12 structural/allOf/pattern validation using pinned AJV8.17.1; format annotations disabled. No cryptographic, runtime, economics or server admission claim."
+}
