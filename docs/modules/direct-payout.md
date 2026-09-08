@@ -244,3 +244,16 @@ broadcast. The payout policy wrapper remains the active signer and broadcast gat
 ports; an approval-bound backend never receives an invented plain broadcast capability.
 
 The wallet nonce boundary resolves a renewed automation context against the durable reservation before asserting or releasing it. Only the same cycle, chain, wallet, stage, fencing token and acquisition timestamp may retain that reservation's original expiry. A later context expiry does not extend a held nonce lease; signing still refuses after its original deadline. Released handles retain their original window only for idempotent release. A new reservation after release uses the current active lease window. Reopening the repository or rebuilding a context does not change the binding, and a stale release cannot remove a successor's global reservation.
+
+## Native payment proof boundary
+
+`packages/adapters/src/native-payment-proof.mjs` exposes `createNativePaymentProof` and
+`isProcessNativePaymentProof`. The producer binds persisted signed bytes, recovered sender,
+chain 4663, exact target/value/calldata/nonce, successful stable receipt and canonical finalized
+inclusion. It never requires recipient ending balance growth. The capability is process-local;
+serialized facts must be reauthenticated on recovery. Gas cost is recorded separately from
+payment principal. A hook claim additionally requires exact claim calldata and one matching
+post-payment ProcessClaimed event from the release-bound runtime at the payment checkpoint;
+no latest-runtime fallback is accepted. Relay return/refund kinds refuse until their dedicated
+source/order/runtime proof is admitted. Producing a proof alone neither consumes a durable
+payment source nor marks a recipient paid; those remain repository transitions.
