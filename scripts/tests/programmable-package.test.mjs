@@ -744,7 +744,7 @@ test('verifies every immutable seed field and the separate deadline window', () 
         chainId: '4663',
         assetId: 'native',
         decimals: 18,
-        amountAtomic: '0',
+        amountAtomic: expectedIntent.amount0Max,
       },
       data: seedCalldata(params),
     },

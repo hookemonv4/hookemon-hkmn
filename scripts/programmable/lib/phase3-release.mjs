@@ -326,3 +326,42 @@ export function derivePriceCandidatesWithMath(
 export function derivePriceCandidates(input) {
   return derivePriceCandidatesWithMath(input);
 }
+
+/** Selected native release: currency0 is ETH and the entire HKMN stock is currency1.
+ * Uses the pinned TickMath bounds and SqrtPriceMath round-up debt formulas. The
+ * native maximum funds the payable seed; any difference from exact debt is refunded.
+ */
+export function deriveNativePriceCandidate({ nativeWei, hkmnAtomic }) {
+  for (const [name, value] of Object.entries({ nativeWei, hkmnAtomic })) {
+    if (typeof value !== 'string' || !/^[1-9][0-9]*$/.test(value)) {
+      throw new Error(`${name} must be a positive canonical integer string`);
+    }
+    if (BigInt(value) > (1n << 128n) - 1n) throw new Error(`${name} exceeds the seed uint128 maximum`);
+  }
+  const native = BigInt(nativeWei);
+  const hkmn = BigInt(hkmnAtomic);
+  const initialPrice = integerSqrt((hkmn * Q192) / native);
+  const lower = sqrtPriceAtTick(PHASE_THREE_MIN_TICK);
+  const upper = sqrtPriceAtTick(PHASE_THREE_MAX_TICK);
+  if (initialPrice <= lower || initialPrice >= upper) throw new Error('native seed price is outside the full range');
+  const { liquidity } = liquidityForAmounts(native, hkmn, initialPrice);
+  if (liquidity <= 0n || liquidity > (1n << 128n) - 1n) throw new Error('native seed liquidity is outside uint128');
+  const price = lower + ((hkmn - 1n) * Q96) / liquidity + 1n;
+  if (price <= lower || price >= upper) throw new Error('exact native seed price is outside the full range');
+  const debt = consumedAmounts(liquidity, price, lower, upper);
+  if (debt.amount1 !== hkmn || debt.amount0 > native) {
+    throw new Error('native seed candidate cannot consume the full HKMN stock within the supplied maxima');
+  }
+  return {
+    sqrtPriceX96: price.toString(),
+    sqrtLowerX96: lower.toString(),
+    sqrtUpperX96: upper.toString(),
+    liquidity: liquidity.toString(),
+    amount0Max: nativeWei,
+    amount1Max: hkmnAtomic,
+    consumedAmount0: debt.amount0.toString(),
+    consumedAmount1: debt.amount1.toString(),
+    consumedHkmn: debt.amount1.toString(),
+    refundWei: (native - debt.amount0).toString(),
+  };
+}

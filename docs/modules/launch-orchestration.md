@@ -6,6 +6,9 @@ Launch Orchestration creates the Phase 3 canonical market and places its first L
 
 ## Public interface
 
+- `deriveNativePriceCandidate({nativeWei,hkmnAtomic})` derives the selected native-currency0 full-range seed tuple from explicit integer maxima. It consumes the complete HKMN stock and records exact native debt and refund; it supplies no default funding amount.
+- `verifyMaterializedSeedTransaction` requires native ETH transaction value equal to `amount0Max`, including the refundable excess over exact debt. Historical zero-value funding fails validation; immutable calldata, destination, intent and deadline bindings remain mandatory.
+
 - `HKMNToken.allocate(address canonicalMarket)` is the graph-only, one-time allocation call. It transfers the entire fixed HKMN supply to the hook.
 - The graph runs exactly three ordered calls after token, custody, and hook deployment: `token.allocate(hook)`, `custody.configureBindingHook(hook)`, and `hook.initializeGraphLaunch(custody, sqrtPriceX96)`.
 - `PermanentPositionCustody` is configured once with the hook and binds one verified PositionManager LP token. It has no HKMN remainder-custody role.

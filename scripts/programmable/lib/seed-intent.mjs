@@ -153,13 +153,13 @@ function sameAddress(left, right) {
   return left.toLowerCase() === right.toLowerCase();
 }
 
-function validateNativeValue(value, chainId) {
+function validateNativeValue(value, chainId, amount0Max) {
   exactKeys(value, ['chainId', 'assetId', 'decimals', 'amountAtomic'], 'seed transaction value');
   if (unsigned(value.chainId, 'seed transaction value.chainId').toString() !== unsigned(chainId, 'chainId').toString()) {
     throw new Error('seed transaction value chainId mismatch');
   }
-  if (value.assetId !== 'native' || value.decimals !== 18 || unsigned(value.amountAtomic, 'seed transaction value.amountAtomic') !== 0n) {
-    throw new Error('seed transaction value must be zero native value');
+  if (value.assetId !== 'native' || value.decimals !== 18 || unsigned(value.amountAtomic, 'seed transaction value.amountAtomic') !== unsigned(amount0Max, 'native seed amount0Max', 128)) {
+    throw new Error('seed transaction value must equal the native amount0Max');
   }
 }
 
@@ -176,7 +176,7 @@ export function verifyMaterializedSeedTransaction({
   const custody = requireEip55Address(expectedCustody, 'expectedCustody');
   const to = requireEip55Address(transaction.to, 'seed transaction to');
   if (!sameAddress(to, hook)) throw new Error('seed transaction target mismatch');
-  validateNativeValue(transaction.value, chainId);
+  validateNativeValue(transaction.value, chainId, expectedIntent?.amount0Max);
 
   const intent = deriveSeedIntent(expectedIntent);
   if (expectedIntent?.digest !== undefined && expectedIntent.digest.toLowerCase() !== intent.digest) {
