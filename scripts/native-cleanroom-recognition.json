@@ -1,7 +1,7 @@
 {
   "schema": "hookemon.cleanroom-recognition.v1",
   "requirementsRevision": 71,
-  "sourceRevision": "15f6c0aa785589a9dcc4b28aa8deae3c317651bb",
+  "sourceRevision": "19d9d8bfae0a55c7fd8091ffb42d7c9845ca6074",
   "auditPath": "docs/evidence/native-cleanroom-audit-20260908/findings.json",
   "auditSha256": "187ec57183501df3c733129603255c8b87bb63f274679acd4413cc7416dabd8c",
   "scope": "Exact reviewed bytes only; native economic terms, incidental full identifiers and unchanged official evidence. No runtime authority or privacy-rule exemption.",
@@ -7246,22 +7246,116 @@
           "basis": "reviewed-native-71-or-retained-provider-source"
         }
       ]
+    },
+    "docs/modules/relay-bridge-client.md": {
+      "sha256": "97ec7c960ece39d1c4406e02f17a9639c488303478333686f1f5004578789295",
+      "matches": [
+        {
+          "rule": "historical-architecture",
+          "offset": 33501,
+          "length": 4,
+          "sha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
+          "tokenStart": 33501,
+          "tokenLength": 4,
+          "tokenSha256": "8591ee9090c0c02ca1f103cb637131d8f358870aba145245ff083e138fdd705b",
+          "basis": "native-return-settlement-asset-source-458a64c"
+        }
+      ]
+    },
+    "feasibility/native-preflight-candidate-20260908/proposed-create-request.json": {
+      "sha256": "408fee062bfc7b46cd4a9814ef4a376113811803ef8457b3db46f59d20a9cea0",
+      "matches": [
+        {
+          "rule": "historical-architecture",
+          "offset": 11496,
+          "length": 8,
+          "sha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
+          "tokenStart": 11496,
+          "tokenLength": 24,
+          "tokenSha256": "5ac0d597343941b72f13dc0777ad8133e93f9820958d4c1f35c19813f2a623b2",
+          "basis": "unchanged-chainDeployment-from-native-preflight-materialization"
+        },
+        {
+          "rule": "historical-architecture",
+          "offset": 11588,
+          "length": 8,
+          "sha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
+          "tokenStart": 11588,
+          "tokenLength": 8,
+          "tokenSha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
+          "basis": "unchanged-chainDeployment-from-native-preflight-materialization"
+        },
+        {
+          "rule": "historical-architecture",
+          "offset": 13001,
+          "length": 8,
+          "sha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
+          "tokenStart": 13001,
+          "tokenLength": 17,
+          "tokenSha256": "1de80fb766bd978946291da751d7295105d0288ca94b9ba83341a44105fe9fc1",
+          "basis": "unchanged-chainDeployment-from-native-preflight-materialization"
+        },
+        {
+          "rule": "historical-architecture",
+          "offset": 13660,
+          "length": 8,
+          "sha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
+          "tokenStart": 13660,
+          "tokenLength": 27,
+          "tokenSha256": "07e2f36ec0dae44bc4e8d11b0f2e46a58979ff4b23b0272aab077727a3c615a2",
+          "basis": "unchanged-chainDeployment-from-native-preflight-materialization"
+        },
+        {
+          "rule": "historical-architecture",
+          "offset": 19080,
+          "length": 8,
+          "sha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
+          "tokenStart": 19080,
+          "tokenLength": 24,
+          "tokenSha256": "5ac0d597343941b72f13dc0777ad8133e93f9820958d4c1f35c19813f2a623b2",
+          "basis": "unchanged-chainDeployment-from-native-preflight-materialization"
+        },
+        {
+          "rule": "historical-architecture",
+          "offset": 19174,
+          "length": 8,
+          "sha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
+          "tokenStart": 19174,
+          "tokenLength": 8,
+          "tokenSha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
+          "basis": "unchanged-chainDeployment-from-native-preflight-materialization"
+        },
+        {
+          "rule": "historical-architecture",
+          "offset": 20647,
+          "length": 8,
+          "sha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
+          "tokenStart": 20647,
+          "tokenLength": 17,
+          "tokenSha256": "1de80fb766bd978946291da751d7295105d0288ca94b9ba83341a44105fe9fc1",
+          "basis": "unchanged-chainDeployment-from-native-preflight-materialization"
+        },
+        {
+          "rule": "historical-architecture",
+          "offset": 21338,
+          "length": 8,
+          "sha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
+          "tokenStart": 21338,
+          "tokenLength": 27,
+          "tokenSha256": "07e2f36ec0dae44bc4e8d11b0f2e46a58979ff4b23b0272aab077727a3c615a2",
+          "basis": "unchanged-chainDeployment-from-native-preflight-materialization"
+        }
+      ]
     }
   },
   "refresh": {
-    "priorManifestSha256": "e140a71d61108629cbeaaf9fbd273d7e6b190b2cef1361051909d1431495eb7f",
-    "reviewedRevision": "15f6c0aa785589a9dcc4b28aa8deae3c317651bb",
-    "relocatedFiles": [
-      "docs/modules/composition-root.md",
-      "docs/modules/cycle-runner.md",
-      "packages/adapters/src/app/compose.mjs",
-      "packages/adapters/test/app/compose.test.mjs"
-    ],
+    "previousManifestSha256": "02d6b1e446d29c5b0613b265cb3d8af5dae1deea481ef4b278573fb8f85d2e79",
+    "reviewedRevision": "19d9d8bfae0a55c7fd8091ffb42d7c9845ca6074",
+    "relocatedFiles": [],
     "addedFiles": [
-      "docs/evidence/native-archive-fork-20260908/observation.json",
-      "packages/adapters/test/app/multi-pack-recovery.test.mjs",
-      "packages/adapters/test/app/stages-collector-lifecycle.test.mjs"
+      "docs/modules/relay-bridge-client.md",
+      "feasibility/native-preflight-candidate-20260908/proposed-create-request.json"
     ],
-    "justification": "Existing full-token/rule multiplicities remain identical in changed files. New contexts are two no-parity settlement-cost tests and one current repository CI run URL. No new private context is recognized."
+    "justification": "One native return settlement-asset reference and eight unchanged official chain-deployment field/schema contexts. Targeted all 48 changed files since 15f6c0aa; no private-path or email recognition added."
   }
 }
