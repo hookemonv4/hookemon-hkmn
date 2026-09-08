@@ -91,6 +91,29 @@ inspection through the same authority boundary.
 
 ## Operational commands
 
+The owner page lists the authenticated `/operator/api/packs` catalog with checkboxes, select-all,
+clear and save controls. Selection comes from the stored `packPlan.orders`, independently of the
+safety allowlist. Existing quantities remain visible and preserved; newly selected packs receive
+quantity one. The revision-checked `update-configuration` command accepts exactly
+`packPlan: { orders: [{ pack, quantity }] }`; clients cannot assign a plan schema or revision.
+The runner owns plan revisions. Bootstrap exposes the complete validated versioned plan.
+
+Saving unions selected codes into the existing `allowedPackIds`, so deselecting a pack or clearing
+the plan does not remove permission needed by an already admitted cycle. Empty selection stores
+an empty plan. Saving does not start a cycle or buy a pack. Previously selected codes absent from
+the catalog remain visible until deselected. An unavailable catalog disables saving without hiding
+the dashboard. Provider names render as text. Confirmation compares authoritative plan readback,
+including quantities; uncertain requests retain their identity for reconciliation.
+
+Legacy bootstrap payloads without a plan remain readable, but the page disables plan saving and
+never infers selection from their safety allowlist. Operator configuration v5 retains native public
+accounting schema v7. No monetary contract is relaxed for compatibility.
+
+The page persists the plan through the injected operator authority. Cycle execution must consume
+the plan through the runner's admission and snapshot integration. A standalone dashboard without
+that composition has no production authority or catalog, and a read-only local service remains
+read-only. Adding permitted packs retains the authority's safety-telemetry checks.
+
 Start the composed service with `node packages/adapters/bin/hookemon-runner.mjs run`, then open
 `http://127.0.0.1:8787` unless `HOOKEMON_DASHBOARD_PORT` selects another port. The browser
 credential is `HOOKEMON_DASHBOARD_PROXY_CREDENTIAL`. Run the dashboard tests with Node 24, then run
