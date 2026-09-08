@@ -2130,6 +2130,15 @@ contract RobinhoodV4ArchiveForkTest is Test {
             observation.runtimeCodes,
             observation.graphDeploymentHash
         ) = factory.deployGraph(plan.authorization, plan.targets);
+        // Emit observed native bytes before strict pins so the archive CI can diagnose drift.
+        emit log_named_bytes32("observed provider token runtime", observation.runtimeCodeHashes[0]);
+        emit log_named_bytes32(
+            "observed provider custody runtime", observation.runtimeCodeHashes[1]
+        );
+        emit log_named_bytes32("observed provider hook runtime", observation.runtimeCodeHashes[2]);
+        emit log_named_bytes32(
+            "observed provider graph deployment", observation.graphDeploymentHash
+        );
         _assertProviderGraphExecution(
             plan, observation.deployments, observation.runtimeCodeHashes, observation.runtimeCodes
         );
