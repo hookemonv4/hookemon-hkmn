@@ -12,6 +12,7 @@ Task traceability connects typed requirements, fenced task execution, completion
 - `node scripts/v4.mjs trace check` verifies requirement coverage and completed-task evidence from committed projections.
 - `node scripts/v4.mjs task prepare-bindings <id>` reads the unleased task prestate for requirement-binding recovery. `task recover-bindings <id> --record decisions/task-bindings/<id>.json --approval decisions/owner-approvals/<approval>.json` applies an exact approved correction.
 - `task prepare-operation <id>` reads the completed unbound task prestate. `task accept-operation <id> --record decisions/task-operations/<id>.json --approval decisions/owner-approvals/<approval>.json` records an exact owner-approved process disposition.
+- `task prepare-historical-usdg-archive <id> --commit <full-sha>` derives the prestate and complete pinned archive inventory. `task archive-historical-usdg-completion <id> --record decisions/task-archives/<id>.json --approval decisions/owner-approvals/<approval>.json` appends the exact approved historical disposition. Run `task project` after resolving the bounded orphan batch.
 - `node scripts/v4.mjs merge enqueue|next|record` serializes integration candidates.
 - [Finding traceability](finding-traceability.md) builds and verifies audited finding dispositions for phase-three work packages.
 
@@ -42,6 +43,12 @@ Task traceability connects typed requirements, fenced task execution, completion
 - Task evidence automatically includes `specs/requirements.json` and requires at least one additional fresh content-addressed verification artifact.
 - Requirement-to-task coverage becomes mandatory only after the tasks gate is authoritatively passed or overridden.
 - The merge queue accepts one integration base at a time; a changed integration SHA moves a candidate to retest.
+
+The historical USDG archive route is limited to `PR38-EVIDENCE-CLEANUP` at `34fc4006e3f05a60d6a3cd9fc8383b445330aa62` and `PR38-PUBLIC-HASH-REDACTION` at `e142bfa101f87c80b121e9c558b2a681f9ee07dd`. Its fixed archive evidence is `c797b6c0a9c856752d05ee2ddd18dd2411571d6f`. It authenticates all original changed paths and regular file modes: eight cleanup paths (five exact and three pinned later-normalized counterparts), or 25 exact archived counterparts including the original module card. Normalization retains the earlier source and identifies the later public digest redaction, its explanatory normalization entry and resulting integrity inventory. The module card stays in the historical archive; active USDG release and module-card paths remain absent from the target.
+
+The `v4-historical-usdg-completion-archive-v1` descriptor contains exactly `schema`, `action` (`TASK_ARCHIVE_HISTORICAL_USDG_COMPLETION`), `taskId`, `prestate`, `prestateFingerprint`, `inventory`, and `rationale`. Preparation supplies the prestate (including successful attempt sequence, commit and fencing token) and inventory (fixed archive/source commits, exact reachable target, manifest, archive file blob/hash/length/mode records, and complete counterpart partition). Owner approval binds this descriptor, action, task phase, task ID and rationale. Git checks disable replacement objects and refuse replacement refs. Missing source objects, changed source or target, incomplete partitions, changed working archive bytes or modes, stale task state, leases, or missing/stale approval refuse before mutation.
+
+Application revalidates inside a transaction and appends a `done` attempt with route `owner-approved-historical-usdg-archive`, full descriptor and authority hashes. Original attempts and task rows are preserved. This is historical archival disposition, not patch equivalence, product requirement acceptance, native release admission or signing authority. The command deliberately leaves projection to the coordinator after the bounded orphan batch; it does not report that global trace checks pass. Reapplication cannot match the original completion prestate. A target or descriptor change requires exact new approval.
 
 ## State transitions
 
@@ -79,3 +86,5 @@ node scripts/v4.mjs merge next
 - Retest a merge candidate against the current integration SHA before recording it as merged.
 - If `rebind-completion` fails, the ledger transaction leaves attempts and task state intact. There is no override or exception route: obtain or reconstruct a genuine descendant or an exact patch-equivalent rewritten commit, then retry.
 - If `rebind-completion-composite-provenance` fails, no attempt or task state changes. It never falls back to `rebind-completion`'s routes or to a broader authority; correct or re-derive the descriptor and its owner approval against the current repository and task prestate, then retry. A target change requires a freshly bound descriptor and approval, never a wildcard re-run against `HEAD`.
+
+For historical archive recovery, prepare and review the exact inventory, obtain its concrete owner approval, then apply the named archive command. A rejected transaction leaves the original history intact. Archive disposition alone does not supply a requirement binding, operational acceptance or fresh task evidence.

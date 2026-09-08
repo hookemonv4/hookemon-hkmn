@@ -12,6 +12,7 @@ import {
 } from './gates.mjs';
 import { resolveReceiptInput } from './receipts.mjs';
 import { validateTaskBindingRecovery, validateOperationalAcceptance } from './task-binding-recovery.mjs';
+import { validateHistoricalUsdgArchive } from './historical-usdg-archive.mjs';
 
 const LEDGER_ROOTS = new WeakMap();
 const FULL_COMMIT = /^[0-9a-f]{40}$/;
@@ -94,6 +95,23 @@ export function addTask(db, t) {
 export function listTasks(db) {
   return db.prepare('SELECT * FROM tasks ORDER BY id').all()
     .map(t => ({ ...t, deps: JSON.parse(t.deps), reqs: JSON.parse(t.reqs) }));
+}
+
+// Archive disposition appends provenance; original attempts and task state remain untouched.
+export function archiveHistoricalUsdgCompletion(db, taskId, options) {
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const root = LEDGER_ROOTS.get(db);
+    if (!root) throw new Error('ledger has no repository root');
+    const provenance = validateHistoricalUsdgArchive(root, db, taskId, options);
+    const at = nowIso();
+    const token = provenance.descriptor.prestate.leaseToken;
+    db.prepare(`INSERT INTO attempts(task_id,token,owner,started,ended,outcome,commit_sha,provenance)
+      VALUES(?,?,?,?,?,'done',?,?)`).run(taskId, token, 'historical-archive-disposition', at, at,
+        provenance.target, JSON.stringify(provenance));
+    db.exec('COMMIT');
+    return { taskId, route: provenance.route, commitSha: provenance.target };
+  } catch (error) { db.exec('ROLLBACK'); throw error; }
 }
 
 export function recoverTaskRequirements(db, taskId, options) {

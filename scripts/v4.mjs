@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { prepareHistoricalUsdgArchive, historicalUsdgArchiveInventory } from './lib/historical-usdg-archive.mjs';
 import { parseArgs } from 'node:util';
 import { projectState } from './lib/state.mjs';
 import { generateDocs } from './lib/policy.mjs';
@@ -14,7 +15,7 @@ import { validatePack, composePacks } from './lib/packs.mjs';
 import {
   openLedger, addTask, listTasks, nextTask, claimTask, heartbeatTask,
   completeTask, releaseTask, projectTasks, mergeEnqueue, mergeNext, mergeRecord,
-  setTaskDeps, prepareTaskDeferral, deferTask, rebindCompletionCommit,
+  archiveHistoricalUsdgCompletion, setTaskDeps, prepareTaskDeferral, deferTask, rebindCompletionCommit,
   prepareCompositeProvenanceRebind, validateCompositeProvenanceRebindApproval,
   rebindCompletionCompositeProvenance,
   recoverTaskRequirements,
@@ -131,6 +132,14 @@ try {
       rebindCompletionCommit(db, id, values.from, values.commit);
       projectTasks(db, root);
       out({ ok: true, id, commitSha: values.commit });
+    }
+    else if (sub === 'prepare-historical-usdg-archive') {
+      out({ ...prepareHistoricalUsdgArchive(db, id), inventory: historicalUsdgArchiveInventory(root, id, values.commit) });
+    }
+    else if (sub === 'archive-historical-usdg-completion') {
+      // Other historical orphans can still prevent projection; this command only appends
+      // the approved disposition. Run task projection after the bounded batch is complete.
+      out({ ok: true, ...archiveHistoricalUsdgCompletion(db, id, { record: values.record, approval: values.approval }) });
     }
     else if (sub === 'prepare-bindings') out(prepareTaskBindingRecovery(db, id));
     else if (sub === 'prepare-operation') out(prepareOperationalAcceptance(db, id));
