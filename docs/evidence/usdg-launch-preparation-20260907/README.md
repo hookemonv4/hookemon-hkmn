@@ -13,3 +13,5 @@ The two source trees differ in three package files:
 - `integrity.json` records the resulting changed byte lengths and hashes.
 
 All other package files match the cleanup commit exactly. This archive does not establish whole-patch equivalence, merge ancestry, task completion, or approval for a ledger rebind. The original source commits remain the provenance for any later disposition of `PR38-EVIDENCE-CLEANUP` and `PR38-PUBLIC-HASH-REDACTION`.
+
+`historical-module-card.md` preserves the original PR38 module card byte-for-byte. It is historical evidence and is not registered in the active module index. Together with the 24 package files, this covers all 25 paths introduced by the PR38 source commit. The manifest records it separately from the unchanged package integrity list.

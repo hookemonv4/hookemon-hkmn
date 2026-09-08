@@ -259,5 +259,15 @@
       "integrity.json"
     ],
     "internalReferences": "Preserved verbatim; repository-relative and historical external references retain their original scope and are not rewritten to archive paths."
-  }
+  },
+  "supportingArtifacts": [
+    {
+      "sourcePath": "docs/modules/launch-preparation.md",
+      "archivePath": "docs/evidence/usdg-launch-preparation-20260907/historical-module-card.md",
+      "sourceBlob": "56d8990cdc68a60983b3ddae5345688e4fc2d3be",
+      "byteLength": 1652,
+      "sha256": "a91a435b0699694702cd7b5d11909559c50cbdc4ce4a97671815c6e44fe20e63",
+      "status": "HISTORICAL_NOT_REGISTERED_AS_ACTIVE_MODULE"
+    }
+  ]
 }
