@@ -1,3 +1,4 @@
+import { nativeProducedAdmissionFixture } from '../native/admission-fixture.mjs';
 import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -196,15 +197,15 @@ function settlementAsset(assetId = SETTLEMENT_ASSET) {
 }
 
 function collectorMoneyConfiguration() {
-  const usdg = { chainId: '4663', assetId: '0x5fc5360d0400a0fd4f2af552add042d716f1d168', decimals: 6 };
+  const eth = { chainId: '4663', assetId: 'native', decimals: 18 };
   const solanaStablecoin = settlementAsset();
   return {
-    schema: 'hookemon.money-configuration.v1',
-    assets: { usdg, solanaStablecoin },
+    schema: 'hookemon.money-configuration.v2',
+    assets: { eth, solanaStablecoin },
     minimums: {
-      robinhoodReceive: { ...usdg, amountAtomic: '0' },
+      robinhoodReceive: { ...eth, amountAtomic: '0' },
       solanaReceive: { ...solanaStablecoin, amountAtomic: '0' },
-      returnUsdg: { ...usdg, amountAtomic: '0' },
+      returnEth: { ...eth, amountAtomic: '0' },
     },
     evm: {
       perTransactionGasPriceCap: { chainId: '4663', assetId: 'native', decimals: 18, amountAtomic: '2' },
@@ -465,7 +466,7 @@ function baseConfig(overrides = {}) {
 }
 
 /** In-memory fake covering the exact repository surface every stage module reads or writes. */
-function repository({ stages = {}, attempts = {}, batches = {}, intents = {}, admission = { unitPurchase: { ...settlementAsset(), amountAtomic: '40' } } } = {}) {
+function repository({ stages = {}, attempts = {}, batches = {}, intents = {}, admission = { unitPurchase: { ...settlementAsset(), amountAtomic: '40' }, aggregateFundingUsd: { amountMicroUsd: '35000000' } } } = {}) {
   const held = [];
   const heldPositions = [];
   const ledgers = [];
@@ -528,8 +529,12 @@ function generateYoloPacksFixture({ memo = MEMO, transaction } = {}) {
 async function durableCycle(t) {
   const directory = await mkdtemp(join(tmpdir(), 'hookemon-collector-lifecycle-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
-  const repo = await CycleRepository.open(directory);
-  const { cycleId } = await repo.createCycle({ releaseAmount: '1', mode: 'production' });
+  const nowMs = 1_700_000_000_000;
+  const repo = await CycleRepository.open(directory, () => nowMs, { testAuthority: createTestProfileMutationAuthority() });
+  const cycleId = await repo.nextCycleId();
+  const admission = await nativeProducedAdmissionFixture(cycleId, { nowMs, purchaseAtoms: '40', costMicroUsd: '35000000' });
+  admission.packId = 'pokemon_50';
+  await repo.createCycle({ cycleId, releaseAmount: '42', mode: 'production', admission });
   return { directory, repository: repo, cycleId };
 }
 
@@ -590,8 +595,8 @@ test('preparePurchaseRequest rejects a catalog pack needing an unsupported multi
   );
 });
 
-function heldPositionFixture(valueMicroUsdg = '10') {
-  return { positionId: `held:test:${Math.random()}`, valueMicroUsdg };
+function heldPositionFixture(costMicroUsd = '10') {
+  return { positionId: `held:test:${Math.random()}`, costMicroUsd };
 }
 
 test('preparePurchaseRequest refuses admission when the batch would exceed the configured held-position count, before any spend', async () => {
@@ -615,17 +620,17 @@ test('preparePurchaseRequest refuses admission when the batch would exceed the c
   const collectorCrypt = { async getMachines() { throw new Error('must not be called'); } };
   const cycleRepository = {
     async listHeldPositions() { return [heldPositionFixture('60')]; },
-    async describeCycle() { return { releaseAmount: '80' }; },
+    async describeCycle() { return { releaseAmount: '42', admission: { packId: 'pokemon_50', quantity: 2, unitPurchase: { ...settlementAsset(), amountAtomic: '40' }, aggregatePurchase: { ...settlementAsset(), amountAtomic: '80' }, aggregateFundingUsd: { amountMicroUsd: '80' } } }; },
   };
-  // Existing held value 60 + worst case (releaseAmount 80 / quantity 2 = 40 per pack * 2) = 140 > 100.
+  // The existing USD cost 60 plus the full batch USD cost 80 per held card exceeds 100; wei is separate.
   await assert.rejects(
     preparePurchaseRequest({
       adapters: { collectorCrypt },
-      config: baseConfig({ pack: { code: 'pokemon_50', quantity: 2 }, maxHeldValueMicroUsdg: '100' }),
+      config: baseConfig({ pack: { code: 'pokemon_50', quantity: 2 }, maxHeldValueMicroUsd: '100' }),
       cycleRepository,
       context: { cycleId: CYCLE_ID },
     }),
-    /HELD_LIMIT would exceed maxHeldValueMicroUsdg/,
+    /HELD_LIMIT would exceed maxHeldValueMicroUsd/,
   );
 });
 
@@ -1161,6 +1166,21 @@ test('reconcileLiveOpen holds a SENT_UNKNOWN pack past its deadline as HELD_UNRE
   assert.equal(result.packs[0].terminalState, 'HELD_UNRESOLVED');
   assert.equal(result.packs[0].reason, 'SENT_UNKNOWN_DEADLINE');
   assert.equal(openCalls, 0);
+});
+
+test('open refuses to invent a USD held cost from principal or USDC purchase atoms', async () => {
+  const cycleRepository = repository({
+    intents: { purchase: { recordedAtMs: 0, intent: { quantity: 1, packType: null, expectedCardCountPerPack: 1, playerAddress: OPERATOR } } },
+    admission: { unitPurchase: { ...settlementAsset(), amountAtomic: '40' } },
+    stages: { purchase: { status: 'COMPLETE', evidence: { quantity: 1, packs: [{ packIndex: 0, memo: MEMO, status: 'purchased', expectedCardCount: 1 }] } } },
+    attempts: { open: { attempt: { state: 'SENT_UNKNOWN' }, sentAtMs: 0, responseEvidence: null, reconciliationEvidence: null } },
+  });
+  await assert.rejects(() => reconcileLiveOpen({
+    adapters: { collectorCrypt: { async getPackStatus() { return { memo: MEMO, pack: null, send: null, buyback: [] }; } }, solana: { client: rpcClient() } },
+    config: baseConfig(), cycleRepository, context: { cycleId: CYCLE_ID, nowMs: 31 * 60 * 1000 },
+  }), /committed USD purchase cost/);
+  assert.equal(cycleRepository.heldPositions.length, 0);
+  assert.equal(cycleRepository.ledgers.length, 0);
 });
 
 // --- epic-gate ---------------------------------------------------------------------------------
@@ -1868,6 +1888,10 @@ test('open response missing its memo-bound mint holds durably without a retry', 
   const state = await reopened.describeCycle(cycleId);
   assert.equal(state.terminalState, null);
   assert.equal(state.heldPositions.size, 1);
+  const held = [...state.heldPositions.values()][0];
+  assert.equal(held.costMicroUsd, '35000000');
+  assert.equal(held.valueMicroUsd, '35000000');
+  assert.equal(held.ledgerAsset ?? null, null);
   assert.equal((await reopened.readOperationalStageAttempt(cycleId, 'open')).attempt.state, 'RESPONSE_RECORDED');
   await assert.doesNotReject(() => reopened.prepareStage(cycleId, 'open'));
 });
@@ -1913,6 +1937,10 @@ test('open SENT_UNKNOWN retry missing mint holds durably after reopen', async t 
   const state = await reopened.describeCycle(cycleId);
   assert.equal(state.terminalState, null);
   assert.equal(state.heldPositions.size, 1);
+  const held = [...state.heldPositions.values()][0];
+  assert.equal(held.costMicroUsd, '35000000');
+  assert.equal(held.valueMicroUsd, '35000000');
+  assert.equal(held.ledgerAsset ?? null, null);
   assert.equal((await reopened.readOperationalStageAttempt(cycleId, 'open')).attempt.state, 'SENT_UNKNOWN');
   await assert.doesNotReject(() => reopened.prepareStage(cycleId, 'open'));
 });
@@ -1982,6 +2010,10 @@ test('records unavailable buyback as a durable held position without terminalizi
   const state = await reopened.describeCycle(cycleId);
   assert.equal(state.terminalState, null);
   assert.equal(state.heldPositions.size, 1);
+  const held = [...state.heldPositions.values()][0];
+  assert.equal(held.costMicroUsd, '35000000');
+  assert.equal(held.valueMicroUsd, '35000000');
+  assert.equal(held.ledgerAsset ?? null, null);
   assert.equal([...state.heldPositions.values()][0].terminalState, 'HELD_UNAVAILABLE');
   assert.equal(await reopened.readOperationalStageAttempt(cycleId, 'buyback'), null);
   assert.equal((await reopened.prepareStage(cycleId, 'buyback')).status, 'PREPARED');
@@ -2017,5 +2049,5 @@ test('carves an overdue SENT_UNKNOWN buyback into a held position without anothe
     },
   });
   assert.equal(cycleRepository.held.length, 1);
-  assert.equal(cycleRepository.heldPositions[0].costMicroUsdg, '40');
+  assert.equal(cycleRepository.heldPositions[0].costMicroUsd, '35000000');
 });

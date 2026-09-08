@@ -33,14 +33,14 @@ function settlementAsset() {
 }
 
 function collectorMoneyConfiguration() {
-  const usdg = { chainId: '4663', assetId: '0x5fc5360d0400a0fd4f2af552add042d716f1d168', decimals: 6 };
+  const eth = { chainId: '4663', assetId: 'native', decimals: 18 };
   return {
-    schema: 'hookemon.money-configuration.v1',
-    assets: { usdg, solanaStablecoin: settlementAsset() },
+    schema: 'hookemon.money-configuration.v2',
+    assets: { eth, solanaStablecoin: settlementAsset() },
     minimums: {
-      robinhoodReceive: { ...usdg, amountAtomic: '0' },
+      robinhoodReceive: { ...eth, amountAtomic: '0' },
       solanaReceive: { ...settlementAsset(), amountAtomic: '0' },
-      returnUsdg: { ...usdg, amountAtomic: '0' },
+      returnEth: { ...eth, amountAtomic: '0' },
     },
     evm: {
       perTransactionGasPriceCap: { chainId: '4663', assetId: 'native', decimals: 18, amountAtomic: '2' },
@@ -82,7 +82,7 @@ function repository({ stages = {}, attempts = {}, batches = {}, intents = {} } =
     async describeCycle() {
       return {
         releaseAmount: '1000',
-        admission: { unitPurchase: { ...settlementAsset(), amountAtomic: '25000000' } },
+        admission: { unitPurchase: { ...settlementAsset(), amountAtomic: '25000000' }, aggregateFundingUsd: { amountMicroUsd: '70000000' } },
         heldPositions: new Map(heldPositions.map(position => [position.positionId, position])),
         custodyLedgers: new Map(ledgers.map(({ ledger }) => [`${ledger.chainId} ${ledger.assetId}`, ledger])),
       };
@@ -316,6 +316,10 @@ test('mixed batch: one purchased pack that never opens is held, the other pack s
   assert.equal(heldPack.terminalState, 'HELD_UNRESOLVED');
   assert.equal(cycleRepository.heldPositions.length, 1);
   assert.equal(cycleRepository.held.length, 1);
+  // Each held card retains the complete admitted batch cost, not half or USDC parity.
+  assert.equal(cycleRepository.heldPositions[0].costMicroUsd, '70000000');
+  assert.equal(cycleRepository.heldPositions[0].valueMicroUsd, '70000000');
+  assert.equal(cycleRepository.heldPositions[0].ledgerAsset ?? null, null);
 
   // epic-gate and buyback pass the held pack through unchanged and only ever touch the resolved one.
   const epicGatePacks = [
