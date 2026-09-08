@@ -871,7 +871,7 @@ test('built-in outbound reconciliation completes a real CycleRepository stage fr
     quoteDigest: `sha256:${'9'.repeat(64)}`,
     originChainId: 4663,
     destinationChainId: 792703809,
-    originAssetId: '0x0000000000000000000000000000000000000000',
+    originAssetId: 'native',
     originDecimals: 18,
     destinationAssetId: solanaMint,
     destinationDecimals: 6,
