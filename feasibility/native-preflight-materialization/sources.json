@@ -1,0 +1,48 @@
+{
+  "officialCli": {
+    "version": "4.1.0",
+    "url": "https://github.com/programmablehq/PROGRAMMABLE/releases/download/programmable-launch-v4.1.0/programmable-launch-4.1.0.tgz",
+    "sha256": "9d7d26a74b0b4aaa3b3d8acddc80f821cbd79511ee1ada6acc7b935aeb21cac5",
+    "sourceCommit": "b17e40b9ff20bb16feb857bf77451b0a590e7105",
+    "sourceTree": "373bceebe355e4f26eb8ffb265bff91630224ab6",
+    "moduleSha256": {
+      "src/pack-v4.mjs": "699c2398aab8ddd6a6c9dd1a0bb7b34ed5b51b43d8e898511781aa926ede8e4f",
+      "src/graph.mjs": "0ace5c4ec16f07d78b4e3d791c2f86cf1c83e1a2ca9f2377bad43610b0aecfe6",
+      "src/source-bundle.mjs": "17059a88e1e08c16ba60b18de30dba0023036bcdf424ec2bd0f8f6a4fd6ba624",
+      "src/project-metadata.mjs": "22706fb75729093025cdc1fa1fb10ac69864d3f680b0eee8cbdf0910035d1214",
+      "src/runtime-immutables.mjs": "4f04ec466c60195f7fd0f8431d2fe7408ceb776242d52a11e3cc73081f3c0e96",
+      "src/v4-contract.mjs": "f941e96560e9dca279d73845bfb0358ef86ef58d107936a2240a39e4b3959b08",
+      "src/robinhood-native-fee-v1.mjs": "603b82fbc9914076963cda4102ee10f256d7ce0f29065b003b744fd7b09ad53a",
+      "src/canonical-json.mjs": "0ed0d9004ce490d996fda3172ffd7863f7ecb603d91c78ea492e7ba089e80c6d",
+      "examples/robinhood-v4-no-broadcast/project/config-from-capabilities.mjs": "a7f1f6fe92056a37cd3f8f28505fd8cc0a4597d119bafe2c37e8eb81c3fba8be",
+      "package.json": "13465e4973b4c2c11ab9df4b5a5c86c475c6869950006d6575d02db69d3e3a81",
+      "npm-shrinkwrap.json": "8b6e473f6dc059dd51d5ca1bc21494511d19205af592d3ca73b7929c3117fdae"
+    }
+  },
+  "publicImages": [
+    {
+      "url": "https://hookemon.com/hookemon-mark.png",
+      "repositoryPath": "release/phase3/metadata/hookemon-mark.png",
+      "sha256": "d21a88989a104f6534741861cb9966bf0d3b12fe86457d73d143de2fe83ed2ad",
+      "officialImageResult": "Rejected: PNG contains an unadmitted or animated chunk"
+    },
+    {
+      "url": "https://hookemon.com/comic/coin.png",
+      "repositoryPath": "apps/web/public/comic/coin.png",
+      "sha256": "6ab9be5d0a61330b2f07e58d46f8da3aed5bd651b0af8c4efbdf80ce122065d3",
+      "officialImageResult": "Accepted: image/png, 194x194, frameCount1; proposed coordinate only"
+    }
+  ],
+  "checkpointRpc": "https://rpc.mainnet.chain.robinhood.com",
+  "dependencies": {
+    "viem": "2.55.5",
+    "ajv": "8.17.1"
+  },
+  "inputSha256": {
+    "release/phase3/package/create-request.json": "cd2813906aabd63d9ba7d5540fb30f75c032e3679468ee2ebad8232d1beab26b",
+    "release/phase3/launch-inputs.json": "24adf01f863cbb83e7795acd36a6f74bcf53c6a58c27d36dd40df3d6905a2eec",
+    "feasibility/native-provider-admission/create-schema.json": "c4d23b0f3bd232b209d6566ac804348720b81432a2978728a10cc4317895c404",
+    "feasibility/native-provider-admission/chain-deployment-preimage.json": "467961bd5c3b708cb423927c18cf796dc26c271fdabe37b45cf275ba9bfd0081",
+    "feasibility/native-provider-admission/discovery.json": "bd63db1d503824cc3c303063a5c15ad3edaef7c639148eb4184ba848a42a88f9"
+  }
+}

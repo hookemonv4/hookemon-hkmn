@@ -1,0 +1,32 @@
+{
+  "sourceRevision": "e21bccdf5b6af56742f1999255e334750d8e6efb",
+  "publicOrigin": {
+    "url": "https://github.com/hookemonv4/hookemon-hkmn",
+    "revision": "e21bccdf5b6af56742f1999255e334750d8e6efb"
+  },
+  "publicationVerified": false,
+  "nonceStatus": "Proposed deterministic build-only replay coordinate: SHA256 of original request bytes. Not a wallet nonce or funded launch choice.",
+  "permitWindowStatus": "Official example finalized timestamp minus60, plus3600; refresh before preflight. Not seed deadline.",
+  "sourceLineageNonceStatus": "Proposed build-only lineage coordinate from official example default; not a final lineage selection.",
+  "chainDeploymentHashVerified": "0x4bde6e26b6630aa684b4ac2a987d6322755896b249a189843bd3a58fe313694c",
+  "routeNamespace": "0xfc62e43731b5fb748b92c6550c8a46ccf6f526fe678fcdb1ce45e382d1901f4f",
+  "applicantSaltStatus": "Proposed public build-only fixed salts 0x01 repeated for token and 0x02 repeated for custody; documented fixed-salt syntax, not final address selections. Hook requires documented permission grind after constructor inputs exist.",
+  "routeNonceRule": "official graph uses applicant request.nonce; choose a fresh public bytes32 before final packing",
+  "officialCliKernelCheck": {
+    "accepted": false,
+    "code": "ROBINHOOD_NATIVE_FEE_KERNEL_REQUIRED",
+    "message": "ROBINHOOD_NATIVE_FEE_KERNEL_REQUIRED: profile 4.1 requires the reviewed native fee kernel and its exact Standard JSON build. Use the distributed robinhood-native-fee-v1 source kit; put custom logic in a separate reviewed module target."
+  },
+  "filledRootFields": [
+    "chainDeployment",
+    "chainDeploymentDescriptorDigest",
+    "externalContracts",
+    "fundingPlan",
+    "nonce",
+    "projectMetadata",
+    "projectMetadataHash",
+    "projectMetadataImageArtifact",
+    "sourceBundleManifest",
+    "sourceDescriptor"
+  ]
+}
