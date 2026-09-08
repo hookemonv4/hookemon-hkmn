@@ -2,6 +2,7 @@ import { constants, closeSync, fstatSync, lstatSync, openSync, readFileSync } fr
 import { resolve } from 'node:path';
 import { collectNativeBuildClosure } from './native-build-closure.mjs';
 import { envelope, sha256 } from './native-issuance-commitments.mjs';
+import { buildNativeSourceBundle } from './native-source-bundle.mjs';
 import { assertObservedNativeRuntime } from './native-runtime-observer.mjs';
 
 const REQUIREMENTS_SHA256 = '0xcf8ca1e3d36cc6019b7555b4dd7815730bfadba9543803fff62ff11734b2983d';
@@ -39,8 +40,8 @@ function requirementsBytes(root) {
  * Exclusions are caller declarations, not a frozen output policy; this preparation cannot
  * establish anti-self-reference. The materializer must pin its output set before use.
  * No route namespace, nonce, independent deployment values, bindingDigest or readiness is accepted
- * or returned. Provider bundle digests are also omitted: the official CLI hashes canonical
- * bundle content including file bytes, which differs from the repository manifest hash.
+ * or returned. Provider bundle digests use the official CLI canonical manifest and content
+ * preimages, including file bytes for the content digest. They do not establish admission.
  * The next stage must apply the retained checksum-verified official provider coordinate derivation and token/
  * custody artifacts reproduced from this exact compiler/input before committing their identities.
  */
@@ -64,5 +65,6 @@ export function prepareNativeCommitmentInputs(options) {
     sourceClosure, sourceBytes, requirementsBytes: requirements, requirementsSha256: REQUIREMENTS_SHA256,
     observedRuntime, runtimeAuthorityDigest,
     sourceBundleManifest,
+    providerSourceBundle: buildNativeSourceBundle({ manifest: sourceBundleManifest, sourceBytes }),
   };
 }
