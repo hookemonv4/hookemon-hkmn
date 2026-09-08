@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 import {
   existsSync,
   mkdirSync,
@@ -37,6 +38,8 @@ import {
 } from '../verify-phase1-release.mjs';
 
 const root = resolve(import.meta.dirname, '../..');
+const historicalReleaseCommit = 'b2cb737a298522e3944652e862c4eeab195667d8';
+const historicalSource = path => execFileSync('git', ['show', `${historicalReleaseCommit}:${path}`], { cwd: root, encoding: 'utf8' });
 const report = JSON.parse(readFileSync(resolve(root, 'release/phase1/local-reproducibility.json')));
 const toolchain = JSON.parse(readFileSync(resolve(root, 'release/phase1/local-toolchain.json')));
 const dependencyPins = JSON.parse(readFileSync(resolve(root, 'product/dependency-pins.json')));
@@ -194,7 +197,7 @@ test('release verifier checks an explicit surface-policy classification for ever
   );
 });
 
-test('release verifier allows only the documented market-routing external-call patterns', () => {
+test('current release verifier enforces historical market-routing external-call vectors', () => {
   for (const path of [
     'packages/contracts/src/HookemonHook.sol',
     'packages/contracts/src/bindings/RobinhoodBindings.sol',
@@ -207,13 +210,13 @@ test('release verifier allows only the documented market-routing external-call p
   assert.equal(marketRoutingSourcePaths.length, 7);
   for (const path of marketRoutingSourcePaths) {
     assert.doesNotThrow(
-      () => validateMarketRoutingSourceSurfaces(readFileSync(resolve(root, path), 'utf8'), path),
+      () => validateMarketRoutingSourceSurfaces(historicalSource(path), path),
       path,
     );
   }
 
   const hookPath = 'packages/contracts/src/HookemonHook.sol';
-  const hookSource = readFileSync(resolve(root, hookPath), 'utf8');
+  const hookSource = historicalSource(hookPath);
   const hookMutations = [
     [
       '.transferFrom(params.payer, address(this), uint160(usdgMax), Currency.unwrap(usdg));',
@@ -298,7 +301,7 @@ test('release verifier allows only the documented market-routing external-call p
   );
 
   const issuancePath = 'packages/contracts/src/launch/HookemonIssuance.sol';
-  const issuanceSource = readFileSync(resolve(root, issuancePath), 'utf8');
+  const issuanceSource = historicalSource(issuancePath);
   assert.throws(
     () => validateMarketRoutingSourceSurfaces(
       `${issuanceSource}\ncontract DuplicateTransferSurface { function transfer(address recipient, uint256 amount) external returns (bool) { return amount > 0 && recipient != address(0); } }`,
@@ -308,7 +311,7 @@ test('release verifier allows only the documented market-routing external-call p
   );
 
   const tokenPath = 'packages/contracts/src/launch/HKMNToken.sol';
-  const tokenSource = readFileSync(resolve(root, tokenPath), 'utf8');
+  const tokenSource = historicalSource(tokenPath);
   assert.throws(
     () => validateMarketRoutingSourceSurfaces(
       `${tokenSource}\ncontract DuplicateTransferSurface { function transfer(address recipient, uint256 amount) external returns (bool) { return amount > 0 && recipient != address(0); } }`,

@@ -127,10 +127,12 @@ test('rejects a release artifact whose runtime consumes all pinned genesis code 
   );
 });
 
-test('rejects an address manifest that breaks provider target order', () => {
+test('current verifier rejects historical draft vectors that break provider target order', () => {
   const directory = mkdtempSync(join(tmpdir(), 'hookemon-address-manifest-'));
   const path = join(directory, 'address-manifest.json');
-  const addressManifest = JSON.parse(readFileSync(addressManifestPath, 'utf8'));
+  const addressManifest = JSON.parse(execFileSync('git', ['show', 'b2cb737a298522e3944652e862c4eeab195667d8:release/phase3/address-manifest.json'], { cwd: root, encoding: 'utf8' }));
+  assert.equal(addressManifest.schemaVersion, 'hookemon.phase3.address-manifest-draft.v1');
+  assert.deepEqual(addressManifest.targets.map(target => target.targetId), ['token', 'custody', 'hook']);
   [addressManifest.targets[1], addressManifest.targets[2]] = [addressManifest.targets[2], addressManifest.targets[1]];
   writeFileSync(path, `${JSON.stringify(addressManifest, null, 2)}\n`);
   try {

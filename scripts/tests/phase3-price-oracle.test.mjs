@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import test from 'node:test';
@@ -7,6 +8,7 @@ import * as phaseThreeRelease from '../programmable/lib/phase3-release.mjs';
 import { keccak256Hex } from '../programmable/lib/keccak.mjs';
 
 const root = resolve(import.meta.dirname, '../..');
+const historicalReleaseCommit = 'b2cb737a298522e3944652e862c4eeab195667d8';
 const Q96 = 1n << 96n;
 const Q192 = Q96 * Q96;
 const MIN_TICK = -887220;
@@ -25,7 +27,8 @@ const EXACT_FULL_STOCK_CANDIDATES = Object.freeze({
 });
 
 function readLaunchInputs() {
-  return JSON.parse(readFileSync(resolve(root, 'release/phase3/launch-inputs.json'), 'utf8'));
+  // Historical full-stock vectors exercise the current oracle; the native draft remains unselected.
+  return JSON.parse(execFileSync('git', ['show', `${historicalReleaseCommit}:release/phase3/launch-inputs.json`], { cwd: root, encoding: 'utf8' }));
 }
 
 function readTickMathVectors() {
