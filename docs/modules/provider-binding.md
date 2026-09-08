@@ -84,3 +84,5 @@ When an approved implementation changes a bound input, review its diff and updat
 `verifyNativeReleaseIdentities` rederives the native atomic graph and compares both commitments, constructor bytes, roles, economics, token/custody inputs, hook/runtime, PoolKey, graph calls and committed artifacts. This is local identity consistency; admission and finalized deployment remain separately required. Recompute after any bound input changes and retain the non-signing draft until all external facts and concrete transaction authority exist.
 
 Commitment validators require exact field arrays and string-typed hashes, addresses and unsigned decimals. Release verification snapshots launch inputs before recomputation and requires own artifact entries in the committed byte map.
+
+Native commitment consistency checks snapshot plain metadata and owned byte buffers before validation. Coercible paths, metadata accessors and sparse canonical arrays are rejected. This consistency check does not independently establish live runtime authority.
