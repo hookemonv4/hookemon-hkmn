@@ -42,6 +42,8 @@ that module's territory.
 
 ## Invariants
 
+- The supplementary return uses the same trusted clock as its Relay quote producer. The stage driver passes that clock separately from canonical configuration data; quote validity and USD valuation are checked after the HTTP response without extending the quote lifetime.
+
 - A held position resold here is always identified by its own immutable `memo`/`mint`, its own
   owner `sell` decision, and its own position-scoped chain-attempt namespace
   (`buybackAttemptRequestDigest`, keyed by `positionId`/`cycleId`/`memo`) -- never the ordinary

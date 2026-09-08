@@ -1243,6 +1243,8 @@ export function createStageDriver({
         adapters: supplementaryCapabilities.adapters,
         signerClient: supplementaryCapabilities.signerClient,
         preflightAuthority,
+        // Keep the trusted Relay clock separate from canonical configuration data.
+        now: currentHandlerConfig.now ?? Date.now,
         config: frozenSupplementaryReconcileConfig(currentHandlerConfig),
         cycleRepository: supplementarySettlementRepository(cycleRepository, input.assertLease),
         context: frozenCanonicalValue(context),

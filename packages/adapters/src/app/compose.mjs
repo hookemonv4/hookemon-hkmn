@@ -1061,7 +1061,7 @@ export function createProductionSupplementaryStageHandlers({ assertCanary }) {
   const buyback = createSupplementaryBuybackHandler();
   const returnHandler = {
     stage: 'supplementary-return',
-    async reconcile({ adapters, signerClient, config, cycleRepository, context, position, preflightAuthority }) {
+    async reconcile({ adapters, signerClient, config, cycleRepository, context, position, preflightAuthority, now = Date.now }) {
       const sale = await cycleRepository.readSupplementarySettlementEvidence(position.positionId);
       if (sale?.state !== 'BUYBACK_SENT_UNKNOWN' || !sale.evidence) {
         throw new Error('supplementary return requires durable confirmed-sale evidence');
@@ -1075,6 +1075,7 @@ export function createProductionSupplementaryStageHandlers({ assertCanary }) {
         context,
         confirmedSale: sale.evidence,
         preflightAuthority,
+        now,
       });
       return reconcileSupplementaryReturn({ adapters, config, cycleRepository, context });
     },
