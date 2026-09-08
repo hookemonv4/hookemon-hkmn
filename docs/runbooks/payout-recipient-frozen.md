@@ -1,8 +1,8 @@
-# Payout recipient frozen
+# Rejected native payout recipient
 
 ## Detection
 
-- A payout canary or transfer result shows that a manifest recipient cannot receive USDG because the address is frozen.
+- A payout canary refuses a recipient or the original signed native payment finalizes reverted. A pending signed transaction must first reach a verified terminal outcome.
 - Retain that recipient record as `REFUSED`, move its amount to quarantine, and record
   `HELD_OWNER_DECISION` only after the remaining immutable-manifest recipients have been processed.
 
@@ -25,7 +25,7 @@
 
 ## Escalation
 
-Escalate the recipient address, canary or transfer evidence, manifest digest, and quarantine amount to the USDG issuer and payout owner.
+Escalate the recipient address, canary or transfer evidence, manifest digest, and quarantine amount to the payout owner.
 
 ## Evidence
 
@@ -37,6 +37,6 @@ Escalate the recipient address, canary or transfer evidence, manifest digest, an
 Failure-matrix cells: Payout:frozen-recipient
 Owning work package: WP09b
 Expected outcome: terminal=HELD_OWNER_DECISION; attempt=REFUSED; next=owner-decision
-Test: packages/adapters/test/app/stages-payout.test.mjs — quarantines a frozen recipient, finalizes a later recipient, then holds reopened custody
-Alarm reason/code: OPEN FACT (WP09b): no dedicated alert code is emitted for a frozen payout recipient.
+Test: packages/adapters/test/app/stages-payout.test.mjs — quarantines a reverted native payment, finalizes a later recipient, then holds reopened custody
+Alarm reason/code: OPEN FACT (WP09b): no dedicated alert code is emitted for a rejected native payout recipient.
 Resume command: none supported; retain the immutable manifest and quarantine liability pending an owner decision.

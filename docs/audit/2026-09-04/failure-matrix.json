@@ -197,7 +197,7 @@
       "expectedAttemptState": "REFUSED",
       "expectedNextStage": "owner-decision",
       "owningWp": "WP09b",
-      "test": "packages/adapters/test/app/stages-payout.test.mjs — quarantines a frozen recipient, finalizes a later recipient, then holds reopened custody"
+      "test": "packages/adapters/test/app/stages-payout.test.mjs — quarantines a reverted native payment, finalizes a later recipient, then holds reopened custody"
     },
     {
       "system": "EVM nonce",
