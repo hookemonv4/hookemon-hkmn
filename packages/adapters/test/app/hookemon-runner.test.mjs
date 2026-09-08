@@ -22,6 +22,7 @@ import { applyOperatorConfiguration } from '../../../runner/src/config/state-sch
 import { deriveCyclePolicyDigest } from '../../../runner/src/automation/policy-engine.mjs';
 import { canonicalJson, digest } from '../../../runner/src/cycle/journal.mjs';
 import { stepAuthorizationIntentDigest } from '../../../runner/src/cycle/authorization-provider.mjs';
+import { readEnvironment } from '../../src/app/environment.mjs';
 import { CycleRepository } from '../../src/app/cycle-repository.mjs';
 import { attachOwnerSignature, buildCanonicalStandingAuthorityDocument } from '../../src/signing/standing-authority.mjs';
 import {
@@ -73,6 +74,16 @@ async function pricedCollectorConfig() {
   return { rawQuoteForTest: raw, now: () => nowMs, pack: { code: 'collector-25' }, collectorCrypt: { packPrice: amount,
     packFundingUsd: createQuoteUsdValuation({ quote, side: 'origin', amount, rounding: 'up', nowMs }) } };
 }
+
+test('compositionInput preserves the environment native payment binding path for release validation', () => {
+  const bindingPath = '/tmp/hookemon-cli-native-payment-binding.json';
+  const env = readEnvironment({ ...baseEnv('/tmp/hookemon-cli-native-binding'), HOOKEMON_NATIVE_PAYMENT_BINDING_PATH: bindingPath });
+  const input = compositionInput({ env, statePath: '/tmp/hookemon-cli-native-binding/operator-state.json',
+    dashboard: null, signerClient: null, signerReadiness: null, rehearsalCapMicroUsd: null,
+    rehearsalSessionId: null, restartInjector: null, logTicks: false });
+  assert.equal(input.nativePaymentBindingPath, bindingPath);
+  assert.equal(input.nativePaymentBinding, undefined, 'the path does not manufacture a release capability');
+});
 
 test('compositionInput pins enforceProfile for every composed run and resume profile', () => {
   const base = {

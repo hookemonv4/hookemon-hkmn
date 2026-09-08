@@ -333,6 +333,7 @@ function compositionInput({
     solana: env.solana,
     relay: env.relay,
     relayQuoteValidityMs: env.relayQuoteValidityMs,
+    nativePaymentBindingPath: env.nativePaymentBindingPath,
     ...(env.now ? { now: env.now } : {}),
     collectorCrypt: env.collectorCrypt,
     ...(env.collectorProductionBindingRegistry === undefined ? {} : { collectorProductionBindingRegistry: env.collectorProductionBindingRegistry }),
