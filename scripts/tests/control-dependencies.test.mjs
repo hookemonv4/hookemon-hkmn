@@ -68,6 +68,13 @@ const CONTROL_DEPENDENCY_VERIFIER_IMPORT_SCRIPT = readFileSync(
   'utf8',
 );
 const CONTROL_DEPENDENCY_VERIFIER_IMPORT_SHA256 = sha256(CONTROL_DEPENDENCY_VERIFIER_IMPORT_SCRIPT);
+const CI_CHANGE_CLASSIFIER_PATH = 'scripts/ci-change-scope.mjs';
+const CI_CHANGE_CLASSIFIER_SCRIPT = readFileSync(join(REPO_ROOT, CI_CHANGE_CLASSIFIER_PATH), 'utf8');
+const CI_CHANGE_CLASSIFIER_SHA256 = sha256(CI_CHANGE_CLASSIFIER_SCRIPT);
+const classifierBlob = () => ({
+  mode: '100644', type: 'blob', blobId: '0'.repeat(40),
+  sha256: CI_CHANGE_CLASSIFIER_SHA256, bytes: Buffer.from(CI_CHANGE_CLASSIFIER_SCRIPT),
+});
 const ARCHIVE_FORK_PROOF_TEST_PATH = 'packages/contracts/test/integration/RobinhoodV4ArchiveFork.t.sol';
 const ARCHIVE_FORK_PROOF_TEST = readFileSync(join(REPO_ROOT, ARCHIVE_FORK_PROOF_TEST_PATH), 'utf8');
 const ARCHIVE_FORK_PROOF_TEST_SHA256 = sha256(ARCHIVE_FORK_PROOF_TEST);
@@ -268,6 +275,7 @@ function fixture() {
   writeFileSync(join(root, FORK_PIN_VERIFIER_IMPORT_PATH), FORK_PIN_VERIFIER_IMPORT_SCRIPT);
   writeFileSync(join(root, 'scripts', 'verify-control-dependencies.mjs'), CONTROL_DEPENDENCY_VERIFIER_SCRIPT);
   writeFileSync(join(root, CONTROL_DEPENDENCY_VERIFIER_IMPORT_PATH), CONTROL_DEPENDENCY_VERIFIER_IMPORT_SCRIPT);
+  writeFileSync(join(root, CI_CHANGE_CLASSIFIER_PATH), CI_CHANGE_CLASSIFIER_SCRIPT);
   writeFileSync(join(root, ARCHIVE_FORK_PROOF_TEST_PATH), ARCHIVE_FORK_PROOF_TEST);
   writeJson(join(root, 'packages', 'adapters', 'package.json'), {
     name: '@hookemon/adapters',
@@ -309,6 +317,7 @@ function fixture() {
       githubActions: ACTIONS,
     },
     controlScripts: {
+      ciChangeClassifier: { path: CI_CHANGE_CLASSIFIER_PATH, sha256: CI_CHANGE_CLASSIFIER_SHA256 },
       commitIdentityAllowlist: {
         path: 'scripts/check-commit-identity.mjs',
         sha256: COMMIT_IDENTITY_ALLOWLIST_SHA256,
@@ -429,15 +438,20 @@ test('verifies the exact runtime executable for the selected platform distributi
       { workflow: '.github/workflows/fork-pin-canary.yml', ref: CHECKOUT_SHA },
       { workflow: '.github/workflows/fork-proof.yml', ref: CHECKOUT_SHA },
       { workflow: '.github/workflows/fork-proof.yml', ref: CHECKOUT_SHA },
+      { workflow: '.github/workflows/fork-proof.yml', ref: CHECKOUT_SHA },
       { workflow: '.github/workflows/identity-gate.yml', ref: CHECKOUT_SHA },
       { workflow: '.github/workflows/identity-gate.yml', ref: CHECKOUT_SHA },
       { workflow: '.github/workflows/launch-gate.yml', ref: CHECKOUT_SHA },
+      { workflow: '.github/workflows/v4-gates.yml', ref: CHECKOUT_SHA },
+      { workflow: '.github/workflows/v4-gates.yml', ref: CHECKOUT_SHA },
+      { workflow: '.github/workflows/v4-gates.yml', ref: CHECKOUT_SHA },
       { workflow: '.github/workflows/v4-gates.yml', ref: CHECKOUT_SHA },
       { workflow: '.github/workflows/v4-gates.yml', ref: CHECKOUT_SHA },
       { workflow: '.github/workflows/web-ci.yml', ref: CHECKOUT_SHA },
     ],
     'actions/setup-node': [
       { workflow: '.github/workflows/deploy-web.yml', ref: SETUP_NODE_SHA },
+      { workflow: '.github/workflows/v4-gates.yml', ref: SETUP_NODE_SHA },
       { workflow: '.github/workflows/web-ci.yml', ref: SETUP_NODE_SHA },
     ],
   });
@@ -685,13 +699,20 @@ test('rejects an unpinned fork-pin verifier package import before workflow execu
 });
 
 test('the git-backed base control entry point loads every declared control descriptor blob from a real tree', () => {
-  const headTree = execFileSync('git', ['rev-parse', 'HEAD^{tree}'], { cwd: REPO_ROOT, encoding: 'utf8' }).trim();
-
-  const report = controlDependencies.verifyBaseControlDependencies(REPO_ROOT, headTree, headTree);
-
-  const errors = report.errors.join('\n');
-  assert.doesNotMatch(errors, /must be a regular Git blob/);
-  assert.doesNotMatch(errors, /is missing or ambiguous in candidate tree/);
+  const { root } = fixture();
+  writeJson(join(root, 'product/dependency-verification.json'), {});
+  const env = { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' };
+  const git = args => execFileSync('git', ['-c', 'core.excludesFile=/dev/null', ...args], { cwd: root, env, encoding: 'utf8' }).trim();
+  git(['init', '--quiet']);
+  git(['add', '--all']);
+  const tree = git(['write-tree']);
+  const source = new URL('../verify-control-dependencies.mjs', import.meta.url).href;
+  const code = `import { verifyBaseControlDependencies } from ${JSON.stringify(source)};
+    process.stdout.write(JSON.stringify(verifyBaseControlDependencies(process.cwd(), process.argv[1], process.argv[1])));`;
+  const report = JSON.parse(execFileSync(process.execPath, ['--input-type=module', '--eval', code, tree], {
+    cwd: root, env, encoding: 'utf8',
+  }));
+  assert.equal(report.result, 'PASSED', report.errors.join('\n'));
 });
 
 test('the base control checker rejects a candidate verifier import outside the pinned closure', () => {
@@ -703,6 +724,7 @@ test('the base control checker rejects a candidate verifier import outside the p
   candidatePins.controlScripts.forkPinVerifier.closure[0].sha256 = sha256(candidateVerifier);
 
   const candidateBlobs = new Map([
+    [CI_CHANGE_CLASSIFIER_PATH, { mode: '100644', type: 'blob', blobId: '0'.repeat(40), sha256: CI_CHANGE_CLASSIFIER_SHA256, bytes: Buffer.from(CI_CHANGE_CLASSIFIER_SCRIPT) }],
     ['.github/workflows/v4-gates.yml', { mode: '100644', type: 'blob', blobId: '1'.repeat(40), sha256: candidatePins.contentAddresses.workflow.sha256 }],
     ['.github/workflows/fork-proof.yml', { mode: '100644', type: 'blob', blobId: 'a'.repeat(40), sha256: candidatePins.contentAddresses.forkProof.sha256 }],
     ['.github/workflows/fork-pin-canary.yml', { mode: '100644', type: 'blob', blobId: '2'.repeat(40), sha256: candidatePins.contentAddresses.forkPinCanary.sha256 }],
@@ -718,6 +740,7 @@ test('the base control checker rejects a candidate verifier import outside the p
     [ARCHIVE_FORK_PROOF_TEST_PATH, { mode: '100644', type: 'blob', blobId: '9'.repeat(40), sha256: candidatePins.contentAddresses.archiveForkProofTest.sha256 }],
   ]);
   const result = verifyBaseControlSurface({
+    baseClassifierBlob: classifierBlob(),
     basePins,
     candidatePins,
     basePinsSha256: sha256(JSON.stringify(basePins)),
@@ -750,6 +773,7 @@ test('the base control checker permits an owner-approved verifier pin bump with 
   const baseCheckerBlob = 'c'.repeat(40);
 
   const candidateBlobs = new Map([
+    [CI_CHANGE_CLASSIFIER_PATH, { mode: '100644', type: 'blob', blobId: '0'.repeat(40), sha256: CI_CHANGE_CLASSIFIER_SHA256, bytes: Buffer.from(CI_CHANGE_CLASSIFIER_SCRIPT) }],
     ['.github/workflows/v4-gates.yml', { mode: '100644', type: 'blob', blobId: '1'.repeat(40), sha256: candidatePins.contentAddresses.workflow.sha256 }],
     ['.github/workflows/fork-proof.yml', { mode: '100644', type: 'blob', blobId: 'a'.repeat(40), sha256: candidatePins.contentAddresses.forkProof.sha256 }],
     ['.github/workflows/fork-pin-canary.yml', { mode: '100644', type: 'blob', blobId: '2'.repeat(40), sha256: candidatePins.contentAddresses.forkPinCanary.sha256 }],
@@ -765,6 +789,7 @@ test('the base control checker permits an owner-approved verifier pin bump with 
     [ARCHIVE_FORK_PROOF_TEST_PATH, { mode: '100644', type: 'blob', blobId: '9'.repeat(40), sha256: candidatePins.contentAddresses.archiveForkProofTest.sha256 }],
   ]);
   const result = verifyBaseControlSurface({
+    baseClassifierBlob: classifierBlob(),
     basePins,
     candidatePins,
     basePinsSha256,
@@ -805,6 +830,7 @@ function v2PinBumpFixture() {
   const baseTree = 'a'.repeat(40);
   const baseCheckerBlob = 'c'.repeat(40);
   const candidateBlobs = new Map([
+    [CI_CHANGE_CLASSIFIER_PATH, { mode: '100644', type: 'blob', blobId: '0'.repeat(40), sha256: CI_CHANGE_CLASSIFIER_SHA256, bytes: Buffer.from(CI_CHANGE_CLASSIFIER_SCRIPT) }],
     ['.github/workflows/v4-gates.yml', { mode: '100644', type: 'blob', blobId: '1'.repeat(40), sha256: candidatePins.contentAddresses.workflow.sha256 }],
     ['.github/workflows/fork-proof.yml', { mode: '100644', type: 'blob', blobId: '2'.repeat(40), sha256: candidatePins.contentAddresses.forkProof.sha256 }],
     ['.github/workflows/fork-pin-canary.yml', { mode: '100644', type: 'blob', blobId: '3'.repeat(40), sha256: candidatePins.contentAddresses.forkPinCanary.sha256 }],
@@ -827,6 +853,123 @@ function v2PinBumpFixture() {
   return { basePins, candidatePins, basePinsSha256, candidatePinsSha256, baseTree, baseCheckerBlob, candidateBlobs, controls };
 }
 
+
+for (const [label, mutate, expected] of [
+  ['missing pin', (state, pins) => { delete pins.controlScripts.ciChangeClassifier; }, /CI change classifier must pin only/],
+  ['changed bytes', state => { writeFileSync(join(state.root, CI_CHANGE_CLASSIFIER_PATH), 'export const scope = "presentation";\n'); }, /CI change classifier digest does not match/],
+  ['coordinated candidate hash', (state, pins) => {
+    const source = 'export const scope = "presentation";\n';
+    writeFileSync(join(state.root, CI_CHANGE_CLASSIFIER_PATH), source);
+    pins.controlScripts.ciChangeClassifier.sha256 = sha256(source);
+  }, /CI change classifier digest must match the supported release/],
+  ['symlink', state => {
+    const path = join(state.root, CI_CHANGE_CLASSIFIER_PATH);
+    renameSync(path, `${path}.target`);
+    symlinkSync('ci-change-scope.mjs.target', path);
+  }, /CI change classifier.*not a symlink/],
+  ['local import', state => {
+    writeFileSync(join(state.root, CI_CHANGE_CLASSIFIER_PATH), `import './unreviewed-scope.mjs';\n${CI_CHANGE_CLASSIFIER_SCRIPT}`);
+  }, /CI change classifier import closure imports an undeclared local module/],
+]) {
+  test(`the classifier control rejects ${label}`, () => {
+    const state = fixture();
+    const path = join(state.root, 'product/dependency-pins.json');
+    const pins = readJson(path);
+    mutate(state, pins);
+    writeJson(path, pins);
+    const result = verifyFixture(state);
+    assert.equal(result.result, 'FAILED');
+    assert.match(result.errors.join('\n'), expected);
+  });
+}
+
+function legacyClassifierBootstrapFixture() {
+  const f = v2PinBumpFixture();
+  delete f.basePins.controlScripts.ciChangeClassifier;
+  const verifier = f.basePins.controlScripts.controlDependencyVerifier;
+  verifier.sha256 = sha256('historical protected checker without classifier support');
+  verifier.closure[0].sha256 = verifier.sha256;
+  f.basePinsSha256 = sha256(JSON.stringify(f.basePins));
+  f.controls.push({
+    path: 'scripts/verify-control-dependencies.mjs',
+    previousSha256: verifier.sha256,
+    sha256: f.candidatePins.controlScripts.controlDependencyVerifier.sha256,
+  });
+  return f;
+}
+
+test('legacy classifier bootstrap requires verified absence and a bound owner-approved checker change', () => {
+  const f = legacyClassifierBootstrapFixture();
+  const result = controlDependencies.verifyBaseControlSurface({
+    ...f, baseClassifierBlob: null, candidateTree: 'b'.repeat(40),
+    candidateVerification: { controlGatePinBump: v2Bump(f) },
+  });
+  assert.equal(result.result, 'PASSED', result.errors.join('\n'));
+  assert.equal(result.changes.some(change => change.path === CI_CHANGE_CLASSIFIER_PATH), false,
+    'bootstrap preserves the old base checker change inventory; the approved checker binds the new classifier');
+});
+
+test('legacy classifier bootstrap rejects an unpinned existing base file or unverified absence', () => {
+  const f = legacyClassifierBootstrapFixture();
+  for (const baseClassifierBlob of [undefined, classifierBlob()]) {
+    const result = controlDependencies.verifyBaseControlSurface({
+      ...f, baseClassifierBlob, candidateTree: 'b'.repeat(40),
+      candidateVerification: { controlGatePinBump: v2Bump(f) },
+    });
+    assert.equal(result.result, 'FAILED');
+    assert.match(result.errors.join('\n'), /requires verified absence/);
+  }
+});
+
+test('legacy classifier bootstrap cannot bypass the approved checker change', () => {
+  const f = legacyClassifierBootstrapFixture();
+  f.basePins.controlScripts.controlDependencyVerifier = structuredClone(f.candidatePins.controlScripts.controlDependencyVerifier);
+  f.basePinsSha256 = sha256(JSON.stringify(f.basePins));
+  f.controls = f.controls.filter(change => change.path !== 'scripts/verify-control-dependencies.mjs');
+  const result = controlDependencies.verifyBaseControlSurface({
+    ...f, baseClassifierBlob: null, candidateTree: 'b'.repeat(40),
+    candidateVerification: { controlGatePinBump: v2Bump(f) },
+  });
+  assert.equal(result.result, 'FAILED');
+  assert.match(result.errors.join('\n'), /requires an owner-approved control dependency verifier pin change/);
+});
+
+test('an established classifier pin cannot disappear or change outside the owner bump', () => {
+  for (const mutation of ['missing', 'changed']) {
+    const f = v2PinBumpFixture();
+    if (mutation === 'missing') {
+      delete f.candidatePins.controlScripts.ciChangeClassifier;
+      f.candidateBlobs.delete(CI_CHANGE_CLASSIFIER_PATH);
+    } else {
+      const source = `${CI_CHANGE_CLASSIFIER_SCRIPT}\nexport const changedScope = true;\n`;
+      f.candidatePins.controlScripts.ciChangeClassifier.sha256 = sha256(source);
+      f.candidateBlobs.set(CI_CHANGE_CLASSIFIER_PATH, {
+        ...classifierBlob(), sha256: sha256(source), bytes: Buffer.from(source),
+      });
+    }
+    f.candidatePinsSha256 = sha256(JSON.stringify(f.candidatePins));
+    const result = controlDependencies.verifyBaseControlSurface({
+      ...f, baseClassifierBlob: classifierBlob(), candidateTree: 'b'.repeat(40),
+      candidateVerification: { controlGatePinBump: v2Bump(f) },
+    });
+    assert.equal(result.result, 'FAILED');
+    assert.ok(result.changes.some(change => change.path === CI_CHANGE_CLASSIFIER_PATH));
+    assert.match(result.errors.join('\n'), /exact control-surface digest changes/);
+  }
+});
+
+test('the protected classifier base rejects a missing, symlinked or wrong-digest blob', () => {
+  const f = v2PinBumpFixture();
+  for (const baseClassifierBlob of [undefined, null, { ...classifierBlob(), mode: '120000' }, { ...classifierBlob(), sha256: 'f'.repeat(64) }]) {
+    const result = controlDependencies.verifyBaseControlSurface({
+      ...f, baseClassifierBlob, candidateTree: 'b'.repeat(40),
+      candidateVerification: { controlGatePinBump: v2Bump(f) },
+    });
+    assert.equal(result.result, 'FAILED');
+    assert.match(result.errors.join('\n'), /protected base CI change classifier must be a regular Git blob matching its base pin/);
+  }
+});
+
 function v2Bump(f, approvalToken = 'OWNER APPROVED') {
   return {
     schema: 'hookemon.control-gate-pin-bump.v2',
@@ -843,6 +986,7 @@ test('the base control checker permits a v2 owner-approved pin bump without comm
   const verifyBaseControlSurface = controlDependencies.verifyBaseControlSurface;
   for (const candidateTree of ['b'.repeat(40), 'd'.repeat(40)]) {
     const result = verifyBaseControlSurface({
+    baseClassifierBlob: classifierBlob(),
       ...f,
       candidateTree,
       candidateVerification: { controlGatePinBump: v2Bump(f) },
@@ -855,6 +999,7 @@ test('the base control checker rejects an unsigned v2 pin bump', () => {
   const f = v2PinBumpFixture();
   const verifyBaseControlSurface = controlDependencies.verifyBaseControlSurface;
   const result = verifyBaseControlSurface({
+    baseClassifierBlob: classifierBlob(),
     ...f,
     candidateTree: 'b'.repeat(40),
     candidateVerification: { controlGatePinBump: v2Bump(f, 'DRAFT_UNSIGNED_NOT_YET_APPROVED') },
@@ -873,6 +1018,7 @@ test('the base control checker rejects an unrelated control change after a v2 ap
     mode: '100644', type: 'blob', blobId: 'e'.repeat(40), sha256: candidatePins.contentAddresses.controlGate.sha256,
   });
   const result = verifyBaseControlSurface({
+    baseClassifierBlob: classifierBlob(),
     ...f,
     candidatePins,
     candidatePinsSha256: sha256(JSON.stringify(candidatePins)),
@@ -907,6 +1053,7 @@ test('the base control checker rejects a candidate mutation of its utility impor
   assert.ok(utility, 'control dependency verifier must pin its utility import');
 
   const result = verifyBaseControlSurface({
+    baseClassifierBlob: classifierBlob(),
     basePins,
     candidatePins,
     basePinsSha256: sha256('same-pins'),
@@ -948,6 +1095,7 @@ test('the base control checker rejects a coordinated candidate control-surface m
   candidatePins.contentAddresses.archiveForkProofTest.sha256 = sha256('candidate-archive-test');
 
   const candidateBlobs = new Map([
+    [CI_CHANGE_CLASSIFIER_PATH, { mode: '100644', type: 'blob', blobId: '0'.repeat(40), sha256: CI_CHANGE_CLASSIFIER_SHA256, bytes: Buffer.from(CI_CHANGE_CLASSIFIER_SCRIPT) }],
     ['.github/workflows/v4-gates.yml', { mode: '100644', type: 'blob', blobId: '1'.repeat(40), sha256: candidatePins.contentAddresses.workflow.sha256 }],
     ['.github/workflows/fork-proof.yml', { mode: '100644', type: 'blob', blobId: 'a'.repeat(40), sha256: candidatePins.contentAddresses.forkProof.sha256 }],
     ['.github/workflows/fork-pin-canary.yml', { mode: '100644', type: 'blob', blobId: '2'.repeat(40), sha256: candidatePins.contentAddresses.forkPinCanary.sha256 }],
@@ -963,6 +1111,7 @@ test('the base control checker rejects a coordinated candidate control-surface m
     ['packages/contracts/test/integration/RobinhoodV4ArchiveFork.t.sol', { mode: '100644', type: 'blob', blobId: '9'.repeat(40), sha256: candidatePins.contentAddresses.archiveForkProofTest.sha256 }],
   ]);
   const result = verifyBaseControlSurface({
+    baseClassifierBlob: classifierBlob(),
     basePins,
     candidatePins,
     basePinsSha256: sha256(JSON.stringify(basePins)),
@@ -998,7 +1147,44 @@ test('rejects a simultaneous fork-pin-canary workflow and candidate pin mutation
 // pipeline) so a job-scoped closure divergence can be isolated from the unrelated
 // whole-file SUPPORTED_FORK_PROOF_WORKFLOW_SHA256 check, which would fail on any byte
 // change regardless of whether the job-scoping fix works.
-const FORK_PROOF_PR_JOB_MARKER = '\n  pull-request:\n';
+
+test('the CI lane graph retains complete full checks and fail-closed required results', () => {
+  const errors = [];
+  controlDependencies.verifyCiLaneWorkflowSemantics(CANONICAL_WORKFLOW, CANONICAL_FORK_PROOF, errors);
+  assert.deepEqual(errors, []);
+});
+
+for (const [name, which, before, after, expected] of [
+  ['missing full dependency', 'gates', 'needs: [classify, universal, phase3-bytecode, financial, web-ci]', 'needs: [classify, universal, web-ci]', /gates must retain/],
+  ['conditional universal checks', 'gates', '  universal:\n', '  universal:\n    if: false\n', /universal must run unconditionally/],
+  ['conditional web checks', 'gates', '  web-ci:\n', '  web-ci:\n    needs: [classify]\n', /web-ci must run unconditionally/],
+  ['disabled financial lane', 'gates', "needs.classify.outputs.scope == 'full'", 'false', /phase3-bytecode must retain/],
+  ['tolerated financial failure', 'gates', '  financial:\n', '  financial:\n    continue-on-error: true\n', /financial must not skip or tolerate/],
+  ['missing real web test', 'gates', '        run: npm test', '        run: true', /web CI must retain: run: npm test/],
+  ['hidden failed full result', 'gates', '"$FINANCIAL_RESULT" == \'success\'', '"$FINANCIAL_RESULT" == \'skipped\'', /Require every applicable check.*fail-closed/],
+  ['unverified presentation result', 'gates', '"$PHASE3_BYTECODE_RESULT" == \'skipped\'', '"$PHASE3_BYTECODE_RESULT" != \'success\'', /Require every applicable check.*fail-closed/],
+  ['incomplete bootstrap binding', 'gates', 'pin === undefined && bytes === null', 'pin === undefined', /Classify changes.*fail-closed/],
+  ['candidate helper execution', 'gates', 'node "$RUNNER_TEMP/ci-change-scope.mjs" --base', 'node scripts/ci-change-scope.mjs --base', /Classify changes.*fail-closed/],
+  ['unprotected actual fork job', 'fork', '    environment: fork-proof', '    environment: unprotected', /main-proof must retain: environment: fork-proof/],
+  ['missing actual fork dependency', 'fork', 'needs: [classify, main-proof, pull-request-proof]', 'needs: [classify]', /fork-proof must retain/],
+  ['failed proof accepted as success', 'fork', '"$PR_PROOF_RESULT" == \'success\'', '"$PR_PROOF_RESULT" == \'failure\'', /Require the applicable archive proof.*fail-closed/],
+  ['scope result from unrelated producer', 'gates', 'needs.classify.outputs.scope', 'needs.web-ci.outputs.scope', /CI classification|must retain|fail-closed/],
+]) {
+  test('CI scope semantics reject ' + name, () => {
+    const original = which === 'gates' ? CANONICAL_WORKFLOW : CANONICAL_FORK_PROOF;
+    const mutated = original.replace(before, after);
+    assert.notEqual(mutated, original, 'mutation must alter the actual workflow');
+    const errors = [];
+    controlDependencies.verifyCiLaneWorkflowSemantics(
+      which === 'gates' ? mutated : CANONICAL_WORKFLOW,
+      which === 'fork' ? mutated : CANONICAL_FORK_PROOF,
+      errors,
+    );
+    assert.match(errors.join('\n'), expected);
+  });
+}
+
+const FORK_PROOF_PR_JOB_MARKER = '\n  pull-request-proof:\n';
 const REAL_DEPENDENCY_PINS = readJson(join(REPO_ROOT, 'product', 'dependency-pins.json'));
 const FORK_PIN_VERIFIER_CLOSURE_WITH_ARCHIVE_TEST = {
   ...REAL_DEPENDENCY_PINS.controlScripts.forkPinVerifier,
@@ -1051,7 +1237,7 @@ assertForkProofJobDivergenceIsRejected(
     FORK_PROOF_ARCHIVE_TEST_ASSIGNMENT,
     `fork_pin_packages_contracts_test_integration_RobinhoodV4ArchiveFork_t_sol_sha256='${'f'.repeat(64)}'`,
   ),
-  /fork-proof\.yml job pull-request must verify the supported fork-pin verifier closure/,
+  /fork-proof\.yml job pull-request-proof must verify the supported fork-pin verifier closure/,
 );
 
 assertForkProofJobDivergenceIsRejected(
@@ -1061,14 +1247,14 @@ assertForkProofJobDivergenceIsRejected(
     FORK_PROOF_ARCHIVE_TEST_ASSIGNMENT,
     `fork_pin_packages_contracts_test_integration_RobinhoodV4ArchiveFork_t_sol_sha256='${'f'.repeat(64)}'`,
   ),
-  /fork-proof\.yml job main must verify the supported fork-pin verifier closure/,
+  /fork-proof\.yml job main-proof must verify the supported fork-pin verifier closure/,
 );
 
 assertForkProofJobDivergenceIsRejected(
   'rejects a fork-proof job missing its fork-pin verifier blob check even with a correct assignment',
   'pull-request',
   section => section.replace(`          ${FORK_PROOF_ARCHIVE_TEST_CHECK}\n`, ''),
-  /fork-proof\.yml job pull-request must verify the supported fork-pin verifier closure/,
+  /fork-proof\.yml job pull-request-proof must verify the supported fork-pin verifier closure/,
 );
 
 test('rejects Phase 2 runner coverage that omits the operator suite', () => {
@@ -1421,7 +1607,7 @@ assertWebCiTamperIsRejected(
 
 assertWebCiTamperIsRejected(
   'rejects a web-ci workflow that adds a pull_request_target trigger',
-  workflow => workflow.replace('on:\n  pull_request:', 'on:\n  pull_request_target:\n  pull_request:'),
+  workflow => workflow.replace('on:\n', 'on:\n  pull_request_target:\n'),
   /web-ci workflow must never trigger on pull_request_target/,
 );
 
