@@ -1,4 +1,4 @@
-import { createRelayNativePaymentProof } from '../../native-payment-proof.mjs';
+import { createRelayNativePaymentProof, readReleaseBoundRelaySourceDebit } from '../../native-payment-proof.mjs';
 import {
   DIRECTIONS,
   RELAY_CONSTANTS,
@@ -9,7 +9,6 @@ import {
 import {
   buildRelayLegacyTransaction,
   readBlockHeight,
-  readFinalizedRelaySourceDebit,
   readSolBalance,
   readUsableLatestBlockhash,
   signedSolanaTransactionSignature,
@@ -1406,7 +1405,7 @@ export async function reconcileLiveReturn({ adapters, config, cycleRepository, c
   const configured = assertReturnConfiguration(config);
   let source;
   try {
-    source = await readFinalizedRelaySourceDebit(adapters.solana.client, {
+    source = await readReleaseBoundRelaySourceDebit({ client: adapters.solana.client, binding: config.nativePaymentBinding,
       signature: leg.sourceTxHash,
       owner: config?.accounts?.solana,
       mint: leg.sourceAssetId,
