@@ -706,7 +706,7 @@ test('fork-proof recovery and the control-supply-chain card document the protect
   assert.match(runbook, /GitHub Environment `fork-proof`/);
   assert.match(runbook, /ROBINHOOD_FORK_RPC_URL/);
   assert.match(runbook, /Selected branches and tags/);
-  assert.match(runbook, /Pull requests require `control-gate`, `identity-gate`, and `gates`\./);
+  assert.match(runbook, /Pull requests require `control-gate`, `identity-gate`, `gates`, and `fork-proof`\./);
   assert.match(runbook, /Main requires `control-gate`, `identity-gate`, `gates`, and `fork-proof`\./);
   assert.match(runbook, /ROBINHOOD_FORK_PINNED=true node scripts\/verify-fork-pin\.mjs/);
   assert.match(runbook, /ROBINHOOD_FORK_PINNED=true FOUNDRY_LIBS=/);
@@ -715,7 +715,7 @@ test('fork-proof recovery and the control-supply-chain card document the protect
   assert.match(card, /\.github\/workflows\/fork-proof\.yml/);
   assert.match(card, /\.github\/workflows\/fork-pin-canary\.yml/);
   assert.match(card, /\.github\/workflows\/identity-gate\.yml/);
-  assert.match(card, /Pull requests require `control-gate`, `identity-gate`, and `gates`\./);
+  assert.match(card, /Pull requests require `control-gate`, `identity-gate`, `gates`, and `fork-proof`\./);
   assert.match(card, /Main requires `control-gate`, `identity-gate`, `gates`, and `fork-proof`\./);
   assert.match(card, /ROBINHOOD_FORK_PINNED=true node scripts\/verify-fork-pin\.mjs/);
   assert.doesNotMatch(card, /required reviewer/i);

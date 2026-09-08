@@ -556,7 +556,15 @@ test('GitHub gate pins immutable checkout and content-addresses Node with read-o
   assert.match(workflow, /actions\/checkout@d23441a48e516b6c34aea4fa41551a30e30af803/);
   assert.match(workflow, /fetch-depth: 0/);
   assert.match(workflow, /persist-credentials: false/);
-  assert.doesNotMatch(workflow, /actions\/setup-node@/);
+  const jobs = [...workflow.matchAll(/^  ([a-z][a-z0-9-]*):\n([\s\S]*?)(?=^  [a-z][a-z0-9-]*:\n|$(?![\s\S]))/gm)];
+  const web = jobs.find(([, id]) => id === 'web-ci');
+  assert.ok(web, 'the dedicated web job must remain present');
+  assert.match(web[2], /actions\/setup-node@820762786026740c76f36085b0efc47a31fe5020/);
+  assert.deepEqual([...workflow.matchAll(/actions\/setup-node@(\S+)/g)].map(([, sha]) => sha),
+    ['820762786026740c76f36085b0efc47a31fe5020']);
+  for (const [, id, body] of jobs) {
+    if (id !== 'web-ci') assert.doesNotMatch(body, /actions\/setup-node@/, id);
+  }
   assert.match(workflow, /node-v24\.19\.0-linux-x64\.tar\.xz/);
   assert.match(workflow, /14b342e71204f811bde6153be8e04b62aef63c236fef92b55f9c83154b409647/);
   assert.match(workflow, /bc17c508ffeed0ec622934f9b7fa72f8e78da65350e63c3eceb56fa688aa5e12/);
