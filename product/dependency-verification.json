@@ -272,16 +272,16 @@
   "controlGatePinBump": {
     "schema": "hookemon.control-gate-pin-bump.v2",
     "approvalToken": "OWNER APPROVED",
-    "basePinsSha256": "3e10954d0303496222701d0ced4bf2369c30eec4fd5f64b6386249b5ffa1349a",
+    "basePinsSha256": "534b96bfaeaa6a3334d377b46ab6410f2c35ecafb13f57b200d0f47f32ff5451",
     "candidatePinsSha256": "fe6f6792b6f14a4617b64fec28b3381fa60ec32a669ded485b19cab9c8268289",
     "baseChecker": {
       "path": "scripts/verify-control-dependencies.mjs",
-      "blobId": "37f870cee481f547e8cf79076292db7c3caf09e3"
+      "blobId": "814dd4fc8d7568610cb8d6755397f3d82a59b055"
     },
     "controls": [
       {
         "path": "scripts/verify-control-dependencies.mjs",
-        "previousSha256": "83ed39db83d42ed3192d985031294a8699210c39978442078ffefa88744b91cf",
+        "previousSha256": "20577b51e3644f62f77c2d9bfde16245a752690e74c69a5d5ec67fa0f1ae3d0a",
         "sha256": "a6bdc3d748e482a3700c59d47ae7ace6ef96806ef1b32535a99dd16ddbc1e77e"
       }
     ]
