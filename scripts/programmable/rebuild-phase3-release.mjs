@@ -254,7 +254,7 @@ function updateAddressManifest(manifest, records, buildInfo, launchInputs) {
     hook.constructor.processClaimLimit6hWei ??= null;
     hook.constructor.processClaimLimitMaxWei ??= null;
     manifest.openFacts = manifest.openFacts.filter(fact => !fact.includes('USDG'));
-    manifest.openFacts = [...new Set([...manifest.openFacts, 'Missing: native seed maximum and explicit wei claim ceilings. Resolve: bind the fully costed reviewed native launch inputs. Verified alternative: no seed or address-bound graph is materialized.'])];
+    manifest.openFacts = [...new Set([...manifest.openFacts, 'Missing: native seed maximum and explicit wei claim ceilings. Resolve: bind reviewed per-action native limits and gas reserves. The owner defers complete EUR 250 affordability proof until functional testing. Verified alternative: no seed or address-bound graph is materialized.'])];
   }
 
   manifest.deployer.factory = PHASE_THREE_FACTORY;

@@ -1,69 +1,50 @@
-# Phase 3 launch handoff
+# Native mainnet test handoff
 
-Status: do not sign. This is a deterministic preparation record, not deployment authority. Requirements revision 65 records the owner's 2026-09-05 decision: the complete 1,000,000,000 HKMN supply is allocated to the canonical market and no other HKMN allocation exists. The DRAFT_UNSIGNED revision-65 baseline records subject hashes only.
+Status: preparation for review; no signable launch transaction is present. This handoff covers one complete cycle, followed by a second cycle only after the first is reconciled. The owner prioritizes functional evidence and will fund the wallets separately. The decision in `decisions/owner-approvals/mainnet-test-priority-20260908.json` defers proof that EUR 250 covers the complete process. It does not select a seed amount, increase transaction limits, change fees or authorize a signature.
 
-The read-only V4 format probes (records retained outside the repository) recorded ten redacted requests. They confirmed the nonce, source descriptor, and nonempty source-manifest field shapes, but no probe returned a non-error preflight result or wallet handoff. The source manifest digest binding remains an OPEN FACT; no signed or deployable request has been produced.
+## Review inputs
 
-## Fixed inputs
-
-The launch wallet and treasury beneficiary are `0xfc82B0da6d487B97d7eA1AA0d51E00AfF4F3a729`. Operations is `0xB54AAF746eb1e80AFDb5eb0992a75b08DB2E4384`. The immutable Programmable recipient is `0x4957f49620AFf3Adbbe8195a4f633E49cc93376c` at 10 bps of the 300 bps hook fee; FEE-01 was accepted with the owner on 2026-09-04. The canonical pool uses zero LP fee, spacing 60, and full-range ticks `-887220` through `887220`.
-
-The owner budget is 300 USD. The seed reserves 240 USDG (`240000000` atomic units, 6 decimals). The graph allocates `1000000000000000000000000000` atomic HKMN to the hook, and permanent custody receives only the minted v4 LP position.
-
-## Transaction 1: graph deployment and pool initialization
-
-| Field | Value |
+| Item | Bound value or present state |
 | --- | --- |
-| Chain ID | `4663` |
-| From | `0xfc82B0da6d487B97d7eA1AA0d51E00AfF4F3a729` |
-| To | `0x34965F2A2ee9254522232C32F02056E92BE0C98a` |
-| Method | `launchAndStampV1` |
-| Value | `0` native atomic units |
-| Calldata digest | UNSET until provider launch-intent preimage fields are supplied |
-| Expected addresses | UNSET until provider derivation completes |
-| Wallet nonce and gas fields | UNSET at signing time |
+| Chain | Robinhood, chain ID 4663; native ETH at 18 decimals |
+| Launch wallet and treasury | `0xfc82B0da6d487B97d7eA1AA0d51E00AfF4F3a729` |
+| Operations | `0xB54AAF746eb1e80AFDb5eb0992a75b08DB2E4384` |
+| Programmable recipient | `0x4957f49620AFf3Adbbe8195a4f633E49cc93376c` |
+| Stock | Exactly 1 billion HKMN at 18 decimals, entirely allocated to the canonical market |
+| Pool | Native ETH currency0, HKMN currency1; zero LP fee, spacing 60, full-range ticks -887220 through 887220 |
+| Fees | 300 bps total: 250 process, 40 treasury, 10 Programmable; no additional platform fee selected |
+| Liquidity custody | Permanent position custody; the test provides no withdrawal route |
+| Seed and process claim ceilings | Explicit wei values required before materialization; currently unset |
+| Total test funding | Owner plans EUR 250; adequacy is deliberately unproven and measured after the test |
 
-The graph target order is `HKMNToken`, `PermanentPositionCustody`, then `HookemonHook`. Its required initializer sequence is `token.allocate(hook)`, `custody.configureBindingHook(hook)`, and `hook.initializeGraphLaunch(custody,selectedSqrtPriceX96)`. The ABI selector, targets, arguments, call count, and order must match the provider encoding before any call data is signed.
+The 0.04 ETH seed and 0.02 ETH recycled float in `feasibility/native-funding/` are local experiment inputs, not selected wallet actions. Their 32 swaps reach one expired historical bridge principal. They do not prove two complete cycles, a fresh quote, a production slippage limit or sufficient gas. USD comparisons in that evidence use a historical ratio and are not an EUR conversion.
 
-## Transaction 2: owner seed and custody binding
+## Preparation before wallet review
 
-| Field | USDG currency0 | HKMN currency0 |
-| --- | ---: | ---: |
-| sqrtPriceX96 | `161723809515207654588927258648643645224` | `38813714284914462669` |
-| Liquidity | `489897948556635619` | `489897948572597439` |
-| USDG maximum | `240000000` | `240000000` |
-| HKMN maximum | `1000000000000000000000000000` | `1000000000000000000000000000` |
+1. Finish the approved source and runtime commitments, reproduce all three deployed addresses and immutable runtime code, and bind the exact source revision, compiler, roles, PoolKey and provider graph. Hashing a supplied runtime record alone does not authenticate it.
+2. Produce the complete provider request using verified official packing rules. Obtain exact-request admission of the separate native seed and inclusive fee model. Current public provider terms describe a different fee and funded-launch model; retain that difference until a concrete response resolves it.
+3. Select explicit native seed and claim limits in the review candidate. After funding, measure available ETH, Solana USDC and SOL independently. Obtain fresh quotes, minimum pack requirements, transaction simulations, gas/rent reserves and deadlines for the next action. Complete-process affordability is not a prerequisite; the next action must still fit its own reviewed amount and reserve.
+4. Present each unsigned transaction with chain, sender, recipient, calldata digest, native value, token approvals, maximum fees, expected state change and expiry. Missing fields remain unset. A preflight response never authorizes a signature or a create request.
 
-The selected address order consumes both maximums exactly. Permit2 allowance must equal the selected USDG maximum and name the resolved hook. Unused USDG is returned to the payer. In graph mode, any HKMN residual reverts the full seed rather than being transferred elsewhere.
+## Launch and first cycle
 
-## Inputs still required before signing
-
-| Input | Resolve it by | Verified alternative now |
+| Step | Required result before continuing | Stop or recovery condition |
 | --- | --- | --- |
-| `UNVERIFIED_LAUNCH_INTENT_PREIMAGE` | Obtain the provider route namespace, route nonce, topology hash, target-id hashes, and serialized graph calls | Retain null graph calldata, addresses, and transaction payload |
-| `PROVIDER_API_KEY_PENDING` | Supply an execution-only preflight API key | Persist no credential in the package |
-| `OWNER_WALLET_FUNDING_PENDING` | Fund the launch wallet and record final nonce, gas, deadline, and exact Permit2 allowance after preflight | Retain the 900-second deadline ceiling and exact allowance rule |
-| `BUILDER_IDENTITY_PENDING` | Provide public builder contact details for preflight | Retain null builder identity fields |
-| `PREFLIGHT_SOURCE_BUNDLE_DIGEST` | Obtain the V4 source-bundle digest preimage or provider-generated descriptor; probes `008`–`010` returned `sourceBundleManifest digest does not match sourceDescriptor` | Retain accepted source field shapes and null source commitment values |
-| `PREFLIGHT_NONCE_DERIVATION` | Obtain the provider's V4 nonce rule or a provider-generated nonce; probe `001` confirmed only `nonce must be a nonzero lowercase bytes32 value` | Retain a null nonce and reject a padded EVM account transaction count |
+| Deploy and initialize graph | Token, custody and hook match the reviewed addresses and code. Exactly `allocate`, `configureBindingHook`, then `initializeGraphLaunch` execute; graph native value is zero. | Any graph, role, code or pool mismatch stops seeding. |
+| Separate payable seed | `msg.value == amount0Max`; full HKMN stock enters the pool; native debt/refund reconcile; the permanent custodian owns the exact LP position. | A reverted seed is inspected before retry; never broaden approvals or invent a compensating withdrawal. |
+| Earn process fees | Bounded, separately simulated buys and sells reconcile actual acquired HKMN, native balances and accrued fee liabilities. | Stop at the configured gas/amount/slippage limit; no assumption that the local test's full-float buys are usable in a funded wallet. |
+| Claim and outbound bridge | Authorized claim fits earned liability and wei ceilings; Relay quote and destination are fresh; source and finalized destination amounts are attributed to this cycle. | Unknown delivery remains uncertain. Reconcile the original request before another claim or bridge. |
+| Collector purchase and reveal | Eligible pack, original instructions, payer, accounts and fees match the approved policy; actual card results are recorded. | Do not replace an ambiguous purchase or substitute a new transaction for an expired original. |
+| Sale or held-card path | Record actual buyback acceptance and proceeds, or durable held custody under the defined policy. | A random held card is not fabricated into a sale and does not prove the complete cash return path. |
+| Return and payout | Finalized return is attributed once; eligibility snapshot, recipient amounts, reserves and confirmed transfers reconcile. | Retry only through durable authorized recovery. Never re-sign or double-pay to escape an uncertain state. |
+| Close cycle | Every external effect has a reconciled receipt; remaining ETH, USDC, SOL and cards are accounted for. | No second cycle while the first has unresolved effects or an unexplained balance difference. |
 
-After transaction 1, do not seed if code hashes, hook mask `0x20cc`, the PoolKey, selected tuple, or exact Permit2 allowance differs from the reviewed package. After transaction 2, do not attempt a compensating withdrawal or approval broadening; record the final transaction hashes, PoolKey, PoolId, custody position identifier, balances, and runtime hashes before enabling trading.
+The second cycle uses fresh observations and a new audited cycle identity. It starts only after the first closes and the next action has enough funds and gas. If the first cycle exposes a defect, preserve its journal and transaction identifiers, fix the cause, run the affected regression and review, then resume only through the supported recovery path. Do not reset custody state to make a retry appear new.
 
-## Owner preflight steps
+## Evidence and cost record
 
-Before either wallet action, run:
+Retain the source revision, package digest, chain/block observations, redacted provider responses, unsigned intent hashes, transaction IDs, actual balance deltas, fees, rent, acquired cards, sale proceeds, recipient transfers and stop reason. Track EUR contributions separately from ETH, USDC and SOL units. Recycled turnover and bridge principal are not additional capital contributions. Permanent liquidity is committed capital, and unrealized card value is not spendable balance.
 
-```sh
-node scripts/programmable/preflight.mjs \
-  --repository-url "$(git remote get-url origin)" \
-  --source-commit "$(git rev-parse HEAD)" \
-  --source-tree "$(git rev-parse HEAD^{tree})"
-```
+Compare actual costs after the first cycle, then after the optional second cycle. Report any further funding needed from observed balances and the next concrete action. Keep `allInBudgetProven` false until a separate complete cost calculation establishes it.
 
-The command reads `PROGRAMMABLE_API_KEY` from the environment and fetches provider capabilities before using only the advertised non-persisting preflight route. An EVM account transaction count is not treated as a provider nonce: the command rejects it unless an independently established V4 nonce is available. It writes redacted evidence under `release/phase3/preflight/`. It exits nonzero with numbered provider mismatches or when a required V4 field cannot be derived from committed evidence; it never sends a placeholder.
-
-At the current revision, the standard command stops before the provider POST. The pinned provider record omits `capabilities.chainDeployment` and `capabilities.chainDeploymentDescriptorDigest`, and the request template retains explicit nulls for the provider graph and source commitment. The separate format probes reached source-manifest digest validation but did not produce a handoff. Do not replace those values manually; retain the canonical provider capability document, provider digest preimage, and graph preimage first.
-
-In Rabby, compare the handoff with the displayed transaction: chain 4663, recipient, native value, calldata and graph digests, expected addresses, nonce, gas, and deadline for the graph transaction; then exact 240 USDG Permit2 allowance, a deadline no longer than 900 seconds, and the refund destination for the seed. The owner alone decides whether to sign or broadcast. A matching preflight does not authorize either action.
-
-The checked-in package is still `ADDRESS_DERIVATION_PENDING`. It includes a recorded-contract request template, not a materialized provider request. The provider route, intent preimage, materialized target addresses, exact-source request, V4 nonce derivation, and unsigned transaction data remain OPEN FACTs. Commit the fully materialized request and repeat the command against that commit before signing.
+The current machine-readable draft is `launch-inputs.json`; `feasibility/native-provider-admission/README.md` identifies exact missing provider fields and their official sources. Historical USDG documents under `docs/evidence/usdg-launch-preparation-20260907/` cannot authorize this native launch.

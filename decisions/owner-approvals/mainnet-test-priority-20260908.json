@@ -1,0 +1,12 @@
+{
+  "schema": "hookemon.owner-decision.v1",
+  "ownerStatement": "Mach das jetzt so weit fertig, dass es kontrolliert werden kann. Ich werde dann das Geld schon raufbringen, die 250 Euro. Du musst jetzt auch nicht gucken, ob diese 250 Euro f\u00fcr den kompletten Prozess ausreichen. Wichtig ist, dass es funktioniert. Das ist oberste Priorit\u00e4t.",
+  "scope": "Prepare a reviewable mainnet test package for one or two controlled end-to-end cycles. Defer proof that EUR 250 covers the complete process until actual test costs are observed.",
+  "preservedRequirements": [
+    "Exact transaction intents, per-action amounts and fee limits",
+    "Custody, authorization, reconciliation and stop conditions",
+    "Real provider and runtime evidence; no fabricated admission",
+    "Unsigned preparation; no secret access, spending, deployment, signature or broadcast by this decision"
+  ],
+  "budgetEvidence": "Retain conditional cost evidence as incomplete; do not report allInBudgetProven true or treat EUR and USD as equivalent."
+}

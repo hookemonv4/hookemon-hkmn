@@ -518,7 +518,7 @@ export function normalizePhaseThreeSubmissionDraft(submission, { native = false 
     normalized.capabilities.externalCalls.targets = normalized.capabilities.externalCalls.targets.filter(target => target !== 'USDG token');
     normalized.risk.rationales.externalDependencies = 'Provider admission, exact manager runtimes and native Relay source/order proofs remain separately verified release facts.';
     normalized.disclosures = normalized.disclosures.filter(value => !value.includes('USDG') && !value.includes('240000000') && !value.includes('accepted 10 bps'));
-    normalized.disclosures.push('The unchanged inclusive 10/40/250 basis-point native model and separate seed require current provider admission; historical acceptance does not establish it.', 'Native ETH is currency0. Seed and wei claim ceilings remain unset until the complete USD 250 test is costed and reviewed.');
+    normalized.disclosures.push('The unchanged inclusive 10/40/250 basis-point native model and separate seed require current provider admission; historical acceptance does not establish it.', 'Native ETH is currency0. Seed and wei claim ceilings require reviewed per-action limits and gas reserves. Complete EUR 250 affordability proof is deferred by the owner until functional testing.');
     normalized.disclosures = [...new Set(normalized.disclosures)];
     launchGraph.summary = 'The native graph preserves complete HKMN allocation and cumulative 10/40/250 basis-point streams. Native provider admission, funding, route fields and final runtime identities remain required.';
   }

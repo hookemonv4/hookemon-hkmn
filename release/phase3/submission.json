@@ -1877,7 +1877,7 @@
     "The metadata icon and banner bytes, content hashes and immutable publication locations must be supplied before a public metadata artifact is bound.",
     "The 12-block reconstruction threshold is a conservative proposal policy and needs target-chain finality confirmation before indexer integration.",
     "The unchanged inclusive 10/40/250 basis-point native model and separate seed require current provider admission; historical acceptance does not establish it.",
-    "Native ETH is currency0. Seed and wei claim ceilings remain unset until the complete USD 250 test is costed and reviewed."
+    "Native ETH is currency0. Seed and wei claim ceilings require reviewed per-action limits and gas reserves. Complete EUR 250 affordability proof is deferred by the owner until functional testing."
   ],
   "unresolved": [
     "Provider graph preimage: route namespace, route nonce, topology hash, target-id hashes, and serialized calls for token.allocate(hook), custody.configureBindingHook(hook), and hook.initializeGraphLaunch(custody,sqrtPriceX96)."
