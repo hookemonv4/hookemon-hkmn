@@ -1,0 +1,13 @@
+--- a/specs/requirements.json
++++ b/specs/requirements.json
+@@ -59,8 +59,8 @@
+       "id": "REQ-provider-binding-3",
+       "kind": "operational",
+       "title": "Binding evidence is reproducible",
+-      "statement": "Every provider binding is content-addressed, versioned, attributable to an official source, and reproducible from the exact release revision without credentials or mutable self-attestation.",
+-      "measurement": "A clean-room verification command reproduces every recorded digest and read-only chain probe twice with zero differences.",
++      "statement": "Every provider binding is content-addressed, versioned, attributable to an official source, and reproducible from the exact release revision without credentials or mutable self-attestation. Native hook issuance constructor commitments use the separately frozen hookemon.native-issuance-prebinding.v1 and hookemon.native-issuance-runtime-authority.v1 predeployment documents and domain-separated SHA-256 envelopes. The documents bind complete build-input evidence, chain identity, immutable roles, economics and authenticated external issuance authority without direct or indirect dependence on the derived hook address, hook init code, materialized hook runtime or final pool identity. A separately authorized final release record binds both commitments to those derived identities and complete deployment evidence; it is never fed back into the constructor commitments.",
++      "measurement": "A clean-room verification command reproduces every recorded digest and read-only chain probe twice with zero differences. Exact schema, canonicalization, independent hash vectors, source-closure completeness, mutation and acyclic dependency tests reproduce both commitments. Release verification rejects unauthenticated runtime evidence, a requirements mismatch, incomplete build inputs or any mismatch between commitments, constructor bytes, issuance plan and final deployment record.",
+       "module": "provider-binding",
+       "status": "approved"
+     },

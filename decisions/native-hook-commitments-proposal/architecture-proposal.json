@@ -1,0 +1,32 @@
+{
+  "status": "PROPOSED_NOT_APPROVED",
+  "baseRevision": "e68b3ef6368b7fb6f20196a6396081a41a9ef7cb",
+  "requirementsRevision": "71; next revision assigned only after owner approval",
+  "target": "architecture/interfaces.json",
+  "proposedJsonPointer": "/nativeMigration/issuanceCommitments",
+  "value": {
+    "schema": "hookemon.native-issuance-commitments.v1",
+    "bindingDocumentSchema": "hookemon.native-issuance-prebinding.v1",
+    "runtimeDocumentSchema": "hookemon.native-issuance-runtime-authority.v1",
+    "hashAlgorithm": "sha256",
+    "preimage": "ASCII(domain) || 0x00 || UTF8(canonical(document))",
+    "bindingDomain": "HOOKEMON_NATIVE_ISSUANCE_BINDING_V1",
+    "runtimeDomain": "HOOKEMON_NATIVE_ISSUANCE_RUNTIME_AUTHORITY_V1",
+    "schemaDefinition": "decisions/native-hook-commitments-proposal/commitments.mjs",
+    "bindingDigest": null,
+    "runtimeDigest": null,
+    "finalReleaseRecord": null
+  },
+  "requiredActiveChangesAfterApproval": [
+    "Freeze exact schemas/canonical encoding in architecture interface and module card",
+    "Implement release producer using hermetic full build-input closure and authenticated external authority evidence",
+    "Require explicit acyclic dependency verification for independent token/custody preimages",
+    "Verify constructor/issuance plan/final release identity equality",
+    "Freeze resulting release bytes only after normal owner authority checks"
+  ],
+  "unchanged": [
+    "HookemonIssuance Solidity equality guard",
+    "Token economics and fee split",
+    "Provider admission and deployment authorization boundaries"
+  ]
+}
