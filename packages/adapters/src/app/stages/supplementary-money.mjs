@@ -238,10 +238,11 @@ export async function mutateSupplementaryReturn({
       instructionPlan: attempt.solanaInstructionPlan,
     });
     const approved = await createReturnPolicySigner({
+      nativePaymentBinding: config.nativePaymentBinding,
       signerClient,
       client,
       configured,
-      request: { intent: attempt.intent, inputAmount: attempt.inputAmount },
+      request: { intent: attempt.intent, inputAmount: attempt.inputAmount, solanaInstructionPlan: attempt.solanaInstructionPlan },
       transaction,
       requestDigest,
       blockhash: latest.blockhash,
@@ -284,10 +285,11 @@ export async function mutateSupplementaryReturn({
       fail('supplementary return signed bytes have expired and cannot be re-signed automatically');
     }
     const approved = await createReturnPolicySigner({
+      nativePaymentBinding: config.nativePaymentBinding,
       signerClient,
       client,
       configured,
-      request: { intent: attempt.intent, inputAmount: attempt.inputAmount },
+      request: { intent: attempt.intent, inputAmount: attempt.inputAmount, solanaInstructionPlan: attempt.solanaInstructionPlan },
       transaction: attempt.rawSignedBytes,
       requestDigest,
       blockhash: attempt.blockhash,

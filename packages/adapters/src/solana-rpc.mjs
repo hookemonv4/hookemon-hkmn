@@ -601,6 +601,13 @@ async function readRelaySourceRuntime(client, binding, finality) {
     sourceSlot: sourceSlot.toString(), observationSlot: String(observation.context.slot), deploymentSlot: deploymentSlot.toString() });
 }
 
+/** Rechecks the release-selected executable before a new source transaction is signed. */
+export async function readCurrentRelaySourceRuntime(client, binding) {
+  const slot = await rpc(client, 'getSlot', [{ commitment: 'finalized' }]);
+  invariant(Number.isSafeInteger(slot) && slot > 0, SolanaAdapterError, 'Relay finalized runtime slot is invalid');
+  return readRelaySourceRuntime(client, binding, { height: String(slot) });
+}
+
 /** Proves one exact finalized source debit before a Relay leg can be settled. */
 export async function readFinalizedRelaySourceDebit(client, {
   signature,
