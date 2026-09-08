@@ -1,0 +1,43 @@
+{
+  "observedAt": "2026-09-08T10:59:33.258480+00:00",
+  "host": "Darwin arm64",
+  "dockerClient": "29.5.2",
+  "dockerServer": "29.5.2 linux aarch64",
+  "executionPlatform": "linux/amd64",
+  "hostToolsAbsentFromPath": [
+    "rustc",
+    "cargo",
+    "rustup",
+    "solana",
+    "cargo-build-sbf",
+    "anchor",
+    "podman",
+    "solana-verify"
+  ],
+  "dockerDesktopInstalled": true,
+  "normalStart": "Canceled initial hung sandbox start after authorized escalated start succeeded",
+  "authorizedEscalatedStart": {
+    "command": [
+      "docker",
+      "desktop",
+      "start",
+      "--timeout",
+      "30"
+    ],
+    "exitCode": 0
+  },
+  "publicImageProbe": {
+    "exitCode": 0,
+    "workdir": "/build",
+    "digest": "sha256:ec2e20e1f80607150a71e4c72adfe64be24347ed0b4fb741c32b34eaf7549a25"
+  },
+  "containerRust": "1.75.0 (82e1608df 2023-12-21)",
+  "containerSolana": "1.18.26 (src:c2b35002; feat:3241752014, client:Agave)",
+  "platformTools": "v1.41",
+  "registryAuthentication": "empty workspace-local Docker config; public anonymous pull",
+  "abandonedDefaultConfigPull": {
+    "exitCode": 125,
+    "stderr": "docker: error getting credentials - err: signal: interrupt, out: ``",
+    "resolution": "Canceled hung helper; public empty-config pull succeeded without credentials"
+  }
+}

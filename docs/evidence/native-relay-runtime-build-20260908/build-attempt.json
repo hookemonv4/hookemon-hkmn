@@ -1,0 +1,15 @@
+{
+  "command": [
+    "docker",
+    "run",
+    "--rm",
+    "solanafoundation/solana-verifiable-build@sha256:ec2e20e1f80607150a71e4c72adfe64be24347ed0b4fb741c32b34eaf7549a25",
+    "pwd"
+  ],
+  "exitCode": 1,
+  "stdout": "",
+  "stderr": "Cannot connect to the Docker daemon at unix:///Users/kerim/.docker/run/docker.sock. Is the docker daemon running?\n",
+  "compiled": false,
+  "localExecutableHash": null,
+  "runtimeMatch": null
+}
