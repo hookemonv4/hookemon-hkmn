@@ -2392,7 +2392,7 @@ test('keeps an expired return blockhash retryable while retaining a broadcast at
     requestDigest,
   }));
   await repository.recordSignedTransaction(cycleId, 'return', requestDigest, {
-    rawBytes: 'return-signed-bytes',
+    rawBytes: Buffer.from('return-signed-bytes').toString('base64'),
     nonce: null,
     blockhash: 'return-blockhash',
     hash: `sha256:${'e'.repeat(64)}`,
