@@ -1,3 +1,4 @@
+import { returnSigningFixture } from '../native/return-signing-fixture.mjs';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -23,6 +24,7 @@ async function setup(t) {
   t.after(() => rm(directory, { recursive: true, force: true }));
   const child = await createIsolatedKeychainChildSetup({ directory });
   const blockhash = Keypair.generate().publicKey.toBase58();
+  const native = returnSigningFixture({ sender: child.solanaPublicKey, blockhash });
   let broadcasts = 0;
   const server = createServer(async (request, response) => {
     let body = '';
@@ -30,6 +32,8 @@ async function setup(t) {
     const rpc = JSON.parse(body);
     let result;
     if (rpc.method === 'getBlockHeight') result = 10;
+    else if (rpc.method === 'getSlot') result = 11;
+    else if (rpc.method === 'getMultipleAccounts') result = native.observation;
     else if (rpc.method === 'sendTransaction') {
       broadcasts += 1;
       const transaction = Transaction.from(Buffer.from(rpc.params[0], 'base64'));
@@ -49,23 +53,10 @@ async function setup(t) {
     role: 'operator-solana', liveMode: true, preflightAuthority: authority,
     exec: createProcessExec(), command: child.command, account: 'operator-solana', broadcast: transport.solana,
   });
-  const data = Buffer.alloc(10);
-  data[0] = 12;
-  data.writeBigUInt64LE(17n, 1);
-  data[9] = 6;
-  const transaction = new Transaction({ feePayer: new PublicKey(child.solanaPublicKey), recentBlockhash: blockhash });
-  transaction.add(new TransactionInstruction({ programId: new PublicKey(TOKEN_PROGRAM_ID), data, keys: [
-    { pubkey: Keypair.generate().publicKey, isSigner: false, isWritable: true },
-    { pubkey: new PublicKey(MINT), isSigner: false, isWritable: false },
-    { pubkey: Keypair.generate().publicKey, isSigner: false, isWritable: true },
-    { pubkey: new PublicKey(child.solanaPublicKey), isSigner: true, isWritable: false },
-  ] }));
-  const wire = transaction.serialize({ requireAllSignatures: false, verifySignatures: false }).toString('base64');
   const args = {
     signerClient: { solana: backend }, client: createSolanaRpcClient({ rpcUrl }),
-    configured: { solana: child.solanaPublicKey },
-    request: { inputAmount: { chainId: '792703809', assetId: MINT, decimals: 6, amountAtomic: '17' }, intent: { deadlineUnixSeconds: 2000000000 } },
-    transaction: wire, requestDigest: `sha256:${'c'.repeat(64)}`, blockhash, blockhashLastValidHeight: '100',
+    ...native,
+    transaction: native.transaction, requestDigest: `sha256:${'c'.repeat(64)}`, blockhash, blockhashLastValidHeight: '100',
     money: {}, now: () => 1700000000000, preflightAuthority: authority,
   };
   return { args, backend, broadcasts: () => broadcasts };
