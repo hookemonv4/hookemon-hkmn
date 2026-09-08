@@ -13,7 +13,7 @@ const SUPERSEDED_MERGE_PARENTS = new Map([
 ]);
 
 function git(root, args, options = {}) {
-  return execFileSync('git', ['-C', root, ...args], options);
+  return execFileSync('git', ['--no-replace-objects', '-C', root, ...args], options);
 }
 
 function assertSha(value, label) {

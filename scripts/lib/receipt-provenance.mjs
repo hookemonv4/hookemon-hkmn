@@ -21,7 +21,7 @@ const descriptor = {
 };
 const descriptorPath = `${PROVENANCE_DIRECTORY}/descriptor.json`;
 const descriptorBytes = Buffer.from(`${JSON.stringify(descriptor, null, 2)}\n`);
-function git(root, args) { return execFileSync('git', ['-C', root, ...args], { stdio: ['ignore', 'pipe', 'pipe'] }); }
+function git(root, args) { return execFileSync('git', ['--no-replace-objects', '-C', root, ...args], { stdio: ['ignore', 'pipe', 'pipe'] }); }
 function text(root, args) { return git(root, args).toString('utf8').trim(); }
 function ancestor(root, base, head) {
   try { git(root, ['merge-base', '--is-ancestor', base, head]); return true; } catch { return false; }

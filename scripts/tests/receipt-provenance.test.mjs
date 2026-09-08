@@ -32,6 +32,12 @@ test('preserves only the pinned two-receipt collision and fails closed on tamper
     const scan = target => spawnSync(process.execPath, [scanner, ACTIVE, target], { cwd: root, encoding: 'utf8' });
     const passing = scan(head);
     assert.equal(passing.status, 0, passing.stdout + passing.stderr);
+    // Local replace refs must not reinterpret the pinned historical commits.
+    git(root, 'replace', SOURCE, ACTIVE);
+    assert.deepEqual([...verifiedEthCollisionPaths(root, head, [SOURCE, ACTIVE]).get(SOURCE)], ['receipts/r-00648.json', 'receipts/r-00649.json']);
+    const replacementSafe = scan(head);
+    assert.equal(replacementSafe.status, 0, replacementSafe.stdout + replacementSafe.stderr);
+    git(root, 'replace', '-d', SOURCE);
     const unrelated = join(root, 'receipts/r-00001.json');
     const unrelatedBytes = readFileSync(unrelated);
     writeFileSync(unrelated, '{}\n');
