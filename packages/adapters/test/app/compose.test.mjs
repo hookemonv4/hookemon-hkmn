@@ -3027,7 +3027,7 @@ function fullCollectorCryptClient() {
   };
 }
 
-function fullRelayClient() {
+function fullRelayClient({ now = () => 1_000 } = {}) {
   const backend = {
     async quoteOutboundBridge({ amount, user, recipient }) {
       // Parser-shaped, because the admission planner persists the returned QuoteResult verbatim and
@@ -3083,7 +3083,7 @@ function fullRelayClient() {
       return { intentDigest: quote.requestId, steps: quote.raw.steps };
     },
   };
-  const client = createRelayClient({ now: () => 1_000, quoteValidityMs: 60_000,
+  const client = createRelayClient({ now, quoteValidityMs: 60_000,
     fetchImpl: async (_url, options) => { const parsed = await backend.quoteOutboundBridge(JSON.parse(options.body));
       return { ok: true, status: 200, text: async () => JSON.stringify(parsed.raw) }; } });
   return { ...backend, quoteOutboundBridge: request => client.quoteOutboundBridge({ ...request, skipRouteCheck: true }) };
@@ -3189,3 +3189,41 @@ test('compose refuses a third Operations EVM identity before creating services',
     /third Operations EVM identity is not supported/,
   );
 });
+
+for (const scenario of ['default-fresh', 'default-stale', 'injected-fresh']) {
+  test(`composed custody clock ${scenario} values native principal and preserves held purchase cost`, async t => {
+    const stateDir = await tempStateDir(t);
+    const statePath = join(stateDir, 'operator-state.json');
+    await writeOperatorState(statePath, { lossCapMicroUsd: '1000000', maxOutstandingCustodyMicroUsd: '1000000' });
+    const now = scenario === 'injected-fresh' ? () => 1_000 : () => Date.now();
+    const relay = fullRelayClient({ now: scenario === 'default-stale' ? () => Date.now() - 120_000 : now });
+    let quoteReads = 0;
+    const quote = relay.quoteOutboundBridge;
+    relay.quoteOutboundBridge = async request => { quoteReads++; return quote(request); };
+    // Synthetic repository read model only: no receipt, signed payment or production authority.
+    const cycleId = 'clock-cycle';
+    const ledger = { schema: 'hookemon.custody-ledger.v3', cycleId, chainId: '4663', assetId: 'native', decimals: 18,
+      claimed: '42', bridgeOut: '0', bridgeIn: '0', packCost: '0', buybackProceeds: '0', returnInput: '0',
+      returnReceived: '0', refunds: '0', residual: '0', heldAssets: '0', heldPositions: '0', payoutLiability: '0',
+      dust: '0', unattributed: '0', verifiedCurrentBalance: { chainId: '4663', assetId: 'native', decimals: 18, amountAtomic: '42' },
+      gasReserve: '0', gasSpent: '0', gasPayments: [] };
+    const positionId = 'held:clock-card';
+    const description = { terminalState: null, version: 0, heldEvidenceDigest: null, ownerDecision: null, custodyLedgers: new Map([['native', ledger]]),
+      heldPositions: new Map([[positionId, { positionId, cycleId, costMicroUsd: '700000', reason: 'OWNER_KEEP',
+        terminalState: 'HELD_USER_CHOICE', evidenceDigest: `sha256:${'1'.repeat(64)}`, openedAtMs: 1,
+        positionRevision: 0, insuredValue: null, ownerDecision: null, resolution: null, ledgerAsset: null }]]) };
+    t.mock.method(CycleRepository.prototype, 'listKnownCycleIds', async () => [cycleId]);
+    t.mock.method(CycleRepository.prototype, 'describeCycle', async () => description);
+    const composition = await compose({ stateDir, statePath, workerOwner: 'clock-test', moneyConfiguration: productionMoneyConfiguration(),
+      accounts: { evm: FULL_EVM_ACCOUNT, solana: FULL_SOLANA_ACCOUNT }, relay: { solanaMint: FULL_SOLANA_MINT },
+      adapters: { ...minimalInjectedAdapters(), relay }, ...(scenario === 'injected-fresh' ? { now } : {}) });
+    t.after(() => composition.shutdown());
+    const status = await composition.operatorControl.status();
+    assert.equal(status.alertSources.safetyTelemetry, true);
+    assert.ok(quoteReads > 0, 'the composed reader must fetch authenticated native pricing');
+    assert.equal(status.cap.loss.atRiskMicroUsd, scenario === 'default-stale' ? '0' : '5');
+    assert.equal(status.cap.outstandingCustody.usedMicroUsd, scenario === 'default-stale' ? '0' : '5');
+    assert.equal(status.cap.heldPositions.count, 1);
+    assert.equal(status.cap.heldPositions.valueMicroUsd, '700000', 'held purchase cost is frozen separately from native principal');
+  });
+}

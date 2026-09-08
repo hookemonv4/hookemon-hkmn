@@ -1229,6 +1229,7 @@ export async function compose(config) {
     reconciliationAdapters: null,
     standingAuthority: null,
     ...config,
+    now,
     budget,
   };
   if (resolved.accounts?.operationsTrigger !== undefined && resolved.accounts.operationsTrigger !== null) {
