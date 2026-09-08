@@ -1,3 +1,4 @@
+import { nativeProducedAdmissionFixture } from '../native/admission-fixture.mjs';
 // Missing-authority nonce recovery, prevention slice: claim-process.mjs reserves the global EVM
 // wallet nonce (reserveClaimWalletNonce) before it reaches any signer, and its own missing-authority
 // refusal previously only happened later, inside the guarded sign() call -- deep inside
@@ -39,15 +40,15 @@ function baseConfig(overrides = {}) {
 }
 
 function claimMoneyConfiguration() {
-  const usdg = { chainId: '4663', assetId: '0x5fc5360d0400a0fd4f2af552add042d716f1d168', decimals: 6 };
+  const eth = { chainId: '4663', assetId: 'native', decimals: 18 };
   const solanaStablecoin = { chainId: '792703809', assetId: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', decimals: 6 };
   return {
-    schema: 'hookemon.money-configuration.v1',
-    assets: { usdg, solanaStablecoin },
+    schema: 'hookemon.money-configuration.v2',
+    assets: { eth, solanaStablecoin },
     minimums: {
-      robinhoodReceive: { ...usdg, amountAtomic: '0' },
+      robinhoodReceive: { ...eth, amountAtomic: '0' },
       solanaReceive: { ...solanaStablecoin, amountAtomic: '0' },
-      returnUsdg: { ...usdg, amountAtomic: '0' },
+      returnEth: { ...eth, amountAtomic: '0' },
     },
     evm: {
       perTransactionGasPriceCap: { chainId: '4663', assetId: 'native', decimals: 18, amountAtomic: '2' },
@@ -68,7 +69,7 @@ function claimHookLiabilityArchive({ operations }) {
   const values = {
     processLiability: covers, remainingProcessClaimCapacity: covers, processClaimsPaused: false,
     processClaimCycleUsed: false, activeProcessClaimLimit: covers, totalLiability: covers,
-    hookUsdgBalance: covers, isSolvent: true,
+    hookEthBalance: covers, isSolvent: true,
   };
   const readContractClient = {
     async readContract({ functionName }) {
@@ -130,7 +131,7 @@ function claimAuthorityReadinessRepository() {
       return stage === 'eligibility-snapshot' ? { status: 'COMPLETE', evidence: { finalized: true } } : { status: 'PENDING' };
     },
     async readClaimPreconditions() { return { heldAssets: false, unattributed: false, unresolvedObligations: false }; },
-    async describeCycle() { return { releaseAmount: '1', chainAttempts: new Map(chainAttempts), custodyLedgers: new Map(custodyLedgers) }; },
+    async describeCycle(cycleId) { return { admission: await nativeProducedAdmissionFixture(cycleId, { amountWei: '1' }), releaseAmount: '1', chainAttempts: new Map(chainAttempts), custodyLedgers: new Map(custodyLedgers) }; },
     async readStageAttempt(cycleId, stage) {
       const record = attempts.get(keyFor(cycleId, stage));
       return record?.responseEvidence ?? null;

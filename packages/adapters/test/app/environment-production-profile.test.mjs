@@ -34,20 +34,22 @@ function completeProductionEnvironment(overrides = {}) {
     HOOKEMON_KEYCHAIN_EVM_ACCOUNT: 'operator-evm',
     HOOKEMON_KEYCHAIN_SOLANA_ACCOUNT: 'operator-solana',
     HOOKEMON_PROVIDER_MODE: 'live',
+    HOOKEMON_COLLECTOR_PACK_PRICE_ATOMS: '25000000',
+    HOOKEMON_RELAY_QUOTE_VALIDITY_MS: '60000',
     HOOKEMON_PACK_CODE: 'collector-25',
     HOOKEMON_MIN_SOLANA_RECEIVE: '0',
-    HOOKEMON_MIN_RETURN_USDG: '0',
+    HOOKEMON_MIN_RETURN_ETH: '0',
     HOOKEMON_NATIVE_GAS_CAP_ROBINHOOD: '0',
     HOOKEMON_NATIVE_GAS_CAP_SOLANA: '0',
     HOOKEMON_EVM_GAS_PRICE_CAP: '2000000000',
     HOOKEMON_EVM_NATIVE_RESERVE: '3000000000000000',
     HOOKEMON_SOLANA_PRIORITY_FEE_CAP: '25000',
     HOOKEMON_SOLANA_LAMPORT_RESERVE: '5000000',
-    HOOKEMON_BUDGET_AVAILABLE_PROCESS_USDG: '0',
-    HOOKEMON_BUDGET_PACK_PRICE_USDG: '0',
-    HOOKEMON_BUDGET_OUTBOUND_CAP_USDG: '0',
-    HOOKEMON_BUDGET_RETURN_CAP_USDG: '0',
-    HOOKEMON_BUDGET_OPERATING_MARGIN_USDG: '0',
+    HOOKEMON_BUDGET_AVAILABLE_PROCESS_WEI: '0',
+    HOOKEMON_BUDGET_PACK_PRICE_WEI: '0',
+    HOOKEMON_BUDGET_OUTBOUND_CAP_WEI: '0',
+    HOOKEMON_BUDGET_RETURN_CAP_WEI: '0',
+    HOOKEMON_BUDGET_OPERATING_MARGIN_WEI: '0',
     ...overrides,
   };
 }
@@ -176,7 +178,7 @@ test('collector-only live rehearsal accepts the Solana Operations signer and ded
     HOOKEMON_REHEARSAL_PROCEEDS_ACCOUNT: PROCEEDS_ACCOUNT,
     HOOKEMON_REHEARSAL_PAYOUT_RECIPIENTS: 'GfFAJnHnSgP7C2FQZLz6ogpdTV6Y7259f83qFFm9wxKm,H9ZXYkudxn6qhyp5S25jm5SrA8Vnu8naSfvymm9TptLA',
     HOOKEMON_REHEARSAL_PAYOUT_SPLIT: 'equal',
-    HOOKEMON_BUDGET_PACK_PRICE_USDG: '25000000',
+    HOOKEMON_BUDGET_PACK_PRICE_WEI: '25000000',
     HOOKEMON_COLLECTOR_CRYPT_API_KEY_PATH: keyPath,
     HOOKEMON_OBSERVABILITY_CONFIG_PATH: observabilityPath,
   });
@@ -231,7 +233,7 @@ test('collector-only live rehearsal reads its Collector credential from a privat
     HOOKEMON_REHEARSAL_PROCEEDS_ACCOUNT: PROCEEDS_ACCOUNT,
     HOOKEMON_REHEARSAL_PAYOUT_RECIPIENTS: 'GfFAJnHnSgP7C2FQZLz6ogpdTV6Y7259f83qFFm9wxKm,H9ZXYkudxn6qhyp5S25jm5SrA8Vnu8naSfvymm9TptLA',
     HOOKEMON_REHEARSAL_PAYOUT_SPLIT: 'equal',
-    HOOKEMON_BUDGET_PACK_PRICE_USDG: '25000000',
+    HOOKEMON_BUDGET_PACK_PRICE_WEI: '25000000',
     HOOKEMON_COLLECTOR_CRYPT_API_KEY_PATH: keyPath,
   });
   for (const field of [
@@ -286,7 +288,7 @@ test('production profile wires solana.chainId and collectorCrypt.settlementAsset
     assetId: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
     decimals: 6,
   });
-  // The Relay-side MoneyConfigurationV1 asset keeps its own numeric chain-id namespace (Relay's
+  // The Relay-side MoneyConfigurationV2 asset keeps its own numeric chain-id namespace (Relay's
   // cross-chain identifier, 792703809) — distinct from the native Collector transaction-policy
   // label above, even though both currently name the same mint and decimals.
   assert.equal(config.moneyConfiguration.assets.solanaStablecoin.chainId, '792703809');
@@ -310,7 +312,7 @@ test('production profile refuses a Relay Solana mint that is not the documented 
   );
 });
 
-test('production profile builds MoneyConfigurationV1 from explicit assets, minima, caps, and reserves', async t => {
+test('production profile builds MoneyConfigurationV2 from explicit assets, minima, caps, and reserves', async t => {
   const directory = await mkdtemp(join(tmpdir(), 'hookemon-observability-config-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const observabilityPath = join(directory, 'observability.json');
@@ -325,9 +327,9 @@ test('production profile builds MoneyConfigurationV1 from explicit assets, minim
   }), { profile: 'production' });
 
   assert.deepEqual(config.moneyConfiguration, {
-    schema: 'hookemon.money-configuration.v1',
+    schema: 'hookemon.money-configuration.v2',
     assets: {
-      usdg: { chainId: '4663', assetId: config.contracts.usdg, decimals: 6 },
+      eth: { chainId: '4663', assetId: 'native', decimals: 18 },
       solanaStablecoin: {
         chainId: '792703809',
         assetId: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
@@ -335,14 +337,14 @@ test('production profile builds MoneyConfigurationV1 from explicit assets, minim
       },
     },
     minimums: {
-      robinhoodReceive: { chainId: '4663', assetId: config.contracts.usdg, decimals: 6, amountAtomic: '2' },
+      robinhoodReceive: { chainId: '4663', assetId: 'native', decimals: 18, amountAtomic: '2' },
       solanaReceive: {
         chainId: '792703809',
         assetId: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
         decimals: 6,
         amountAtomic: '3',
       },
-      returnUsdg: { chainId: '4663', assetId: config.contracts.usdg, decimals: 6, amountAtomic: '0' },
+      returnEth: { chainId: '4663', assetId: 'native', decimals: 18, amountAtomic: '0' },
     },
     evm: {
       perTransactionGasPriceCap: { chainId: '4663', assetId: 'native', decimals: 18, amountAtomic: '2000000000' },
@@ -363,7 +365,7 @@ test('production profile builds MoneyConfigurationV1 from explicit assets, minim
       },
     },
   });
-  assert.equal(config.minimums.returnUsdg, '0');
+  assert.equal(config.minimums.returnEth, '0');
   assert.equal(config.nativeGasCaps.robinhood, '0');
 });
 
@@ -409,21 +411,23 @@ test('collector-only rehearsal accepts an explicit fake-provider profile without
     HOOKEMON_KEYCHAIN_COMMAND: '/tmp/hookemon-keychain-signer',
     HOOKEMON_KEYCHAIN_EVM_ACCOUNT: 'operator-evm',
     HOOKEMON_KEYCHAIN_SOLANA_ACCOUNT: 'operator-solana',
+    HOOKEMON_COLLECTOR_PACK_PRICE_ATOMS: '25000000',
+    HOOKEMON_RELAY_QUOTE_VALIDITY_MS: '60000',
     HOOKEMON_PACK_CODE: 'collector-25',
     HOOKEMON_MIN_ROBINHOOD_RECEIVE: '0',
     HOOKEMON_MIN_SOLANA_RECEIVE: '0',
-    HOOKEMON_MIN_RETURN_USDG: '0',
+    HOOKEMON_MIN_RETURN_ETH: '0',
     HOOKEMON_NATIVE_GAS_CAP_ROBINHOOD: '0',
     HOOKEMON_NATIVE_GAS_CAP_SOLANA: '0',
     HOOKEMON_EVM_GAS_PRICE_CAP: '2000000000',
     HOOKEMON_EVM_NATIVE_RESERVE: '3000000000000000',
     HOOKEMON_SOLANA_PRIORITY_FEE_CAP: '25000',
     HOOKEMON_SOLANA_LAMPORT_RESERVE: '5000000',
-    HOOKEMON_BUDGET_AVAILABLE_PROCESS_USDG: '30',
-    HOOKEMON_BUDGET_PACK_PRICE_USDG: '30',
-    HOOKEMON_BUDGET_OUTBOUND_CAP_USDG: '0',
-    HOOKEMON_BUDGET_RETURN_CAP_USDG: '0',
-    HOOKEMON_BUDGET_OPERATING_MARGIN_USDG: '0',
+    HOOKEMON_BUDGET_AVAILABLE_PROCESS_WEI: '30',
+    HOOKEMON_BUDGET_PACK_PRICE_WEI: '30',
+    HOOKEMON_BUDGET_OUTBOUND_CAP_WEI: '0',
+    HOOKEMON_BUDGET_RETURN_CAP_WEI: '0',
+    HOOKEMON_BUDGET_OPERATING_MARGIN_WEI: '0',
     HOOKEMON_PROVIDER_MODE: 'fake',
     HOOKEMON_RELAY_SOLANA_MINT: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
     HOOKEMON_RELAY_SOLANA_DECIMALS: '6',
@@ -497,18 +501,18 @@ test('production profile names every required money and execution field when it 
     'HOOKEMON_PACK_CODE',
     'HOOKEMON_MIN_ROBINHOOD_RECEIVE',
     'HOOKEMON_MIN_SOLANA_RECEIVE',
-    'HOOKEMON_MIN_RETURN_USDG',
+    'HOOKEMON_MIN_RETURN_ETH',
     'HOOKEMON_NATIVE_GAS_CAP_ROBINHOOD',
     'HOOKEMON_NATIVE_GAS_CAP_SOLANA',
     'HOOKEMON_EVM_GAS_PRICE_CAP',
     'HOOKEMON_EVM_NATIVE_RESERVE',
     'HOOKEMON_SOLANA_PRIORITY_FEE_CAP',
     'HOOKEMON_SOLANA_LAMPORT_RESERVE',
-    'HOOKEMON_BUDGET_AVAILABLE_PROCESS_USDG',
-    'HOOKEMON_BUDGET_PACK_PRICE_USDG',
-    'HOOKEMON_BUDGET_OUTBOUND_CAP_USDG',
-    'HOOKEMON_BUDGET_RETURN_CAP_USDG',
-    'HOOKEMON_BUDGET_OPERATING_MARGIN_USDG',
+    'HOOKEMON_BUDGET_AVAILABLE_PROCESS_WEI',
+    'HOOKEMON_COLLECTOR_PACK_PRICE_ATOMS',
+    'HOOKEMON_BUDGET_OUTBOUND_CAP_WEI',
+    'HOOKEMON_BUDGET_RETURN_CAP_WEI',
+    'HOOKEMON_BUDGET_OPERATING_MARGIN_WEI',
     'HOOKEMON_PROVIDER_MODE',
     'HOOKEMON_RELAY_BASE_URL',
     'HOOKEMON_RELAY_API_KEY',

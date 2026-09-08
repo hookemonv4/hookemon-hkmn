@@ -24,15 +24,15 @@ function relayAsset(overrides = {}) {
 
 function moneyConfiguration({ solanaStablecoin, priorityFeeCapChainId = solanaStablecoin.chainId, priorityFeeCapAmount = '100', lamportReserveAmount = '1000' } = {}) {
   return {
-    schema: 'hookemon.money-configuration.v1',
+    schema: 'hookemon.money-configuration.v2',
     assets: {
-      usdg: { chainId: '4663', assetId: `0x${'a'.repeat(40)}`, decimals: 6 },
+      eth: { chainId: '4663', assetId: 'native', decimals: 18 },
       solanaStablecoin,
     },
     minimums: {
-      robinhoodReceive: { chainId: '4663', assetId: `0x${'a'.repeat(40)}`, decimals: 6, amountAtomic: '0' },
+      robinhoodReceive: { chainId: '4663', assetId: 'native', decimals: 18, amountAtomic: '0' },
       solanaReceive: { ...solanaStablecoin, amountAtomic: '0' },
-      returnUsdg: { chainId: '4663', assetId: `0x${'a'.repeat(40)}`, decimals: 6, amountAtomic: '0' },
+      returnEth: { chainId: '4663', assetId: 'native', decimals: 18, amountAtomic: '0' },
     },
     evm: {
       perTransactionGasPriceCap: { chainId: '4663', assetId: 'native', decimals: 18, amountAtomic: '5' },
