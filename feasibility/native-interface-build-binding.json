@@ -1,24 +1,25 @@
 {
   "schema": "hookemon.native-interface-build-binding.v1",
   "status": "PROVISIONAL_BUILD_ONLY",
-  "requirementsRevision": 71,
+  "requirementsRevision": 72,
   "architectureRevision": 11,
   "productionReady": false,
   "historicalEvidenceScope": "HISTORICAL_ONLY_NO_NATIVE_FEASIBILITY_CREDIT",
   "inputHashes": {
-    "architecture/interfaces.json": "65db2344cd7307897a2d8910d5d33f75b9e256573159a41864ebbdd0416099bc",
-    "architecture/provisional-interfaces.json": "c3a060596e46cbf8a1adbbda8533e0db344786e620125b3ba71c816f859875f7",
+    "architecture/interfaces.json": "b54b50a0cd96d1db48b73eca23dd67d03c73c6a787d594cd6e6d68b7eac253d5",
+    "architecture/provisional-interfaces.json": "f32b4c06a27354149dc27cfc59bb9a7368ec4b921af51ff8998af78425b819f7",
     "bindings/robinhood-chain.json": "10f7b2c02ec8d108e2bb90371adbe3a2eedc8f0f10dca8c6becfe2f3573d9f69",
     "decisions/native-eth-interface/IMPLEMENTATION-SCOPE.md": "3e307c157d987b97223ffadb8b79ebfd079d674ca79b3266430015b8fef6c59f",
     "decisions/owner-approvals/revision-67-spec-s5-approved.json": "aebdddeb596ce2f9b6cd1fed6cbd9621cbcb5897c06b911d291608f5f376ca8b",
     "decisions/owner-approvals/revision-68-spec-s5-approved.json": "38146dffe3f47df9e5cf62f03e049310bf638ee141052b24c7b1bb97c43fd1a2",
     "decisions/owner-approvals/revision-69-collector-explicit-spec-s5-approved.json": "e576590ea782085ff791887a7f9dac4ef52f7a68e6066b436ae722d82cc869fb",
     "decisions/owner-approvals/revision-70-collector-explicit-spec-s5-approved.json": "c5381d6e698ac50a15c65a766f8c6d941dd06f6c34020e25fec5e97632a62061",
+    "decisions/owner-approvals/revision-72-native-commitments-approved.json": "eef9e64fbd86db39d4a825dc4fc2f8b532931b997eb7f6903abd574d95c62cef",
     "feasibility/interface-freeze.json": "e5b6fade85bd5ef9c0ae0cefaeffbf23ae7926460f21ccea52debd8484f1818d",
     "feasibility/phase3-offchain-interface-amendment.json": "3e91a11ca644f1664f670979a772628690caf4f3eeda53e0ecb2722f91daa6b0",
     "packages/contracts/foundry.toml": "2b1d724039460a2ca32166acddc989ef190a79d0f63b4a061c6ffb5ec2f8e258",
     "packages/contracts/remappings.txt": "1c4a68fb5b2e49b88df6bfbd52d85b24bc899aaf3cbb4367a680e2d455d02341",
-    "product/dependency-pins.json": "a125fe9564b49f50d71f4e1dd2a76de38115be3db644201d1e660b4ad913456e",
-    "specs/requirements.json": "750a12abf47a771d1181dd6a1782c1b6fbcc4eebb4632e5d1927bf52f4193425"
+    "product/dependency-pins.json": "3e10954d0303496222701d0ced4bf2369c30eec4fd5f64b6386249b5ffa1349a",
+    "specs/requirements.json": "cf8ca1e3d36cc6019b7555b4dd7815730bfadba9543803fff62ff11734b2983d"
   }
 }
