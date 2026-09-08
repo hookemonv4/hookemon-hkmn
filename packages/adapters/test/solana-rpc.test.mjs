@@ -481,6 +481,8 @@ test('readFinalizedRelaySourceDebit requires one successful finalized source deb
     amountAtomic: '25',
   }), {
     transactionHash: SIGNATURE,
+    owner: OWNER,
+    mint: CIRCLE_USD_MINT,
     debitedAmountAtomic: '25',
     finality: { height: '43', hash: SIGNATURE, timestampUnixSeconds: '1700000011' },
   });
