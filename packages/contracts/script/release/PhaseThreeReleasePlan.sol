@@ -51,7 +51,6 @@ contract PhaseThreeReleasePlan {
     uint16 public constant TREASURY_FEE_BPS = 40;
     uint16 public constant PROCESS_FEE_BPS = 250;
 
-
     struct Draft {
         uint256 chainId;
         address graphFactory;
@@ -153,14 +152,16 @@ contract PhaseThreeReleasePlan {
     }
 
     function _isFeasibleNativeSeedTuple(Draft calldata draft) private pure returns (bool) {
-        if (draft.nativeSeedWei == 0 || draft.nativeSeedWei > type(uint128).max
-            || draft.amount0Max != draft.nativeSeedWei || draft.amount1Max != POOL_ALLOCATION
-            || draft.liquidity == 0 || draft.liquidity > uint128(type(int128).max)) return false;
+        if (
+            draft.nativeSeedWei == 0 || draft.nativeSeedWei > type(uint128).max
+                || draft.amount0Max != draft.nativeSeedWei || draft.amount1Max != POOL_ALLOCATION
+                || draft.liquidity == 0 || draft.liquidity > uint128(type(int128).max)
+        ) return false;
         uint160 lower = TickMath.getSqrtPriceAtTick(TICK_LOWER);
         uint160 upper = TickMath.getSqrtPriceAtTick(TICK_UPPER);
         if (draft.sqrtPriceX96 <= lower || draft.sqrtPriceX96 >= upper) return false;
         return SqrtPriceMath.getAmount0Delta(draft.sqrtPriceX96, upper, draft.liquidity, true)
-            <= draft.nativeSeedWei
+                <= draft.nativeSeedWei
             && SqrtPriceMath.getAmount1Delta(lower, draft.sqrtPriceX96, draft.liquidity, true)
                 == POOL_ALLOCATION;
     }

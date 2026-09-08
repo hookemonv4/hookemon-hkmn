@@ -1,34 +1,37 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.26;
 
-import {Vm} from "forge-std/Vm.sol";
-import {Test} from "forge-std/Test.sol";
-import {PoolManager} from "@uniswap/v4-core/src/PoolManager.sol";
-import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
-import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
-import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
-import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
-import {SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
-import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
-import {SqrtPriceMath} from "@uniswap/v4-core/src/libraries/SqrtPriceMath.sol";
-import {PoolSwapTest} from "@uniswap/v4-core/src/test/PoolSwapTest.sol";
-import {PositionManager} from "@uniswap/v4-periphery/src/PositionManager.sol";
-import {IPositionDescriptor} from "@uniswap/v4-periphery/src/interfaces/IPositionDescriptor.sol";
-import {IWETH9} from "@uniswap/v4-periphery/src/interfaces/external/IWETH9.sol";
-import {LiquidityAmounts} from "@uniswap/v4-periphery/src/libraries/LiquidityAmounts.sol";
-import {IAllowanceTransfer} from "permit2/src/interfaces/IAllowanceTransfer.sol";
-import {DeployPermit2} from "permit2/test/utils/DeployPermit2.sol";
-import {HookemonHook} from "../../src/HookemonHook.sol";
-import {HKMNToken} from "../../src/launch/HKMNToken.sol";
-import {PermanentPositionCustody, RobinhoodBindings} from "../../src/bindings/RobinhoodBindings.sol";
-import {FeeAccounting} from "../../src/accounting/FeeAccounting.sol";
+import { Vm } from "forge-std/Vm.sol";
+import { Test } from "forge-std/Test.sol";
+import { PoolManager } from "@uniswap/v4-core/src/PoolManager.sol";
+import { IPoolManager } from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
+import { IHooks } from "@uniswap/v4-core/src/interfaces/IHooks.sol";
+import { Currency } from "@uniswap/v4-core/src/types/Currency.sol";
+import { PoolKey } from "@uniswap/v4-core/src/types/PoolKey.sol";
+import { SwapParams } from "@uniswap/v4-core/src/types/PoolOperation.sol";
+import { TickMath } from "@uniswap/v4-core/src/libraries/TickMath.sol";
+import { SqrtPriceMath } from "@uniswap/v4-core/src/libraries/SqrtPriceMath.sol";
+import { PoolSwapTest } from "@uniswap/v4-core/src/test/PoolSwapTest.sol";
+import { PositionManager } from "@uniswap/v4-periphery/src/PositionManager.sol";
+import { IPositionDescriptor } from "@uniswap/v4-periphery/src/interfaces/IPositionDescriptor.sol";
+import { IWETH9 } from "@uniswap/v4-periphery/src/interfaces/external/IWETH9.sol";
+import { LiquidityAmounts } from "@uniswap/v4-periphery/src/libraries/LiquidityAmounts.sol";
+import { IAllowanceTransfer } from "permit2/src/interfaces/IAllowanceTransfer.sol";
+import { DeployPermit2 } from "permit2/test/utils/DeployPermit2.sol";
+import { HookemonHook } from "../../src/HookemonHook.sol";
+import { HKMNToken } from "../../src/launch/HKMNToken.sol";
+import {
+    PermanentPositionCustody,
+    RobinhoodBindings
+} from "../../src/bindings/RobinhoodBindings.sol";
+import { FeeAccounting } from "../../src/accounting/FeeAccounting.sol";
 
 /// @dev Isolated payable Operations fixture; no off-chain route or buyback is fabricated.
 contract FundingOperations {
     function claim(HookemonHook hook, uint256 amount) external {
         hook.claimProcess(keccak256("historical-exact-output-scenario"), amount, address(this));
     }
-    receive() external payable {}
+    receive() external payable { }
 }
 
 /// @notice Actual native graph and pinned managers. Gas is local EVM execution, not a live cap.
@@ -60,7 +63,9 @@ contract NativeFundingFeasibilityTest is Test, DeployPermit2 {
     function _deploy() private {
         manager = new PoolManager(address(this));
         IAllowanceTransfer permit = IAllowanceTransfer(deployPermit2());
-        positions = new PositionManager(manager, permit, 100000, IPositionDescriptor(address(0)), IWETH9(address(0)));
+        positions = new PositionManager(
+            manager, permit, 100000, IPositionDescriptor(address(0)), IWETH9(address(0))
+        );
         router = new PoolSwapTest(manager);
         operations = new FundingOperations();
         uint256 start = gasleft();
@@ -86,14 +91,18 @@ contract NativeFundingFeasibilityTest is Test, DeployPermit2 {
             processClaimMaxCount: 1,
             operationsRotationDelay: 43200
         });
-        bytes32 initHash = keccak256(abi.encodePacked(type(HookemonHook).creationCode, abi.encode(config)));
+        bytes32 initHash =
+            keccak256(abi.encodePacked(type(HookemonHook).creationCode, abi.encode(config)));
         bytes32 salt;
         for (uint256 i;; ++i) {
             salt = bytes32(i);
-            if (uint160(vm.computeCreate2Address(salt, initHash, address(this))) & 0x3fff == 0x20cc) break;
+            if (uint160(vm.computeCreate2Address(salt, initHash, address(this))) & 0x3fff == 0x20cc)
+            {
+                break;
+            }
         }
         start = gasleft();
-        hook = new HookemonHook{salt: salt}(config);
+        hook = new HookemonHook{ salt: salt }(config);
         uint256 hookGas = start - gasleft();
         start = gasleft();
         custody = new PermanentPositionCustody(address(positions), 0);
@@ -104,8 +113,12 @@ contract NativeFundingFeasibilityTest is Test, DeployPermit2 {
         hook.initializeGraphLaunch(address(custody), PRICE);
         token.approve(address(router), type(uint256).max);
         uint256 wiringGas = start - gasleft();
-        key = PoolKey(Currency.wrap(address(0)), Currency.wrap(address(token)), 0, 60, IHooks(address(hook)));
-        nativeDebt = SqrtPriceMath.getAmount0Delta(PRICE, TickMath.getSqrtPriceAtTick(887220), LIQUIDITY, true);
+        key = PoolKey(
+            Currency.wrap(address(0)), Currency.wrap(address(token)), 0, 60, IHooks(address(hook))
+        );
+        nativeDebt = SqrtPriceMath.getAmount0Delta(
+            PRICE, TickMath.getSqrtPriceAtTick(887220), LIQUIDITY, true
+        );
         assertEq(nativeDebt, 39999999999999657);
         assertEq(token.totalSupply(), 1e27);
         assertEq(token.balanceOf(address(this)), 0);
@@ -129,7 +142,7 @@ contract NativeFundingFeasibilityTest is Test, DeployPermit2 {
         );
         vm.prank(LAUNCH);
         uint256 start = gasleft();
-        hook.seedCanonicalLiquidity{value: SEED_MAX}(seed);
+        hook.seedCanonicalLiquidity{ value: SEED_MAX }(seed);
         emit log_named_uint("seedGasLocal", start - gasleft());
         assertEq(positions.ownerOf(hook.canonicalPositionTokenId()), address(custody));
         assertEq(token.balanceOf(address(manager)), token.totalSupply());
@@ -142,9 +155,13 @@ contract NativeFundingFeasibilityTest is Test, DeployPermit2 {
     function _swap(bool buy, uint256 amount) private {
         vm.recordLogs();
         uint256 start = gasleft();
-        router.swap{value: buy ? amount : 0}(
+        router.swap{ value: buy ? amount : 0 }(
             key,
-            SwapParams(buy, -int256(amount), buy ? TickMath.MIN_SQRT_PRICE + 1 : TickMath.MAX_SQRT_PRICE - 1),
+            SwapParams(
+                buy,
+                -int256(amount),
+                buy ? TickMath.MIN_SQRT_PRICE + 1 : TickMath.MAX_SQRT_PRICE - 1
+            ),
             PoolSwapTest.TestSettings(false, false),
             ""
         );
@@ -153,8 +170,10 @@ contract NativeFundingFeasibilityTest is Test, DeployPermit2 {
         uint256 matched;
         for (uint256 i; i < logs.length; i++) {
             if (logs[i].emitter == address(hook) && logs[i].topics[0] == FEES) {
-                (uint256 executed,,,,,,,) =
-                    abi.decode(logs[i].data, (uint256, uint256, uint256, uint256, uint256, uint256, uint256, uint256));
+                (uint256 executed,,,,,,,) = abi.decode(
+                    logs[i].data,
+                    (uint256, uint256, uint256, uint256, uint256, uint256, uint256, uint256)
+                );
                 gross += executed;
                 matched++;
             }
@@ -184,7 +203,8 @@ contract NativeFundingFeasibilityTest is Test, DeployPermit2 {
             if (address(this).balance < minRoundEnd) minRoundEnd = address(this).balance;
             assertGe(address(manager).balance, nativeDebt);
             assertEq(
-                LAUNCH.balance + address(this).balance + address(manager).balance + address(hook).balance,
+                LAUNCH.balance + address(this).balance + address(manager).balance
+                    + address(hook).balance,
                 initialCapital
             );
         }
@@ -209,8 +229,8 @@ contract NativeFundingFeasibilityTest is Test, DeployPermit2 {
             assertEq(address(operations).balance, TARGET);
             assertEq(hook.processLiability(), before - TARGET);
             assertEq(
-                LAUNCH.balance + address(this).balance + address(manager).balance + address(hook).balance
-                    + address(operations).balance,
+                LAUNCH.balance + address(this).balance + address(manager).balance
+                    + address(hook).balance + address(operations).balance,
                 initialCapital
             );
         }
@@ -227,5 +247,5 @@ contract NativeFundingFeasibilityTest is Test, DeployPermit2 {
     function testSeed004Float004EarnsAndClaimsHistoricalBridgePrincipal() external {
         _scenario(0.04 ether, true);
     }
-    receive() external payable {}
+    receive() external payable { }
 }
