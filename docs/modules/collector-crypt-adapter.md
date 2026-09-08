@@ -65,3 +65,11 @@ node --test --test-timeout=120000 test/collector-crypt.test.mjs
 - Documentation excerpts and their URLs are recorded in `packages/adapters/test/fixtures/collector-crypt/docs-evidence-2026-09-04.json`. The unresolved Solana insured-value unit remains an OPEN FACT and is reconciled at the epic gate rather than inferred by this client.
 
 The Core buyback production binding uses original-blockhash RPC validity and a provider-paid transaction. A missing binding or original-blockhash resolver refuses before the buyback API mutation. Provider signature validation precedes Operations signing; recovery reuses approved signed bytes without another signature.
+
+## First-cycle single-pack generation
+
+A newly prepared one-pack purchase binds `generation: { endpoint: "generatePack", turbo: false }` in the durable stage request. The purchase stage calls the existing single-pack transport and records its returned memo in the ordinary batch journal. Binding admission still precedes provider generation; decoding, signature validation, original-blockhash checks and recovery use the same policy path. Unknown modes, a quantity other than one, or a missing bound transport refuse before generation.
+
+Older durable requests without `generation` retain their batch endpoint. Recovery never converts an unresolved batch into a single-pack request. The current bulk adapter envelope has not been admitted against the current provider API; first-cycle readiness requires exactly one pack. The official [Collector API](https://docs.collectorcrypt.com/gacha/api) documents the single-pack request and response. This endpoint selection grants no live binding, signature or spend authority.
+
+Purchase reconciliation holds unresolved provider status, signature lookup or settlement evidence after the deadline. Missing provider records alone cannot establish that no purchase debit occurred.
