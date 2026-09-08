@@ -603,7 +603,8 @@ async function runCollectorOnlyPreflight({ statePathOverride, environment = proc
 
 /** Fetches pricing only. The public release role is a quote coordinate, never live authority. */
 export async function priceCollectorOnlyConfig(env, { fetchImpl = globalThis.fetch, now = env.now ?? Date.now } = {}) {
-  if (env.execution?.providerMode !== 'live' || env.rehearsal?.mode !== 'collector-only') return env;
+  if (env.execution?.profile !== 'rehearsal' || env.execution?.providerMode !== 'live'
+    || env.rehearsal?.mode !== 'collector-only') return env;
   if (env.collectorCrypt?.packFundingUsd) {
     collectorOnlyPackUsdCost(env);
     return env;

@@ -97,3 +97,5 @@ node packages/adapters/bin/hookemon-runner.mjs abort-cycle <cycle-id> --reason "
 - Start with `status` after a restart. For `SENT_UNKNOWN`, inspect provider and independent chain
   evidence; for `SIGNED`, inspect the exact stored bytes, nonce or blockhash, and hash. Resume
   only after the repository marks the attempt safe to advance.
+
+Collector-only USD quote pricing runs only for the explicit live rehearsal profile. Inspection and dry-run composition do not fetch that quote or require its live quote TTL.
