@@ -11,7 +11,7 @@ import { sha256 } from './native-issuance-commitments.mjs';
 export function buildNativeSourceBundle({ manifest, sourceBytes }) {
   const snapshot = structuredClone(assertSourceBundleManifest(manifest));
   const entries = snapshot.entries.map(entry => {
-    const bytes = sourceBytes?.[entry.path];
+    const bytes = sourceBytes && Object.hasOwn(sourceBytes, entry.path) ? sourceBytes[entry.path] : undefined;
     if (!Buffer.isBuffer(bytes) || String(bytes.length) !== entry.byteLength
       || `sha256:${sha256(bytes).slice(2)}` !== entry.contentSha256) {
       throw new TypeError(`native provider bundle bytes mismatch: ${entry.path}`);

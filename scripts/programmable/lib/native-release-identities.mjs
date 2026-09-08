@@ -1,6 +1,6 @@
 import { verifyDerivedAddresses } from '../../launch/derive-addresses.mjs';
 import { sha256Bytes } from './canonical-json.mjs';
-import { deriveNativeIssuanceCommitments } from './native-issuance-commitments.mjs';
+import { deriveNativeIssuanceCommitments, snapshotNativeCommitmentInputs } from './native-issuance-commitments.mjs';
 
 const equal = (actual, expected, label) => {
   if (expected === undefined || actual !== expected) throw new Error(`native release identity mismatch: ${label}`);
@@ -12,6 +12,7 @@ const equal = (actual, expected, label) => {
  * rooted at those paths. The complete producer must also bind deploymentManifestPath.
  */
 export function verifyNativeReleaseIdentities({ commitments, derived, ...derivation }) {
+  commitments = snapshotNativeCommitmentInputs(commitments);
   const launchInputs = structuredClone(derivation.launchInputs);
   equal(launchInputs?.schemaVersion, 'hookemon.phase3.launch-inputs.v2', 'native launch schema');
   equal(derived?.schemaVersion, 'hookemon.phase3.derived-addresses.v2', 'native derived schema');

@@ -66,3 +66,12 @@ test('hash address and decimal validators reject coercible arrays',()=>{
   assert.throws(()=>deriveNativeIssuanceCommitments(f),/invalid (hash|address|unsigned decimal)/);
  }
 });
+
+test('commitment paths reject coercion and metadata accessors cannot change hashed values',()=>{
+ for(const mutate of [f=>{f.binding.sourceClosure.compilerPath=['compiler'];},f=>{f.runtime.contracts[0].abiPath=['abi.json'];}]){
+  const f=fixture();mutate(f);assert.throws(()=>deriveNativeIssuanceCommitments(f),/invalid ASCII text/);
+ }
+ const f=fixture();Object.defineProperty(f.binding,'chainId',{enumerable:true,get(){return '999999';}});
+ assert.throws(()=>deriveNativeIssuanceCommitments(f),/accessors refused/);
+ assert.throws(()=>canonical(new Array(2)),/no numbers or exotic objects/);
+});
