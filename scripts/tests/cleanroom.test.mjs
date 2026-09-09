@@ -625,7 +625,7 @@ test('native recognition binds exact reviewed file bytes, path, rule and token',
   const selected = [
     'architecture/interfaces.json',
     'docs/evidence/native-provider-20260908/verified-Multicall3.sol.txt',
-    'packages/adapters/src/app/compose.mjs',
+    'packages/adapters/test/native/admission-fixture.mjs',
   ];
   for (const file of selected) {
     const text = readFileSync(join(repoRoot, file), 'utf8');
