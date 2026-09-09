@@ -106,3 +106,19 @@ test('bootstrap exposes the exact stored plan and deliberately accepts legacy pa
   delete legacy.state.packPlan;
   assert.equal(assertBootstrap(legacy), legacy);
 });
+
+test('saved recipient setting never replaces an active cycle frozen or historic selection', async () => {
+  const { createDefaultOperatorConfiguration } = await import('../../../runner/src/config/state-schema.mjs');
+  const configuration = { ...createDefaultOperatorConfiguration(), rewardRecipientLimit: 900, configurationRevision: 20 };
+  const authorityStatus = { configuration, revision: 25, activeCycleId: 'frozen', cycles: [{ cycleId: 'frozen', rewardSelection: { rewardRecipientLimit: 300, configurationRevision: 4 }, stages: [] }] };
+  const bootstrap = buildBootstrap({ authorityStatus, identity: { subject: 'operator', email: null, role: 'operator' } });
+  assert.equal(bootstrap.state.rewardRecipientLimit, 900);
+  assert.deepEqual(bootstrap.rewardRecipientLimits, [100,200,300,400,500,600,700,800,900,1000]);
+  const selected = buildDashboardReadModel({ authorityStatus, now: () => 0 });
+  assert.equal(selected.activeCycle.rewardRecipientLimit, 300);
+  assert.equal(selected.activeCycle.configurationRevision, '4');
+  delete authorityStatus.cycles[0].rewardSelection;
+  const historic = buildDashboardReadModel({ authorityStatus, now: () => 0 });
+  assert.equal(historic.activeCycle.rewardRecipientLimit, null);
+  assert.equal(historic.activeCycle.configurationRevision, null);
+});

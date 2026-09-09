@@ -106,7 +106,7 @@ the dashboard. Provider names render as text. Confirmation compares authoritativ
 including quantities; uncertain requests retain their identity for reconciliation.
 
 Legacy bootstrap payloads without a plan remain readable, but the page disables plan saving and
-never infers selection from their safety allowlist. Operator configuration v5 retains native public
+never infers selection from their safety allowlist. Operator configuration v6 retains native public
 accounting schema v7. No monetary contract is relaxed for compatibility.
 
 The page persists the plan through the injected operator authority. Cycle execution must consume
@@ -172,3 +172,18 @@ exercises projection, both public parser boundaries, the served comic dashboard,
 and parser parity. Historical contract and dashboard presentation tests exercise the old readers.
 
 Pack selection groups use native expandable sections, with Pokémon first, followed by One Piece, Sports, and other packs. Pokémon opens initially; each group orders packs by catalog price and code. Collapsing a section preserves selection.
+
+## Reward recipient controls
+
+Bootstrap publishes the runner's canonical recipient options and the saved future-cycle limit.
+The authenticated configuration command accepts only numeric integers 100–1000 in steps of 100.
+The owner page separates the editable choice, confirmed saved value and active-cycle frozen value.
+A successful command requires an authoritative matching bootstrap readback before the page reports
+success. Stale, uncertain, failed or unreadable outcomes remain visibly unconfirmed; reload restores
+the authority's value. Pack-plan editing remains independent.
+
+Private active-cycle and public latest-cycle limits come only from the persisted `rewardSelection`
+snapshot. A missing historic snapshot yields null and an all-holder label; the current configuration
+never supplies an active or historical cycle limit. The website's active-cycle decoder accepts this
+null representation. `operator/control.mjs` validates the snapshot digest and cycle identity before
+projecting repository data.

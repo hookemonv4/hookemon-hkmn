@@ -9,7 +9,7 @@ import { readOperatorState, mutateOperatorState } from '../../src/operator/state
 import { canonicalJson } from '../../src/cycle/journal.mjs';
 
 function legacyConfiguration() {
-  const { packPlan, ...current } = createDefaultOperatorConfiguration();
+  const { packPlan, rewardRecipientLimit, ...current } = createDefaultOperatorConfiguration();
   return { ...current, schema: 'hookemon.operator-configuration.v4', allowedPackIds: ['alpha', 'beta'], requestedOrders: 2, maxBoostersPerCycle: 3, maxUnitPriceMicroUsd: '100', maxCycleBudgetMicroUsd: '200', perCycleCapMicroUsd: '200', max24HourBudgetMicroUsd: '400', configurationRevision: 12 };
 }
 
@@ -25,10 +25,10 @@ test('v4 migration preserves every prior value and never promotes an allowlist i
   const legacy = legacyConfiguration();
   const migrated = migrateOperatorConfiguration(legacy);
   assert.equal(migrated.migrated, true);
-  const { packPlan, schema, ...fields } = migrated.configuration;
+  const { packPlan, schema, rewardRecipientLimit, ...fields } = migrated.configuration;
   const { schema: oldSchema, ...oldFields } = legacy;
   assert.deepEqual(fields, oldFields);
-  assert.equal(schema, 'hookemon.operator-configuration.v5');
+  assert.equal(schema, 'hookemon.operator-configuration.v6');
   assert.deepEqual(packPlan, { schema: 'hookemon.pack-plan.v1', revision: 0, orders: [] });
   assert.equal(migrateOperatorConfiguration(migrated.configuration).migrated, false);
   assert.throws(() => assertOperatorConfiguration(legacy), /exact schema/);
@@ -82,4 +82,31 @@ test('plan revisions are server-owned and unchanged replacements preserve retry 
   assert.throws(() => applyOperatorConfiguration(first, { packPlan: { ...patch.packPlan, revision: 9 } }), /exact schema/);
   assert.throws(() => applyOperatorConfiguration(first, { packPlan: first.packPlan }), /exact schema/);
   assert.deepEqual(applyOperatorConfiguration(first, { packPlan: { orders: [] } }).packPlan.orders, []);
+});
+
+test('all recipient options persist through CAS and fresh-process restart; invalid and stale edits preserve bytes', async t => {
+  const path = await stateFile(t, createDefaultOperatorConfiguration());
+  const script = `import { readOperatorState } from ${JSON.stringify(new URL('../../src/operator/state-file.mjs', import.meta.url).href)}; console.log(JSON.stringify(await readOperatorState(process.argv[1])));`;
+  for (let limit = 100; limit <= 1000; limit += 100) {
+    const before = await readOperatorState(path);
+    const saved = await mutateOperatorState(path, before.revision, current => ({ ...current, configuration: applyOperatorConfiguration(current.configuration, { rewardRecipientLimit: limit }) }));
+    const restarted = JSON.parse(execFileSync(process.execPath, ['--input-type=module', '-e', script, path], { encoding: 'utf8' }));
+    assert.deepEqual(restarted, saved);
+    assert.equal(restarted.configuration.rewardRecipientLimit, limit);
+    const bytes = await readFile(path, 'utf8');
+    await assert.rejects(mutateOperatorState(path, before.revision, current => ({ ...current, configuration: applyOperatorConfiguration(current.configuration, { rewardRecipientLimit: 200 }) })), /stale/);
+    for (const value of ['200', 150, null, 1100]) await assert.rejects(mutateOperatorState(path, saved.revision, current => ({ ...current, configuration: applyOperatorConfiguration(current.configuration, { rewardRecipientLimit: value }) })));
+    assert.equal(await readFile(path, 'utf8'), bytes);
+  }
+});
+
+test('native v5 migration persists once, preserving nonempty pack plan, flags and configuration revision', async t => {
+  const current = applyOperatorConfiguration(createDefaultOperatorConfiguration(), { packPlan: { orders: [{ pack: 'alpha', quantity: 2 }] }, paused: true, executionPaused: true });
+  const { rewardRecipientLimit, ...legacy } = current;
+  legacy.schema = 'hookemon.operator-configuration.v5';
+  const path = await stateFile(t, legacy);
+  const migrated = await readOperatorState(path);
+  assert.deepEqual(migrated.configuration, current);
+  assert.equal(migrated.revision, 8);
+  assert.deepEqual(await readOperatorState(path), migrated);
 });

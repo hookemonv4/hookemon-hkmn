@@ -46,6 +46,13 @@ creates a local cycle store, signer, or provider effect.
   the plan schema and revision. A new pack or increased quantity for any pack increases exposure,
   even if the total quantity falls. Identical, reduced, or empty plans remain editable without
   safety telemetry. The allowlist and budget controls remain independent admission constraints.
+- Operator configuration v6 requires a numeric `rewardRecipientLimit` from the shared 100–1000
+  options in steps of 100. The default is 200. Native v4/v5 migration preserves every existing
+  field and configuration revision, adds only the future-cycle selection default, and persists
+  atomically through the existing state-file CAS revision. Pre-native money state stays non-executable.
+- Recipient edits use `update-configuration` and the same revision CAS as other controls. Invalid
+  or stale edits leave durable state unchanged. Each cycle exposes its validated frozen
+  `rewardSelection`; historical cycles expose null and retain all-holder semantics.
 - `pause` sets both `paused` and `executionPaused`. `kill` additionally sets `killSwitch`.
   `resume` clears only the two pause fields and never clears a kill switch.
 - A held-owner decision binds cycle ID, held-evidence digest, request ID, expected cycle revision,

@@ -570,3 +570,19 @@ test('authenticated HTTP saves the durable pack plan across service recreation w
   assert.equal(invalid.status, 400);
   assert.equal((await readOperatorState(statePath)).configuration.packPlan.revision, 2);
 });
+
+test('authenticated recipient decisions accept all options and reject malformed values before authority dispatch', async t => {
+  const server = await buildTestServer(t);
+  for (let limit = 100; limit <= 1000; limit += 100) {
+    const response = await server.post('/operator/api/decisions', { requestId: `recipient-${limit}`, expectedVersion: limit / 100 - 1, command: { type: 'update-configuration', configuration: { rewardRecipientLimit: limit } } }, AUTH);
+    assert.equal(response.status, 200, response.diagnostics);
+    const bootstrap = await server.get('/operator/api/bootstrap', AUTH);
+    assert.equal(bootstrap.body.state.rewardRecipientLimit, limit);
+  }
+  const count = server.calls.execute.length;
+  for (const value of ['200', null, 150, 0, 1100]) {
+    const response = await server.post('/operator/api/decisions', { requestId: `invalid-${String(value)}`, expectedVersion: 10, command: { type: 'update-configuration', configuration: { rewardRecipientLimit: value } } }, AUTH);
+    assert.equal(response.status, 400);
+  }
+  assert.equal(server.calls.execute.length, count);
+});

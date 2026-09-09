@@ -278,3 +278,51 @@ test('legacy bootstrap cannot turn the safety allowlist into a new plan implicit
   page.click('savePacksBtn');
   assert.equal(requests.length, 0);
 });
+
+test('recipient editor uses backend options and confirms readback separately from the active cycle', async () => {
+  const html = await readFile(join(process.cwd(), 'packages/dashboard/src/public/index.html'), 'utf8');
+  const script = html.match(/<script>\s*([\s\S]*?)<\/script>/)[1];
+  let saved = 200;
+  const requests = [];
+  const page = browserHarness({ session: new Map(), requests, nextRequestId: () => 'reward-request',
+    get: async path => path.endsWith('bootstrap') ? { state: { version: 4, rewardRecipientLimit: saved, allowedPackIds: [] }, rewardRecipientLimits: [100, 200, 300] }
+      : path.endsWith('dashboard') ? { activeCycle: { cycleId: 'old-cycle', rewardRecipientLimit: null }, cycles: [] } : {},
+    response: async () => { saved = requests.at(-1).command.configuration.rewardRecipientLimit; return { ok: true, text: async () => JSON.stringify({ commandState: 'APPLIED' }) }; },
+  });
+  vm.runInNewContext(script, page.context);
+  page.click('loadBtn'); await settlePage();
+  assert.equal(page.element('rewardRecipientLimit').children.length, 3);
+  assert.match(page.element('activeRewardLimit').textContent, /All eligible holders/);
+  page.element('rewardRecipientLimit').value = '300'; page.element('rewardRecipientLimit').trigger('change');
+  page.click('saveRewardBtn'); await settlePage();
+  assert.equal(requests[0].expectedVersion, 4);
+  assert.equal(saved, 300);
+  assert.match(page.element('rewardMessage').textContent, /saved.*next cycle/i);
+  assert.match(page.element('savedRewardLimit').textContent, /300/);
+  assert.match(page.element('activeRewardLimit').textContent, /All eligible holders/);
+});
+
+for (const failure of ['stale', 'unreadable', 'mismatch']) test(`recipient save remains unsuccessful after ${failure} and reload shows authoritative state`, async () => {
+  const html = await readFile(join(process.cwd(), 'packages/dashboard/src/public/index.html'), 'utf8');
+  const script = html.match(/<script>\s*([\s\S]*?)<\/script>/)[1];
+  let posted = false, unreadable = failure === 'unreadable';
+  const page = browserHarness({ session: new Map(), requests: [], nextRequestId: () => 'failed-reward',
+    get: async path => {
+      if (path.endsWith('bootstrap')) {
+        if (posted && unreadable) throw new Error('Readback unavailable');
+        return { state: { version: posted ? 5 : 4, rewardRecipientLimit: 200, allowedPackIds: [] }, rewardRecipientLimits: [100,200,300] };
+      }
+      return path.endsWith('dashboard') ? { activeCycle: { rewardRecipientLimit: 100 }, cycles: [] } : {};
+    },
+    response: async () => { posted = true; return { ok: failure !== 'stale', text: async () => JSON.stringify(failure === 'stale' ? { commandState: 'REJECTED', code: 'STALE_VERSION' } : { commandState: 'APPLIED' }) }; },
+  });
+  vm.runInNewContext(script, page.context); page.click('loadBtn'); await settlePage();
+  page.element('rewardRecipientLimit').value = '300'; page.element('rewardRecipientLimit').trigger('change');
+  page.click('saveRewardBtn'); await settlePage();
+  assert.match(page.element('rewardMessage').textContent, /Not confirmed/);
+  assert.equal(page.element('savedRewardLimit').textContent, 'Saved: 200');
+  assert.equal(page.element('activeRewardLimit').textContent, 'Active cycle: 100');
+  unreadable = false; page.click('loadBtn'); await settlePage();
+  assert.equal(page.element('rewardRecipientLimit').value, '200');
+  assert.equal(page.element('saveRewardBtn').disabled, true);
+});

@@ -1,3 +1,4 @@
+import { assertRewardSelectionSnapshot } from '../automation/reward-selection-snapshot.mjs';
 import { isAbsolute } from 'node:path';
 
 import { applyOperatorConfiguration, createDefaultOperatorConfiguration } from '../config/state-schema.mjs';
@@ -319,6 +320,7 @@ function projectCycle(cycleId, description) {
     .map(transaction => transaction.transactionId))];
   return deepFreeze({
     cycleId,
+    rewardSelection: description.rewardSelection ? assertRewardSelectionSnapshot(description.rewardSelection, { cycleId }) : null,
     releaseAmount: typeof description.releaseAmount === 'string' ? description.releaseAmount : null,
     terminalState,
     terminalAtMs,

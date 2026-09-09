@@ -1445,7 +1445,7 @@ function decodeActiveCycle(value: unknown): ActiveCycle {
     revealedCards: dashboardInteger(raw.revealedCards, 0, 10_000),
     rewardRecipientLimit: raw.rewardRecipientLimit === undefined
       ? undefined
-      : dashboardInteger(raw.rewardRecipientLimit, 50, 1_000),
+      : raw.rewardRecipientLimit === null ? null : dashboardInteger(raw.rewardRecipientLimit, 50, 1_000),
   };
 }
 

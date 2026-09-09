@@ -126,3 +126,9 @@ test('configuration accepts only orders in a pack plan patch and rejects client 
     { orders: [{ pack: 'base-pack', quantity: 1 }, { pack: 'base-pack', quantity: 1 }] },
   ]) assert.throws(() => read(value), ContractValidationError);
 });
+
+test('recipient decision boundary accepts only canonical numeric options', () => {
+  const request = rewardRecipientLimit => ({ requestId: 'selection', expectedVersion: 4, command: { type: 'update-configuration', configuration: { rewardRecipientLimit } } });
+  for (let limit = 100; limit <= 1000; limit += 100) assert.equal(readDecisionRequest(request(limit)).command.configuration.rewardRecipientLimit, limit);
+  for (const value of ['200', null, true, 150, 0, 1100, 200.1]) assert.throws(() => readDecisionRequest(request(value)));
+});

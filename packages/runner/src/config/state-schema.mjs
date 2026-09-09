@@ -3,10 +3,11 @@
 // automation scheduler reads out of the operator state file (packages/runner/src/operator/state-file.mjs).
 // This module holds no secret material and performs no signing; it only validates the shape of a
 // plain JSON document and rejects anything that carries a secret-material field.
+import { DEFAULT_REWARD_RECIPIENT_LIMIT, assertRewardRecipientLimit } from './reward-recipient-selection.mjs';
 import { canonicalJson } from '../cycle/journal.mjs';
 import { assertPackPlan, createEmptyPackPlan, replacePackPlan } from './pack-plan.mjs';
 
-export const OPERATOR_CONFIGURATION_SCHEMA = 'hookemon.operator-configuration.v5';
+export const OPERATOR_CONFIGURATION_SCHEMA = 'hookemon.operator-configuration.v6';
 const legacyConfigurationSchema = 'hookemon.operator-configuration.v4';
 
 const configurationFields = [
@@ -14,6 +15,7 @@ const configurationFields = [
   'intervalMinutes',
   'allowedPackIds',
   'packPlan',
+  'rewardRecipientLimit',
   'requestedOrders',
   'maxBoostersPerCycle',
   'maxUnitPriceMicroUsd',
@@ -286,6 +288,7 @@ export function assertOperatorConfiguration(value) {
     intervalMinutes,
     allowedPackIds: Object.freeze(allowedPackIds),
     packPlan,
+    rewardRecipientLimit: assertRewardRecipientLimit(value.rewardRecipientLimit),
     requestedOrders,
     maxBoostersPerCycle,
     maxUnitPriceMicroUsd: value.maxUnitPriceMicroUsd,
@@ -322,6 +325,7 @@ export function createDefaultOperatorConfiguration() {
     intervalMinutes: DEFAULT_INTERVAL_MINUTES,
     allowedPackIds: [],
     packPlan: createEmptyPackPlan(),
+    rewardRecipientLimit: DEFAULT_REWARD_RECIPIENT_LIMIT,
     requestedOrders: 0,
     maxBoostersPerCycle: 1,
     maxUnitPriceMicroUsd: '0',
@@ -347,14 +351,17 @@ export function createDefaultOperatorConfiguration() {
   });
 }
 
-// Native v4 preserves all existing controls but gains an empty, non-executable plan.
+// Native v4 gains an empty plan; native v5 retains its plan. Both gain the future-cycle
+// recipient default without changing prior configuration revisions or cycle snapshots.
 // Older money schemas never migrate into executable native state.
 export function migrateOperatorConfiguration(value) {
   if (value === null) return Object.freeze({ configuration: null, migrated: false });
-  if (value?.schema === legacyConfigurationSchema) {
+  if ([legacyConfigurationSchema, 'hookemon.operator-configuration.v5'].includes(value?.schema)) {
     assertNoSecretMaterial(value, 'legacy operator configuration');
-    assertExactPlainObject(value, configurationFields.filter(field => field !== 'packPlan'), 'legacy operator configuration');
-    const configuration = assertOperatorConfiguration({ ...value, schema: OPERATOR_CONFIGURATION_SCHEMA, packPlan: createEmptyPackPlan() });
+    const v4 = value.schema === legacyConfigurationSchema;
+    assertExactPlainObject(value, configurationFields.filter(field => field !== 'rewardRecipientLimit' && (!v4 || field !== 'packPlan')), 'legacy operator configuration');
+    const configuration = assertOperatorConfiguration({ ...value, schema: OPERATOR_CONFIGURATION_SCHEMA,
+      packPlan: v4 ? createEmptyPackPlan() : value.packPlan, rewardRecipientLimit: DEFAULT_REWARD_RECIPIENT_LIMIT });
     return Object.freeze({ configuration, migrated: true });
   }
   return Object.freeze({ configuration: assertOperatorConfiguration(value), migrated: false });

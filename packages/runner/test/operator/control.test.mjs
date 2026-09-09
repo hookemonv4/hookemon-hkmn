@@ -1262,3 +1262,24 @@ test('unchanged, reduced and empty pack plans remain writable without safety tel
     assert.deepEqual((await readOperatorState(statePath)).configuration.packPlan.orders, nextOrders);
   }
 });
+
+test('recipient changes persist every option without changing a frozen cycle selection', async t => {
+  const statePath = await temporaryState(t);
+  await seedConfiguration(statePath);
+  const { createRewardSelectionSnapshot } = await import('../../src/automation/reward-selection-snapshot.mjs');
+  const snapshot = createRewardSelectionSnapshot({ cycleId: 'cycle-frozen', configurationRevision: 0, rewardRecipientLimit: 100 });
+  const descriptions = new Map([['cycle-frozen', { rewardSelection: snapshot }]]);
+  const { createOperatorControl } = await controlModule();
+  const control = createOperatorControl({ statePath, cycleRepository: createRepository({ activeCycleId: 'cycle-frozen', knownCycleIds: ['cycle-frozen'], descriptions }), policyEngine: { recordManualApproval: async () => {} } });
+  for (let limit = 100; limit <= 1000; limit += 100) {
+    const before = await control.status();
+    await control.execute({ expectedRevision: before.revision, command: { type: 'update-configuration', configuration: { rewardRecipientLimit: limit } } });
+    const after = await control.status();
+    assert.equal(after.configuration.rewardRecipientLimit, limit);
+    assert.deepEqual(after.cycles[0].rewardSelection, snapshot);
+  }
+  descriptions.set('cycle-frozen', {});
+  assert.equal((await control.status()).cycles[0].rewardSelection, null);
+  descriptions.set('cycle-frozen', { rewardSelection: { ...snapshot, rewardRecipientLimit: 200 } });
+  await assert.rejects(control.status(), /digest/);
+});
