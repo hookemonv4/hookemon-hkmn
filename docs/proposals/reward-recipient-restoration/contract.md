@@ -2,7 +2,7 @@
 
 Status: owner-approved compatibility contract. The owner answered "ja" to the explicit approval question for this contract and its proposed spec revision on 2026-09-09 in task 01a083d9-313d-7511-b041-5a9630e6b6a1. Implementation is in progress; this is not deployment evidence.
 
-Baseline: origin/main `20eb8e4e`, requirements revision 71. Historical selection references: `07203cd64892ca3620bc4cdb960d38f9ad9f0dd0` and `69f8b71c`. The accompanying `requirements.patch` records the approved revision 72 and changes only REQ-dashboard-2, REQ-cycle-runner-3, REQ-eligibility-snapshot-1 and REQ-direct-payout-1. Rebase the proposal if main's requirements advance; never overwrite another revision.
+Baseline: origin/main `20eb8e4e`, requirements revision 71. Historical selection references: `07203cd64892ca3620bc4cdb960d38f9ad9f0dd0` and `69f8b71c`. The accompanying `requirements.patch` records the approved revision 72 and changes only REQ-dashboard-2, REQ-cycle-runner-3, REQ-eligibility-snapshot-1 and REQ-direct-payout-1. The same four approved requirement deltas are applied after native revision 73 as revision 74; the original approval patch remains unchanged.
 
 ## Financial compatibility
 
@@ -59,7 +59,7 @@ The implementation source write set is:
 - affected `docs/modules/{operator-controls,cycle-repository,eligibility-snapshot,direct-payout,automation,composition-root,dashboard}.md` cards;
 - the local wrapper `.session/local-dashboard.mjs`, Docker build copy `.session/docker-dashboard/app/.session/local-dashboard.mjs` and Docker build context in the dashboard-post-test worktree, only after explicit coordinator handoff. These local deployment files are not part of the source PR.
 
-No Solidity, signing policy, dependency manifest, lockfile or unrelated CI source was changed. Two demonstrated `apps/web` active-cycle null-compatibility fixes affect `app/operator/OperatorControlPanel.tsx` and `app/operator/operator-types.ts`. The local wrapper delegates to the new tested `packages/dashboard/src/local-selection-policy.mjs` guard.
+The restoration itself changes no Solidity or signing policy. Native release and pack-plan dependencies carry their separately reviewed contract, release and CI updates; the restoration refreshes only the resulting exact requirement and control bindings. Two demonstrated `apps/web` active-cycle null-compatibility fixes affect `app/operator/OperatorControlPanel.tsx` and `app/operator/operator-types.ts`. The local wrapper delegates to the new tested `packages/dashboard/src/local-selection-policy.mjs` guard.
 
 ## Authority and requirement binding
 
