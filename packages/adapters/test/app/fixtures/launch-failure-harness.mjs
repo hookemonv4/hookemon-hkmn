@@ -560,6 +560,7 @@ export async function activateTwoPackPolicy(directory) {
   const configuration = applyOperatorConfiguration(null, {
     intervalMinutes: 5,
     allowedPackIds: ['return-fixture'],
+    packPlan: { orders: [{ pack: 'return-fixture', quantity: 2 }] },
     requestedOrders: 2,
     maxBoostersPerCycle: 2,
     maxUnitPriceMicroUsd: '17',

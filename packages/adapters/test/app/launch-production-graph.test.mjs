@@ -1239,6 +1239,7 @@ async function activateTwoPackPolicy(directory) {
   const configuration = applyOperatorConfiguration(null, {
     intervalMinutes: 5,
     allowedPackIds: ['return-fixture'],
+    packPlan: { orders: [{ pack: 'return-fixture', quantity: 2 }] },
     requestedOrders: 2,
     maxBoostersPerCycle: 2,
     maxUnitPriceMicroUsd: '17',
@@ -1718,9 +1719,9 @@ test('I-01/I-02 literal production loader pays ordinary and held N=2 proceeds ac
     authorizations: authority.diagnostics, terminalState: cycle.terminalState,
     admission: cycle.admission === null ? null : {
       quoteDigest: cycle.admission.quoteDigest,
-      unitFunding: cycle.admission.unitFundingQuote.amountAtomic,
+      unitFunding: cycle.admission.orders[0].unitFundingQuote.amountAtomic,
       aggregateFunding: cycle.admission.aggregateFundingQuote.amountAtomic,
-      unitPurchase: cycle.admission.unitPurchase.amountAtomic,
+      unitPurchase: cycle.admission.orders[0].unitPurchase.amountAtomic,
       aggregatePurchase: cycle.admission.aggregatePurchase.amountAtomic,
     },
     ledger: await readOperatorLedgers(directory), quotes: fixture.calls.quotes,
@@ -1757,9 +1758,9 @@ test('I-01/I-02 literal production loader pays ordinary and held N=2 proceeds ac
   assert.equal(recipient.finalizedTransfer.gasSpentWei, '42000');
   assert.equal(recipient.finalizedTransfer.calldataDigest, keccak256('0x'));
   assert.ok(ordinary.broadcasts.some(entry => entry.hash === recipient.transactionHash));
-  assert.equal(cycle.admission.unitFundingQuote.amountAtomic, '17');
+  assert.equal(cycle.admission.orders[0].unitFundingQuote.amountAtomic, '17');
   assert.equal(cycle.admission.aggregateFundingQuote.amountAtomic, '33');
-  assert.equal(cycle.admission.unitPurchase.amountAtomic, '8');
+  assert.equal(cycle.admission.orders[0].unitPurchase.amountAtomic, '8');
   assert.equal(cycle.admission.aggregatePurchase.amountAtomic, '16');
   assert.equal(ordinary.purchases.length, 2);
   assert.equal(ordinary.buybacks.length, 1);
@@ -1956,7 +1957,7 @@ const RELAY_SUPPLEMENTARY_RETURN_ORDER_ID = `0x${'4'.repeat(64)}`;
  * provider response exists.
  */
 const SYNTHETIC_RELAY_PROGRAM = '99vQwtBwYtrqqD9YSXbdum3KBdxPAVxYTaQ3cfnJSrN2';
-// Isolated quote rate: each USDC atomic source unit buys 101 wei, never a unit alias.
+// Isolated quote rate: each settlement token atomic source unit buys 101 wei, never a unit alias.
 const quotedNativeReturnWei = amount => BigInt(amount) * 101n;
 const capturedSourceInstruction = Object.freeze({ programId: SYNTHETIC_RELAY_PROGRAM,
   discriminatorHex: '0b9c60da27a3b413', dataLengthBytes: 48, amountOffsetBytes: 8, orderIdOffsetBytes: 16 });
@@ -3830,7 +3831,7 @@ test('N=2 composed offline scenario: real compose(config) drives purchase throug
   assert.equal(returnEvidence.relayLeg.state, 'SETTLED', `the real Relay return leg must reach SETTLED; ${diagnostics()}`);
   assert.equal(returnEvidence.relayLeg.netDeltaAtomic, '9090', `the settled leg's own independently observed net delta must be exactly pack 0's real 90-unit proceeds; ${diagnostics()}`);
   assert.equal(returnEvidence.relayLeg.destinationAssetId?.toLowerCase(), 'native', `the settled leg must credit ETH; ${diagnostics()}`);
-  assert.equal(returnEvidence.relayLeg.sourceAmountAtomic, '90', `the source remains 90 USDC atoms while the destination is the separately quoted 9090 wei; ${diagnostics()}`);
+  assert.equal(returnEvidence.relayLeg.sourceAmountAtomic, '90', `the source remains 90 settlement token atoms while the destination is the separately quoted 9090 wei; ${diagnostics()}`);
   const [[, settledReturnLeg]] = cycle.relayLegs instanceof Map ? [...cycle.relayLegs.entries()] : [];
   assert.equal(cycle.relayLegs.size, 1, `exactly one Relay leg (the real return bridge) may ever be recorded; ${diagnostics()}`);
   assert.equal(settledReturnLeg.direction, 'return', `the one recorded Relay leg must be the return leg; ${diagnostics()}`);

@@ -568,7 +568,7 @@ test('claim admission rejects configuration values above the fixed operator ceil
   );
 });
 
-// Synthetic native-policy valuation fixture; no live ETH/USD or USDC/USD rate is implied.
+// Synthetic native-policy valuation fixture; no live ETH/USD or settlement token/USD rate is implied.
 const SYNTHETIC_N2_COST_MICRO_USD = '50309869';
 
 function parsedUnitRelayQuote({ cycleId, unitFunding, unitPurchase, deadlineUnixSeconds, requestId: overrideRequestId, orderId: overrideOrderId }) {
@@ -1431,7 +1431,7 @@ test('new native risk refuses missing producer capability and wrong valuation un
   const { rawEngine } = policyFixture();
   for (const mutation of [
     value => { value.aggregateFundingUsd.rounding = 'down'; },
-    value => { value.aggregateFundingUsd.amount.assetId = 'USDC'; },
+    value => { value.aggregateFundingUsd.amount.assetId = 'wrong-asset'; },
     value => { value.aggregateFundingUsd.amount.decimals = 6; },
     value => { value.aggregateFundingUsd.amount.amountAtomic = '5000001'; },
     value => { value.aggregateFundingUsd.sourcePath = 'details.currencyOut.amountUsd'; },

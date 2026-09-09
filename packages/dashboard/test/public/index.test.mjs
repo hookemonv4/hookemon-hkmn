@@ -172,7 +172,7 @@ test('pack selection lists the catalog and saves sorted plan orders without shri
     { code: 'aa-pack', name: 'Alpha' }, { code: null },
   ] } });
   assert.equal(requests.length, 0, 'loading must never mutate configuration');
-  const rows = page.element('packList').children;
+  const rows = page.element('packList').children.flatMap(group => group.children[1].children);
   assert.equal(rows.length, 3);
   assert.match(rows[1].children[1].textContent, /Not in current catalog/);
   assert.equal(rows[2].children[1].textContent, '<script>untrusted</script> · zz-pack');
@@ -200,7 +200,7 @@ test('missing or failed catalog disables pack saves without hiding the rest of t
   for (const catalog of [{ configured: false, machines: [] }, new Error('PACK_CATALOG_UNAVAILABLE')]) {
     const { page, requests } = await packPage({ catalog });
     assert.equal(page.element('dashboard').hidden, false);
-    assert.equal(page.element('packList').children[0].children[0].checked, true);
+    assert.equal(page.element('packList').children.flatMap(group => group.children[1].children)[0].children[0].checked, true);
     assert.equal(page.element('savePacksBtn').disabled, true);
     page.click('clearPacksBtn'); page.click('savePacksBtn');
     await settlePage();
@@ -252,7 +252,7 @@ test('plan selection preserves quantities and keeps previously allowed active-cy
     catalog: { configured: true, machines: [{ code: 'aa-pack' }, { code: 'old-pack' }, { code: 'active-pack' }] },
     quantities: { 'old-pack': 3 }, allowed: ['active-pack', 'old-pack'],
   });
-  const rows = page.element('packList').children;
+  const rows = page.element('packList').children.flatMap(group => group.children[1].children);
   assert.equal(rows[1].children[0].checked, false, 'allowlist membership is not plan selection');
   assert.match(rows[2].children[1].textContent, /Quantity 3/);
   rows[0].children[0].checked = true;
@@ -266,13 +266,13 @@ test('plan selection preserves quantities and keeps previously allowed active-cy
   assert.equal(page.element('packMessage').textContent, 'Pack plan saved.');
   page.click('loadBtn');
   await settlePage();
-  assert.equal(page.element('packList').children[1].children[0].checked, false);
-  assert.match(page.element('packList').children[2].children[1].textContent, /Quantity 3/);
+  assert.equal(page.element('packList').children.flatMap(group => group.children[1].children)[1].children[0].checked, false);
+  assert.match(page.element('packList').children.flatMap(group => group.children[1].children)[2].children[1].textContent, /Quantity 3/);
 });
 
 test('legacy bootstrap cannot turn the safety allowlist into a new plan implicitly', async () => {
   const { page, requests } = await packPage({ catalog: { configured: true, machines: [{ code: 'old-pack' }] }, legacy: true });
-  assert.equal(page.element('packList').children[0].children[0].checked, false);
+  assert.equal(page.element('packList').children.flatMap(group => group.children[1].children)[0].children[0].checked, false);
   page.click('selectAllPacksBtn');
   assert.equal(page.element('savePacksBtn').disabled, true);
   page.click('savePacksBtn');

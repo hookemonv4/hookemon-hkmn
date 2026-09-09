@@ -316,7 +316,7 @@ test('mixed batch: one purchased pack that never opens is held, the other pack s
   assert.equal(heldPack.terminalState, 'HELD_UNRESOLVED');
   assert.equal(cycleRepository.heldPositions.length, 1);
   assert.equal(cycleRepository.held.length, 1);
-  // Each held card retains the complete admitted batch cost, not half or USDC parity.
+  // Each held card retains the complete admitted batch cost, not half or settlement token parity.
   assert.equal(cycleRepository.heldPositions[0].costMicroUsd, '70000000');
   assert.equal(cycleRepository.heldPositions[0].valueMicroUsd, '70000000');
   assert.equal(cycleRepository.heldPositions[0].ledgerAsset ?? null, null);

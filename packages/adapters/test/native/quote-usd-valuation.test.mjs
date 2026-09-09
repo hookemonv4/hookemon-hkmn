@@ -39,13 +39,13 @@ test('valuation refuses stale, substituted, mutated and unbounded quotes and rou
   assert.throws(() => createQuoteUsdValuation({ ...base, quote: unbounded }));
 });
 
-test('Collector-only USD policy refuses USDC atom parity and JSON prices', async () => {
-  const { collectorOnlyPackUsdCost } = await import('../../src/app/compose.mjs');
+test('Collector-only USD policy refuses settlement token atom parity and JSON prices', async () => {
+  const { collectorOnlyPackCostMicroUsd } = await import('../../src/app/compose.mjs');
   const config = { now: () => nowMs, pack: { code: 'synthetic' }, collectorCrypt: { packPrice: { chainId: 'solana-mainnet', assetId: captured.details.currencyOut.currency.address, decimals: 6, amountAtomic: '25000000' } } };
-  assert.throws(() => collectorOnlyPackUsdCost(config), /fresh authenticated/);
+  assert.throws(() => collectorOnlyPackCostMicroUsd(config), /fresh authenticated/);
   config.collectorCrypt.packFundingUsd = { amountMicroUsd: '25000000' };
-  assert.throws(() => collectorOnlyPackUsdCost(config), /fresh authenticated/);
+  assert.throws(() => collectorOnlyPackCostMicroUsd(config), /fresh authenticated/);
   config.collectorCrypt.packFundingUsd = await capabilityForWrongAsset();
-  assert.throws(() => collectorOnlyPackUsdCost(config), /fresh authenticated/);
+  assert.throws(() => collectorOnlyPackCostMicroUsd(config), /fresh authenticated/);
   async function capabilityForWrongAsset() { return createQuoteUsdValuation({ quote: await quote(), side: 'origin', amount, rounding: 'up', nowMs }); }
 });
