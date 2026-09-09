@@ -58,16 +58,16 @@
   "pool": {
     "fee": 0,
     "tickSpacing": 60,
-    "tickSpacingRationale": "The frozen Phase 3 hook composition passes tickSpacing 60 into its canonical-market binding, and 60 aligns the full range to -887220 through 887220. The retained provider material and hook source do not establish an independent provider-required fee-tier spacing, so this is a recorded owner/composition choice rather than a provider fact.",
+    "tickSpacingRationale": "The existing canonical market uses tick spacing 60. The owner-selected inventory range must have ordered, aligned bounds; no production bounds have been selected.",
     "fullRange": {
-      "minimumTick": -887220,
-      "maximumTick": 887220
+      "minimumTick": null,
+      "maximumTick": null
     },
     "quoteAsset": {
       "chainId": "4663",
       "assetId": "native",
       "decimals": 18,
-      "amountAtomic": null
+      "amountAtomic": "0"
     },
     "baseAsset": {
       "chainId": "4663",
@@ -79,7 +79,7 @@
       "nativeCurrency0": null,
       "selection": {
         "status": "OPEN_FACT",
-        "rule": "Native ETH is currency0; derive the price from the explicit native maximum and complete HKMN stock.",
+        "rule": "Native ETH is currency0. Zero-native inventory starts exactly at the selected upper tick; derive maximal token-only liquidity from the complete HKMN stock and permanently lock mechanical rounding dust.",
         "selectedOrdering": "nativeCurrency0",
         "selectedSqrtPriceX96": null,
         "poolKey": null,
@@ -103,11 +103,11 @@
     },
     "refundAndDust": {
       "intendedDestination": "0xfc82B0da6d487B97d7eA1AA0d51E00AfF4F3a729",
-      "sourceBehavior": "Send only the exact native debt to PositionManager and refund msg.value minus debt to the payer. HKMN Permit2 approvals are cleared. Any graph-mode HKMN residual or rejected native refund reverts the entire seed."
+      "sourceBehavior": "Zero-native seeding sends no ETH. Maximal token-only liquidity consumes the HKMN stock less mechanically derived rounding dust, which remains locked in PermanentPositionCustody. HKMN approvals are cleared. The funded legacy route refunds excess native value and rejects token residuals."
     },
     "nativeFunding": {
       "payer": "0xfc82B0da6d487B97d7eA1AA0d51E00AfF4F3a729",
-      "amountWei": null,
+      "amountWei": "0",
       "valueRule": "msg.value == amount0Max"
     }
   },
@@ -118,7 +118,7 @@
     "website": "https://hookemon.com",
     "x": "https://x.com/hookemon4",
     "icon": {
-      "expectedFile": "hookemon-mark.png",
+      "expectedFile": "release/phase3/metadata/hkmn-logo.png",
       "status": "OPEN_FACT"
     },
     "banner": {
@@ -129,8 +129,8 @@
   "openFacts": [
     "Missing: provider-supplied encoded preimage for the accepted three-call initialization sequence token.allocate(hook), custody.configureBindingHook(hook), and hook.initializeGraphLaunch(custody,sqrtPriceX96). Resolve: obtain the route namespace, route nonce, topology hash, target-id hashes, and serialized provider graph call data. Verified alternative: retain no encoded call data, target addresses, or signing payload.",
     "Missing: owner-reviewed seed deadline, wallet nonce and gas parameters. Resolve: bind them to the exact unsigned native transaction after preflight. Verified alternative: retain the 900-second deadline ceiling without a transaction payload.",
-    "Missing: icon and banner bytes, content hashes and immutable publication locations. Resolve: add the supplied assets to the package and bind their SHA-256 values. Verified alternative: publish no public metadata artifact and retain the owner text only.",
-    "Missing: the explicit native seed maximum, initial price and wei claim ceilings. Resolve: select reviewed per-action funding and gas reserves; calculate complete test affordability after functional testing under the owner decision. Verified alternative: funding values remain null and no seed can materialize until those explicit limits are selected.",
-    "Missing: current provider admission of the unchanged inclusive 10/40/250 basis-point fee model with separate native seed. Resolve: submit the exact native graph to authenticated preflight and retain its admission result. Verified alternative: local native compilation and tests proceed without deployment authority."
+    "Missing: final provider metadata binding. Resolve: bind the selected release/phase3/metadata/hkmn-logo.png and its verified immutable public URI through the official metadata packer. Verified alternative: the actual logo bytes, matching public image and API metadata input are retained; no banner is required by the selected metadata input.",
+    "Missing: owner-selected inventory price range, native claim ceilings and transaction gas budget. Resolve: choose reviewed range bounds and independent wei limits without converting dollar numerals into wei. Verified alternative: zero creator seed and zero graph funding are fixed; production price, addresses and transaction payload remain unmaterialized.",
+    "Missing: provider admission of the unchanged inclusive 10/40/250 basis-point custom fee graph and compatible buyer-prepayment router. Resolve: obtain a server-owned custom economic adapter and verified external bindings; then run authenticated preflight on a complete request. Verified alternative: the local zero-native inventory and buyer-funded router sequence are tested without deployment or submission claims."
   ]
 }
