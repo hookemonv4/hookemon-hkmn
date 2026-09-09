@@ -5951,7 +5951,7 @@
       ]
     },
     "packages/adapters/test/app/compose.test.mjs": {
-      "sha256": "b1039dedaa711eb112c67c6549ae876a3a87416fc62c3fcafb22851dcb83eb69",
+      "sha256": "760a2615e6b4ceb13cec750802d4d03f3089c692ce87f029f3c0048b20d53197",
       "matches": [
         {
           "file": "packages/adapters/test/app/compose.test.mjs",
@@ -7229,15 +7229,15 @@
       ]
     },
     "packages/adapters/test/app/stages-collector-lifecycle.test.mjs": {
-      "sha256": "030884d597c9ca6d0730ffcd83b64076ff008d0ceb524125befadb8e7b7c4ee6",
+      "sha256": "1e02c93bc3789e12df04fccefb76bddb943edeb3ccacb9c4ce50461d73fe685d",
       "matches": [
         {
           "file": "packages/adapters/test/app/stages-collector-lifecycle.test.mjs",
           "rule": "historical-architecture",
-          "offset": 56706,
+          "offset": 56720,
           "length": 4,
           "sha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
-          "tokenStart": 56706,
+          "tokenStart": 56720,
           "tokenLength": 4,
           "tokenSha256": "8591ee9090c0c02ca1f103cb637131d8f358870aba145245ff083e138fdd705b",
           "basis": "reviewed-native-71-or-retained-provider-source"
