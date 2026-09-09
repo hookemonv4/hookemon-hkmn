@@ -31,6 +31,7 @@ import {
   reconcileLiveOutbound,
 } from './stages/outbound.mjs';
 import {
+  legacyPlanPurchaseRequest,
   preparePurchaseRequest,
   probePurchase,
   mutatePurchase,
@@ -1484,8 +1485,18 @@ export function createStageDriver({
       } catch (error) {
         throw error;
       }
-      const preparedRequestDigest = requestDigest(context, request);
-      if (resumePlanPurchase && current.attempt.requestDigest !== preparedRequestDigest) throw new Error('plan purchase resume requires the original parent request digest');
+      let preparedRequestDigest = requestDigest(context, request);
+      if (resumePlanPurchase && current.attempt.requestDigest !== preparedRequestDigest) {
+        // A partially generated plan recorded before single-pack orders bound their generation
+        // route resumes under its own recorded identity: the legacy reconstruction is trusted only
+        // when it reproduces the parent digest exactly, and its remaining orders then keep the
+        // batch generation semantics that identity was recorded with. Anything else still refuses.
+        const legacyRequest = usesBuiltInHandlers ? legacyPlanPurchaseRequest(request) : null;
+        const legacyRequestDigest = legacyRequest === null ? null : requestDigest(context, legacyRequest);
+        if (legacyRequestDigest !== current.attempt.requestDigest) throw new Error('plan purchase resume requires the original parent request digest');
+        request = freezeRequest(legacyRequest);
+        preparedRequestDigest = legacyRequestDigest;
+      }
       if (context.stage === 'purchase' && Array.isArray(request.orders)) {
         await cycleRepository.recordStageRequestDigest(context.cycleId, context.stage, preparedRequestDigest);
       }

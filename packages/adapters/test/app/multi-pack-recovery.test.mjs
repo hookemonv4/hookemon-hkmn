@@ -20,6 +20,7 @@ import { mutatePurchase, preparePurchaseRequest, reconcileLivePurchase } from '.
 import { mutateOpen, reconcileLiveOpen } from '../../src/app/stages/open.mjs';
 import { reconcileLiveEpicGate } from '../../src/app/stages/epic-gate.mjs';
 import { reconcileLiveBuyback } from '../../src/app/stages/buyback.mjs';
+import { digest } from '../../../runner/src/cycle/journal.mjs';
 import { MAXIMUM_PACK_BATCH_SIZE } from '../../../runner/src/cycle/money-schemas.mjs';
 import { createTestProfileMutationAuthority } from '../../../runner/src/cycle/preflight.mjs';
 import { CycleRepository } from '../../src/app/cycle-repository.mjs';
@@ -622,7 +623,10 @@ test('built-in driver refuses next order while prior broadcast is unfinalized an
   const collectorCrypt = {
     getMachines: async () => ({ machines: orders.map(order => ({ code: order.packId, contains: 1 })) }),
     getPackStatus: async ({ memo }) => ({ memo, pack: { transaction_signature: signatureFor(0), token_mint: SETTLEMENT_ASSET } }),
-    generateYoloPacks: async input => { generateCalls.push(input.packType); throw new Error('second order response lost'); },
+    // Each admitted order is a single pack, so the prepared plan binds the approved non-turbo
+    // generatePack route per order; the batch endpoint must never be reached for it.
+    generatePack: async input => { generateCalls.push(input.packType); throw new Error('second order response lost'); },
+    generateYoloPacks: async () => { throw new Error('single-pack plan order must not use the batch endpoint'); },
   };
   const config = baseConfig({ collectorCrypt: { settlementAsset: settlementAsset(), purchase: { policy: {} } } });
   const adapters = { collectorCrypt, solana: { client: rpcClient({ debitsBySignature: debits }) } };
@@ -644,16 +648,197 @@ test('built-in driver refuses next order while prior broadcast is unfinalized an
   assert.deepEqual(generateCalls, ['pokemon_50']);
 });
 
+/** A partially generated plan exactly as an older attempt recorded it: the parent request was
+ * digested before single-pack orders bound `generation`, its first order is durably generated and
+ * reconciled under that digest, and its second order has not been attempted yet. */
+function legacyPartialPlanFixture({ parentRequestDigest = null } = {}) {
+  const orders = ['pokemon_25', 'pokemon_50'].map((packId, orderIndex) => ({ orderIndex, packId, quantity: 1,
+    unitPurchase: { ...settlementAsset(), amountAtomic: orderIndex === 0 ? '25000000' : '50000000' } }));
+  const admission = { schema: 'hookemon.policy-admission.v4', quantity: 2, orders };
+  const legacyRequest = { provider: 'collector-crypt', operation: 'purchase', playerAddress: OPERATOR, quantity: 2,
+    admissionDigest: digest(admission), orders: orders.map(order => ({ orderIndex: order.orderIndex, packType: order.packId, quantity: 1,
+      unitPurchase: order.unitPurchase, aggregatePurchase: order.unitPurchase, expectedCardCountPerPack: 1 })) };
+  const legacyDigest = digest({ schema: 'hookemon.operational-stage-request.v1', cycleId: 'cycle-x', stage: 'purchase', request: legacyRequest });
+  const recordedDigest = parentRequestDigest ?? legacyDigest;
+  const parent = { attempt: { state: 'SENT_UNKNOWN', cycleId: 'cycle-x', stage: 'purchase', requestDigest: recordedDigest }, sentAtMs: 1000 };
+  const first = { packs: [{ packIndex: 0, memo: 'memo-0', packType: 'pokemon_25', expectedCardCount: 1 }], requestedAtMs: 1000 };
+  const intents = new Map([[0, { intent: { quantity: 1, packType: 'pokemon_25', expectedCardCountPerPack: 1, playerAddress: OPERATOR },
+    requestDigest: recordedDigest, admissionDigest: digest(admission) }]]);
+  const recordedDigests = [];
+  const cycleRepository = repository({ intents: { purchase: { recordedAtMs: 1000, intent: { playerAddress: OPERATOR } } } });
+  cycleRepository.describeCycle = async () => ({ admission });
+  cycleRepository.readOperationalStageAttempt = async () => parent;
+  cycleRepository.readStageAttempt = async () => null;
+  cycleRepository.readPackBatchRequest = async () => ({ ...first, generationComplete: false });
+  cycleRepository.readPackOrderRequest = async (_id, index) => (index === 0 ? first : null);
+  cycleRepository.readPackOrderIntent = async (_id, index) => intents.get(index) ?? null;
+  cycleRepository.readPackOrderReconciliation = async (_id, index) => (index === 0 ? [{ packIndex: 0, memo: 'memo-0', status: 'purchased' }] : null);
+  cycleRepository.recordPackOrderIntent = async (_id, index, intent, requestDigest) => { intents.set(index, { intent, requestDigest, admissionDigest: digest(admission) }); };
+  cycleRepository.recordStageRequestDigest = async (_id, _stage, value) => { recordedDigests.push(value); };
+  cycleRepository.markStageAttemptSentUnknown = async () => {};
+  cycleRepository.markStageAttemptNotSent = async () => assert.fail('a resumed plan cannot become NOT_SENT');
+  cycleRepository.prepareStageAttempt = async () => assert.fail('a resumed plan keeps its original parent attempt');
+  cycleRepository.recordStageAttemptResponse = async () => assert.fail('partial generation cannot complete the parent response');
+  cycleRepository.reconcileStageAttempt = async () => assert.fail('partial reconciliation cannot complete the parent stage');
+  const calls = { generatePack: [], generateYoloPacks: [] };
+  const collectorCrypt = {
+    getMachines: async () => ({ machines: orders.map(order => ({ code: order.packId, contains: 1 })) }),
+    generatePack: async input => { calls.generatePack.push(input); throw new Error('a legacy plan order must keep its recorded batch endpoint'); },
+    generateYoloPacks: async input => { calls.generateYoloPacks.push(input); throw new Error('second order response lost'); },
+  };
+  const config = baseConfig({ collectorCrypt: { settlementAsset: settlementAsset(), purchase: { policy: {} } } });
+  const adapters = { collectorCrypt, solana: { client: rpcClient() } };
+  const context = { cycleId: 'cycle-x', stage: 'purchase', nowMs: 2000, assertLease() {}, assertMutationAllowed: async () => {} };
+  return { admission, legacyRequest, legacyDigest, intents, recordedDigests, calls, cycleRepository, config, adapters, context };
+}
+
+test('built-in driver resumes an older partially generated plan under its recorded request digest and keeps the batch endpoint for the remaining legacy order', async () => {
+  const { createStageDriver } = await import('../../src/app/stage-driver.mjs');
+  const { legacyRequest, legacyDigest, intents, recordedDigests, calls, cycleRepository, config, adapters, context } = legacyPartialPlanFixture();
+  // A fresh preparation now binds the single-pack route, so its digest no longer names this parent
+  // attempt; the recorded identity is the fresh request minus exactly that binding.
+  const fresh = await preparePurchaseRequest({ adapters, config, cycleRepository, context });
+  assert.deepEqual(fresh.orders.map(order => order.generation), [{ endpoint: 'generatePack', turbo: false }, { endpoint: 'generatePack', turbo: false }]);
+  assert.notEqual(digest({ schema: 'hookemon.operational-stage-request.v1', cycleId: 'cycle-x', stage: 'purchase', request: fresh }), legacyDigest);
+  assert.deepEqual(fresh.orders.map(({ generation, ...order }) => order), legacyRequest.orders);
+
+  const driver = createStageDriver({ liveMode: true, adapters, config, cycleRepository,
+    signerClient: { solana: { sign: async () => assert.fail('a lost response never reaches signing') } }, preflightAuthority: createTestProfileMutationAuthority() });
+  await assert.rejects(driver.execute(context), /second order response lost/);
+  assert.deepEqual(calls.generatePack, []);
+  assert.deepEqual(calls.generateYoloPacks, [{ playerAddress: OPERATOR, quantity: 1, packType: 'pokemon_50' }]);
+  // The parent identity is unchanged: the same digest is re-recorded and binds the new order intent.
+  assert.deepEqual(recordedDigests, [legacyDigest]);
+  assert.equal(intents.get(1).requestDigest, legacyDigest);
+  assert.deepEqual(intents.get(1).intent, { quantity: 1, packType: 'pokemon_50', expectedCardCountPerPack: 1, playerAddress: OPERATOR });
+
+  // The lost response left the second order uncertain: nothing regenerates until reconciliation.
+  await assert.rejects(driver.execute(context), /requires reconciliation/);
+  assert.equal(calls.generateYoloPacks.length, 1);
+  assert.deepEqual(calls.generatePack, []);
+});
+
+test('built-in driver refuses to resume a plan whose recorded digest names neither the fresh nor the legacy request', async () => {
+  const { createStageDriver } = await import('../../src/app/stage-driver.mjs');
+  const foreignDigest = `sha256:${'f'.repeat(64)}`;
+  const { intents, recordedDigests, calls, cycleRepository, config, adapters, context } = legacyPartialPlanFixture({ parentRequestDigest: foreignDigest });
+  const driver = createStageDriver({ liveMode: true, adapters, config, cycleRepository,
+    signerClient: { solana: { sign: async () => assert.fail('an unidentified plan never reaches signing') } }, preflightAuthority: createTestProfileMutationAuthority() });
+  await assert.rejects(driver.execute(context), /plan purchase resume requires the original parent request digest/);
+  assert.deepEqual(calls, { generatePack: [], generateYoloPacks: [] });
+  assert.deepEqual(recordedDigests, []);
+  assert.equal(intents.has(1), false);
+});
+
 test('resumed later order receives its own reconciliation deadline', async () => {
   const orders = ['pokemon_25', 'pokemon_50'].map((packId, orderIndex) => ({ orderIndex, packId, quantity: 1,
     unitPurchase: { ...settlementAsset(), amountAtomic: '25000000' } }));
   const packs = orders.map(order => ({ packIndex: order.orderIndex, packType: order.packId, memo: `memo-${order.orderIndex}`, expectedCardCount: 1 }));
-  const cycleRepository = repository({ batches: { purchase: { packs, generationComplete: true, requestedAtMs: 0 } },
-    intents: { purchase: { intent: { playerAddress: OPERATOR } } } });
-  cycleRepository.describeCycle = async () => ({ admission: { schema: 'hookemon.policy-admission.v4', orders } });
-  cycleRepository.readPackOrderRequest = async (_id, i) => ({ packs: [packs[i]], requestedAtMs: i === 0 ? 0 : 10_000_000 });
-  cycleRepository.recordPackOrderReconciliation = async () => assert.fail('later order remains pending');
-  const adapters = { collectorCrypt: { getPackStatus: async ({ memo }) => ({ memo, pack: null }) }, solana: { client: rpcClient() } };
-  assert.equal(await reconcileLivePurchase({ adapters, config: baseConfig(), cycleRepository,
-    context: { cycleId: 'cycle-x', stage: 'purchase', nowMs: 10_000_001 } }), null);
+  const admission = { schema: 'hookemon.policy-admission.v4', quantity: 2, orders };
+  // Per-order requests exactly as the durable journal derives them: the aggregate purchase batch is
+  // their concatenation, stamped with the first order's request time, and complete only once every
+  // admitted order has generated. The first order generated at 0; the second resumes much later.
+  const orderRequests = new Map([[0, { packs: [packs[0]], requestedAtMs: 0 }]]);
+  const reconciled = new Map();
+  const cycleRepository = repository({ intents: { purchase: { recordedAtMs: 0, intent: { playerAddress: OPERATOR } } } });
+  cycleRepository.describeCycle = async () => ({ admission });
+  cycleRepository.readPackBatchRequest = async () => ({
+    packs: [...orderRequests.values()].flatMap(request => request.packs),
+    requestedAtMs: orderRequests.get(0).requestedAtMs,
+    generationComplete: orderRequests.size === admission.quantity,
+  });
+  cycleRepository.readPackOrderRequest = async (_id, index) => orderRequests.get(index) ?? null;
+  cycleRepository.readPackOrderIntent = async () => null;
+  cycleRepository.recordPackOrderReconciliation = async (_id, index, outcomes) => { reconciled.set(index, outcomes); };
+  // The first memo finalized with exactly its admitted debit; the second memo has no provider record yet.
+  const collectorCrypt = {
+    getPackStatus: async ({ memo }) => (memo === 'memo-0'
+      ? { memo, pack: { transaction_signature: signatureFor(0), token_mint: SETTLEMENT_ASSET }, send: null, buyback: [] }
+      : { memo, pack: null, send: null, buyback: [] }),
+  };
+  const adapters = { collectorCrypt, solana: { client: rpcClient({ debitsBySignature: new Map([[signatureFor(0), '25000000']]) }) } };
+  const reconcile = nowMs => reconcileLivePurchase({ adapters, config: baseConfig(), cycleRepository,
+    context: { cycleId: 'cycle-x', stage: 'purchase', nowMs } });
+
+  // Before the second order exists, the first order's terminal outcome is recorded and nothing holds.
+  assert.equal(await reconcile(5_000), null);
+  assert.deepEqual(reconciled.get(0), [{ packIndex: 0, memo: 'memo-0', status: 'purchased', signature: signatureFor(0),
+    expectedCardCount: 1, packCost: { ...settlementAsset(), amountAtomic: '25000000' } }]);
+  assert.equal(cycleRepository.held.length, 0);
+
+  // The resumed second order is judged against its own request time. Measured from the aggregate
+  // batch's first-order time it would already be 10_000_001ms old and hold here; it stays pending.
+  orderRequests.set(1, { packs: [packs[1]], requestedAtMs: 10_000_000 });
+  assert.equal(await reconcile(10_000_001), null);
+  assert.equal(cycleRepository.held.length, 0);
+  assert.deepEqual([...reconciled.keys()], [0]);
+
+  // Once its own deadline passes, the still-unproven second memo holds the whole cycle.
+  assert.equal(await reconcile(10_000_000 + 30 * 60_000), null);
+  assert.equal(cycleRepository.held.length, 1);
+  assert.equal(cycleRepository.held[0].terminalState, 'HELD_DATA_UNVERIFIED');
+  assert.equal(cycleRepository.held[0].evidence.memo, 'memo-1');
+  assert.equal(cycleRepository.held[0].evidence.reason, 'missing provider evidence cannot prove that no purchase debit occurred');
+  assert.deepEqual([...reconciled.keys()], [0]);
+});
+
+test('new plan orders bind the approved single-pack generatePack route per order and keep the batch route for multi-pack orders', async () => {
+  const orders = [
+    { orderIndex: 0, packId: 'pokemon_25', quantity: 1, unitPurchase: { ...settlementAsset(), amountAtomic: '25000000' } },
+    { orderIndex: 1, packId: 'pokemon_50', quantity: 2, unitPurchase: { ...settlementAsset(), amountAtomic: '50000000' } },
+  ];
+  const admission = { schema: 'hookemon.policy-admission.v4', quantity: 3, orders };
+  const calls = { generatePack: [], generateYoloPacks: [] };
+  const collectorCrypt = {
+    getMachines: async () => ({ machines: orders.map(order => ({ code: order.packId, contains: 1 })) }),
+    generatePack: async input => { calls.generatePack.push(input); throw new Error('single-pack response lost'); },
+    generateYoloPacks: async input => { calls.generateYoloPacks.push(input); throw new Error('batch response lost'); },
+  };
+  const config = baseConfig({ collectorCrypt: { settlementAsset: settlementAsset(), purchase: { policy: {} } } });
+  const prepared = repository();
+  prepared.describeCycle = async () => ({ admission });
+  const request = await preparePurchaseRequest({ adapters: { collectorCrypt }, config, cycleRepository: prepared, context: { cycleId: 'cycle-x' } });
+  assert.deepEqual(request.orders[0].generation, { endpoint: 'generatePack', turbo: false });
+  assert.equal(Object.hasOwn(request.orders[1], 'generation'), false);
+
+  // Mutation follows the bound route per order: the single pack goes to generatePack, the
+  // two-pack order still goes to generateYoloPacks. Each provider loses its response so no signer
+  // is reached; the durable intent makes the interrupted order uncertain rather than regenerated.
+  const scenarios = [
+    { name: 'first order', generatedFirst: false, rejects: /single-pack response lost/,
+      generatePack: [{ playerAddress: OPERATOR, turbo: false, packType: 'pokemon_25' }], generateYoloPacks: [] },
+    { name: 'second order', generatedFirst: true, rejects: /batch response lost/,
+      generatePack: [], generateYoloPacks: [{ playerAddress: OPERATOR, quantity: 2, packType: 'pokemon_50' }] },
+  ];
+  for (const scenario of scenarios) {
+    calls.generatePack.length = 0;
+    calls.generateYoloPacks.length = 0;
+    const cycleRepository = repository();
+    cycleRepository.describeCycle = async () => ({ admission });
+    const intents = new Map(), batches = new Map();
+    if (scenario.generatedFirst) {
+      intents.set(0, { intent: { quantity: 1, packType: 'pokemon_25', expectedCardCountPerPack: 1, playerAddress: OPERATOR } });
+      batches.set(0, { packs: [{ packIndex: 0, memo: 'already-generated', packType: 'pokemon_25', expectedCardCount: 1 }], requestedAtMs: 1000 });
+    }
+    cycleRepository.readPackOrderIntent = async (_id, index) => intents.get(index) ?? null;
+    cycleRepository.readPackOrderRequest = async (_id, index) => batches.get(index) ?? null;
+    cycleRepository.readPackOrderReconciliation = async (_id, index) => batches.has(index) ? [{ status: 'purchased' }] : null;
+    cycleRepository.recordPackOrderIntent = async (_id, index, intent) => { const record = { intent }; intents.set(index, record); return record; };
+    cycleRepository.recordPackOrderRequest = async () => assert.fail('lost response must not create a memo batch');
+    const options = { liveMode: true, cycleRepository, request, config,
+      signerClient: { solana: { async sign() { assert.fail('lost generation has no transaction to sign'); } } },
+      adapters: { solana: { client: rpcClient() }, collectorCrypt },
+      context: { cycleId: 'cycle-x', requestDigest: `sha256:${'a'.repeat(64)}` },
+      preflightAuthority: createTestProfileMutationAuthority(),
+    };
+    await assert.rejects(mutatePurchase(options), scenario.rejects, scenario.name);
+    assert.deepEqual(calls.generatePack, scenario.generatePack, scenario.name);
+    assert.deepEqual(calls.generateYoloPacks, scenario.generateYoloPacks, scenario.name);
+    assert.deepEqual(intents.get(scenario.generatedFirst ? 1 : 0).intent,
+      scenario.generatedFirst
+        ? { quantity: 2, packType: 'pokemon_50', expectedCardCountPerPack: 1, playerAddress: OPERATOR }
+        : { quantity: 1, packType: 'pokemon_25', expectedCardCountPerPack: 1, playerAddress: OPERATOR }, scenario.name);
+    await assert.rejects(mutatePurchase(options), /generation is uncertain/, scenario.name);
+    assert.equal(calls.generatePack.length + calls.generateYoloPacks.length, 1, scenario.name);
+  }
 });

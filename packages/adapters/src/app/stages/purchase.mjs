@@ -339,6 +339,7 @@ export async function preparePurchaseRequest({ adapters, config, cycleRepository
         const count = expectedCardCountFromCatalog({ catalog, packType: order.packId });
         if (count !== 1) throw new Error(`Collector machine "${order.packId}" needs an unsupported ${count}-card fan-out per pack`);
         return { orderIndex: order.orderIndex, packType: order.packId, quantity: order.quantity,
+          ...(order.quantity === 1 ? { generation: { endpoint: 'generatePack', turbo: false } } : {}),
           unitPurchase: order.unitPurchase,
           aggregatePurchase: { ...order.unitPurchase, amountAtomic: (BigInt(order.unitPurchase.amountAtomic) * BigInt(order.quantity)).toString() },
           expectedCardCountPerPack: count };
@@ -357,6 +358,21 @@ export async function preparePurchaseRequest({ adapters, config, cycleRepository
   };
   if (typeof packType !== 'string' || packType.length === 0) return request;
   return { ...request, packType, expectedCardCountPerPack: await expectedCardCountPerPack({ adapters, packType }) };
+}
+
+/**
+ * The request an older plan attempt was digested under, before newly prepared single-pack orders
+ * bound `generation` (see `preparePurchaseRequest`): `request` with that binding removed from every
+ * order, or `null` when no order carries one. It only re-identifies a durably recorded parent
+ * request -- the caller must prove this reconstruction against the recorded parent digest before
+ * trusting it -- and the orders it yields keep their original batch generation semantics.
+ */
+export function legacyPlanPurchaseRequest(request) {
+  if (!Array.isArray(request?.orders) || !request.orders.some(order => Object.hasOwn(order, 'generation'))) return null;
+  return {
+    ...request,
+    orders: request.orders.map(order => Object.fromEntries(Object.entries(order).filter(([key]) => key !== 'generation'))),
+  };
 }
 
 export async function probePurchase({ adapters, config }) {
