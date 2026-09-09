@@ -351,18 +351,20 @@ contract HookemonHook is FeeAccounting, MoneyRoles, CanonicalMarketCallback, Hoo
             params.payer == address(0) || params.payer == address(this)
                 || params.custody == address(0) || params.custody.code.length == 0
                 || params.liquidity == 0 || params.liquidity > uint256(uint128(type(int128).max))
-                || params.tickLower != -887220 || params.tickUpper != 887220
-                || params.tickLower % tickSpacing != 0 || params.tickUpper % tickSpacing != 0
-                || params.deadline < block.timestamp
+                || params.tickLower < TickMath.MIN_TICK || params.tickUpper > TickMath.MAX_TICK
+                || params.tickLower >= params.tickUpper || params.tickLower % tickSpacing != 0
+                || params.tickUpper % tickSpacing != 0 || params.deadline < block.timestamp
         ) revert InvalidSeedParams();
 
         PoolKey memory key = _canonicalPoolKey();
         uint256 hkmnMax = params.amount1Max;
         if (msg.value != params.amount0Max) revert SeedFundingMismatch();
         uint256 hkmnBalanceBefore = _tokenBalance(Currency.unwrap(hkmn), address(this));
-        if (hkmnMax == 0 || params.amount0Max == 0 || hkmnMax != hkmnBalanceBefore) {
+        if (hkmnMax == 0 || hkmnMax != hkmnBalanceBefore) {
             revert InvalidSeedParams();
         }
+
+        _validateSeedRange(key, params);
 
         PermanentPositionCustody custody = PermanentPositionCustody(params.custody);
         if (
@@ -761,6 +763,19 @@ contract HookemonHook is FeeAccounting, MoneyRoles, CanonicalMarketCallback, Hoo
         _approveToken(hkmnToken, permit2, hkmnMax);
         ILaunchPermit2(permit2)
             .approve(hkmnToken, positionManager, uint160(hkmnMax), uint48(block.timestamp));
+    }
+
+    /// @dev Token-only inventory starts exactly at its upper boundary, where buys enter the range.
+    function _validateSeedRange(PoolKey memory key, SeedParams calldata params) private view {
+        if (params.amount0Max != 0) {
+            if (params.tickLower != -887220 || params.tickUpper != 887220) {
+                revert InvalidSeedParams();
+            }
+            return;
+        }
+        (uint160 price,,,) = poolManager.getSlot0(key.toId());
+        if (price != TickMath.getSqrtPriceAtTick(params.tickUpper)) revert InvalidSeedParams();
+        if (graphMode && !_graphConfigurationIsValid(price)) revert InvalidGraphIssuance();
     }
 
     /// @dev Matches pinned Pool.modifyLiquidity rounded-up principal debt in all tick regions.

@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.26;
 
+import { MockV4Router } from "@uniswap/v4-periphery/test/mocks/MockV4Router.sol";
+import { IV4Router } from "@uniswap/v4-periphery/src/interfaces/IV4Router.sol";
+import { Actions } from "@uniswap/v4-periphery/src/libraries/Actions.sol";
 import { Test } from "forge-std/Test.sol";
 import { PoolManager } from "@uniswap/v4-core/src/PoolManager.sol";
 import { IPoolManager } from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
@@ -77,8 +80,10 @@ contract NativeHookTest is Test, DeployPermit2 {
     PoolKey private key;
     HookemonHook.SeedParams private seed;
     uint256 private nativeDebt;
+    int24 private fixtureUpperTick;
 
     function setUp() public {
+        uint160 fixturePrice = TickMath.getSqrtPriceAtTick(fixtureUpperTick);
         manager = new PoolManager(address(this));
         permit = IAllowanceTransfer(deployPermit2());
         positions = new PositionManager(
@@ -90,7 +95,7 @@ contract NativeHookTest is Test, DeployPermit2 {
         );
         router = new PoolSwapTest(manager);
         operations = new NativeRecipient();
-        token = new HKMNToken(address(this), address(0), 18, uint160(1 << 96));
+        token = new HKMNToken(address(this), address(0), 18, fixturePrice);
         HookemonHook.ConstructorConfig memory config = HookemonHook.ConstructorConfig({
             manager: manager,
             positionManager: address(positions),
@@ -123,19 +128,18 @@ contract NativeHookTest is Test, DeployPermit2 {
         custody = new PermanentPositionCustody(address(positions), 0);
         custody.configureBindingHook(address(hook));
         token.allocate(address(hook));
-        hook.initializeGraphLaunch(address(custody), uint160(1 << 96));
+        hook.initializeGraphLaunch(address(custody), fixturePrice);
         key = PoolKey(
             Currency.wrap(address(0)), Currency.wrap(address(token)), 0, 60, IHooks(address(hook))
         );
         uint160 lower = TickMath.getSqrtPriceAtTick(-887220);
         uint160 upper = TickMath.getSqrtPriceAtTick(887220);
         uint128 liquidity =
-            LiquidityAmounts.getLiquidityForAmount1(lower, uint160(1 << 96), token.totalSupply());
+            LiquidityAmounts.getLiquidityForAmount1(lower, fixturePrice, token.totalSupply());
         assertEq(
-            SqrtPriceMath.getAmount1Delta(lower, uint160(1 << 96), liquidity, true),
-            token.totalSupply()
+            SqrtPriceMath.getAmount1Delta(lower, fixturePrice, liquidity, true), token.totalSupply()
         );
-        nativeDebt = SqrtPriceMath.getAmount0Delta(uint160(1 << 96), upper, liquidity, true);
+        nativeDebt = SqrtPriceMath.getAmount0Delta(fixturePrice, upper, liquidity, true);
         seed = HookemonHook.SeedParams(
             -887220,
             887220,
@@ -167,6 +171,166 @@ contract NativeHookTest is Test, DeployPermit2 {
             PoolSwapTest.TestSettings(false, false),
             ""
         );
+    }
+
+    // Tick zero is an existing local fixture price, not a production launch choice.
+    function _tokenOnlySeed() private {
+        seed.tickUpper = fixtureUpperTick;
+        seed.amount0Max = 0;
+        nativeDebt = 0;
+    }
+
+    function _inventoryBuy() private {
+        MockV4Router buyer = new MockV4Router(manager);
+        bytes[] memory params = new bytes[](3);
+        params[0] = abi.encode(key.currency0, uint256(100000), false);
+        params[1] = abi.encode(
+            IV4Router.ExactInputSingleParams({
+                poolKey: key,
+                zeroForOne: true,
+                amountIn: 100000,
+                amountOutMinimum: 1,
+                minHopPriceX36: 0,
+                hookData: ""
+            })
+        );
+        params[2] = abi.encode(key.currency1, uint256(1));
+        buyer.executeActions{ value: 100000 }(
+            abi.encode(
+                abi.encodePacked(
+                    uint8(Actions.SETTLE),
+                    uint8(Actions.SWAP_EXACT_IN_SINGLE),
+                    uint8(Actions.TAKE_ALL)
+                ),
+                params
+            )
+        );
+        assertEq(address(buyer).balance, 0);
+    }
+
+    function testBuyerFundedInventorySeedsWithoutNativeAndConservesBuySellBalances() external {
+        _tokenOnlySeed();
+        vm.deal(LAUNCH, 0);
+        vm.deal(address(hook), 73);
+        vm.deal(address(positions), 17);
+        _seed();
+        assertEq(LAUNCH.balance, 0);
+        assertEq(address(manager).balance, 0);
+        assertEq(address(hook).balance, 73);
+        assertEq(address(positions).balance, 17);
+        assertEq(hook.totalLiability(), 0);
+        assertEq(token.balanceOf(address(manager)), token.totalSupply());
+        assertEq(token.balanceOf(address(hook)), 0);
+        assertEq(positions.ownerOf(hook.canonicalPositionTokenId()), address(custody));
+        assertTrue(custody.positionReceived());
+        assertEq(token.allowance(address(hook), address(permit)), 0);
+        (uint160 allowed,,) = permit.allowance(address(hook), address(token), address(positions));
+        assertEq(allowed, 0);
+        uint256 buyerBefore = address(this).balance;
+        _inventoryBuy();
+        assertGt(token.balanceOf(address(this)), 0);
+        assertEq(buyerBefore - address(this).balance, 100000);
+        assertEq(address(manager).balance, 97000);
+        (uint256 p, uint256 t, uint256 process) = hook.readFeeLiabilities(TREASURY);
+        assertEq(p, 100);
+        assertEq(t, 400);
+        assertEq(process, 2500);
+        uint256 received = token.balanceOf(address(this));
+        _swap(false, -int256(received));
+        assertEq(token.balanceOf(address(this)), 0);
+        assertEq(token.balanceOf(address(manager)), token.totalSupply());
+        assertEq(
+            buyerBefore - address(this).balance, address(manager).balance + hook.totalLiability()
+        );
+        assertEq(address(hook).balance, 73 + hook.totalLiability());
+        assertEq(address(positions).balance, 17);
+        assertTrue(hook.isSolvent());
+    }
+
+    function testTokenOnlyInventoryAtExplicitNonzeroUpperTick() external {
+        fixtureUpperTick = 60;
+        setUp();
+        _tokenOnlySeed();
+        vm.deal(LAUNCH, 0);
+        _seed();
+        assertEq(address(manager).balance, 0);
+        assertEq(token.balanceOf(address(manager)), token.totalSupply());
+        assertEq(token.balanceOf(address(hook)), 0);
+        _inventoryBuy();
+        uint256 received = token.balanceOf(address(this));
+        assertGt(received, 0);
+        _swap(false, -int256(received));
+        assertEq(token.balanceOf(address(this)), 0);
+        assertEq(address(hook).balance, hook.totalLiability());
+        assertTrue(hook.isSolvent());
+    }
+
+    function testEmptyInventoryPoolRequiresBuyerSettlementBeforeFeeCallback() external {
+        _tokenOnlySeed();
+        _seed();
+        vm.expectRevert();
+        _swap(true, -100000);
+        assertEq(address(manager).balance, 0);
+        assertEq(hook.totalLiability(), 0);
+        assertEq(token.balanceOf(address(this)), 0);
+    }
+
+    function testTokenOnlySeedRejectsUnexpectedValueAndSecondSeed() external {
+        _tokenOnlySeed();
+        vm.prank(LAUNCH);
+        vm.expectRevert(HookemonHook.SeedFundingMismatch.selector);
+        hook.seedCanonicalLiquidity{ value: 1 }(seed);
+        _seed();
+        vm.prank(LAUNCH);
+        vm.expectRevert(HookemonHook.CanonicalLiquidityAlreadySeeded.selector);
+        hook.seedCanonicalLiquidity(seed);
+    }
+
+    function testTokenOnlySeedRejectsPriceAwayFromUpperBoundary() external {
+        _tokenOnlySeed();
+        seed.tickUpper = 60;
+        vm.prank(LAUNCH);
+        vm.expectRevert(HookemonHook.InvalidSeedParams.selector);
+        hook.seedCanonicalLiquidity(seed);
+        seed.tickUpper = -60;
+        vm.prank(LAUNCH);
+        vm.expectRevert(HookemonHook.InvalidSeedParams.selector);
+        hook.seedCanonicalLiquidity(seed);
+        assertFalse(hook.canonicalLiquiditySeeded());
+        assertEq(token.balanceOf(address(hook)), token.totalSupply());
+    }
+
+    function testTokenOnlySeedRejectsUnboundGraphPriceEvenAtUpperBoundary() external {
+        _tokenOnlySeed();
+        seed.tickUpper = 60;
+        bytes32 slot = keccak256(abi.encode(keccak256(abi.encode(key)), uint256(6)));
+        vm.store(
+            address(manager),
+            slot,
+            bytes32(uint256(TickMath.getSqrtPriceAtTick(60)) | (uint256(60) << 160))
+        );
+        vm.prank(LAUNCH);
+        vm.expectRevert(HookemonHook.InvalidGraphIssuance.selector);
+        hook.seedCanonicalLiquidity(seed);
+    }
+
+    function testTokenOnlySeedRejectsInvalidRangeAndIncompleteAllocation() external {
+        _tokenOnlySeed();
+        seed.tickLower = 0;
+        vm.prank(LAUNCH);
+        vm.expectRevert(HookemonHook.InvalidSeedParams.selector);
+        hook.seedCanonicalLiquidity(seed);
+        seed.tickLower = -61;
+        vm.prank(LAUNCH);
+        vm.expectRevert(HookemonHook.InvalidSeedParams.selector);
+        hook.seedCanonicalLiquidity(seed);
+        seed.tickLower = -887220;
+        seed.liquidity -= 100;
+        vm.prank(LAUNCH);
+        vm.expectRevert(HookemonHook.SeedResidualTransferFailed.selector);
+        hook.seedCanonicalLiquidity(seed);
+        assertFalse(hook.canonicalLiquiditySeeded());
+        assertEq(positions.nextTokenId(), 1);
     }
 
     function testNativeSeedPreservesForcedBalancesAndRefundsDistinctPayer() external {
