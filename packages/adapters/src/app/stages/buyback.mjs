@@ -29,6 +29,7 @@ import {
   assertSolanaSignerFeeEnvelope,
   assertSolanaSignerMoneyConfiguration,
 } from './solana-money-controls.mjs';
+import { heldPackIdForMemo } from './held-pack.mjs';
 
 const canonicalUnsignedInteger = /^(0|[1-9][0-9]*)$/;
 const DEFAULT_UNRESOLVED_CARD_DEADLINE_MINUTES = 30;
@@ -190,7 +191,7 @@ async function holdPack(cycleRepository, config, context, packIndex, memo, mint,
   }
   const description = await cycleRepository.describeCycle(context.cycleId);
   const costMicroUsd = description?.admission?.aggregateFundingUsd?.amountMicroUsd;
-  const packId = config?.pack?.code;
+  const packId = await heldPackIdForMemo({ cycleRepository, cycleId: context.cycleId, memo, config });
   if (typeof costMicroUsd !== 'string' || !canonicalUnsignedInteger.test(costMicroUsd)
     || typeof packId !== 'string' || packId.length === 0) {
     throw new Error('buyback cannot attribute a held card without attributable cycle purchase evidence');

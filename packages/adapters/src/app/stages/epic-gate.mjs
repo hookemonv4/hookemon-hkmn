@@ -1,5 +1,6 @@
 import { assertTypedAmount } from '../../../../runner/src/cycle/money-schemas.mjs';
 import { COLLECTOR_CRYPT_SETTLEMENT_ASSET } from '../../collector-crypt.mjs';
+import { heldPackIdForMemo } from './held-pack.mjs';
 
 const DOCUMENTED_PRIZE_TIER_RARITIES = Object.freeze({
   1: 'epic',
@@ -166,7 +167,7 @@ async function recordHeldEpicPosition({ cycleRepository, config, context, packIn
   if (typeof costMicroUsd !== 'string' || !canonicalUnsignedInteger.test(costMicroUsd)) {
     throw new Error('epic gate cannot attribute a held card without the committed USD purchase cost');
   }
-  const packId = config?.pack?.code;
+  const packId = await heldPackIdForMemo({ cycleRepository, cycleId: context.cycleId, memo, config });
   if (typeof packId !== 'string' || packId.length === 0) {
     throw new Error('epic gate cannot attribute a held card without a pack identifier');
   }
