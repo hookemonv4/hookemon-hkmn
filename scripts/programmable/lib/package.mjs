@@ -25,7 +25,7 @@ import { verifyAddressManifest } from '../../launch/build-address-manifest.mjs';
 import {
   artifactHashes,
   derivePriceCandidates,
-  deriveNativePriceCandidate,
+  deriveNativeSeedCandidate,
   PHASE_THREE_FACTORY,
   PHASE_THREE_SOLC_LONG_VERSION,
   PHASE_THREE_SOLC_VERSION,
@@ -474,16 +474,17 @@ export function normalizePhaseThreeSubmissionDraft(submission, { native = false 
     Object.assign(quote, { id: 'native', origin: 'native-eth', address: null, decimals: 18,
       decimalsSource: 'native-eth-protocol', supplyPolicy: 'native', initialSupply: null, behaviors: ['standard'], controls: [] });
     normalized.model.summary = 'A fixed-supply HKMN market uses native ETH and a cumulative inclusive 3% gross quote-side fee.';
-    normalized.model.userOutcome = 'A reviewed graph and separate payable seed establish the canonical ETH and HKMN pool with permanent liquidity custody.';
-    liquidityFormation.valueFlow = 'The graph allocates the complete HKMN stock to the hook. A separately authorized payable seed supplies the explicitly reviewed native maximum.';
-    liquidityFormation.actor = 'Launch wallet supplies native ETH through the payable seed';
+    normalized.model.userOutcome = 'A reviewed graph and authorized seed establish the canonical ETH and HKMN pool with permanent custody.';
+    tokenCreation.custody = 'The hook receives the complete HKMN supply. Zero-native inventory locks the maximal position and its mechanical rounding remainder in permanent custody; a funded legacy seed requires exact full-range consumption.';
+    liquidityFormation.valueFlow = 'The graph allocates the complete HKMN stock to the hook. An explicit zero native maximum selects token-only inventory at the chosen upper tick; a positive maximum retains the funded full-range route.';
+    liquidityFormation.actor = 'Launch wallet submits the seed with its exact selected native ETH maximum, including zero';
     liquidityFormation.failure = 'Wrong native value, expired deadline, wrong range, failed mint or rejected refund reverts the seed atomically.';
     normalized.launchLifecycle.poolInitialization.valueFlow = 'The hook initializes the canonical native-currency0 PoolKey at the deterministic native price candidate.';
     normalized.launchLifecycle.dependencyFailure.valueFlow = 'No transfer proceeds after a failed provider route, native value check, HKMN approval, PoolManager callback or token settlement.';
     normalized.operations.monitoring = 'Monitor graph runtime hashes, hook mask, PoolKey, PoolId, native seed value, temporary HKMN approvals and permanent custody before and after seeding.';
     launchGraph.trustBoundary = 'The package binds local native inputs; current provider admission and runtime authority remain separate and no signing-ready payload is established.';
-    initialTransaction.custody = 'The seed caller supplies ETH; the hook refunds only msg.value minus exact PositionManager debt to the specified payer.';
-    normalized.launchLifecycle.trading.valueFlow = 'Each canonical ETH and HKMN swap follows its specified gross native fee quadrant.';
+    initialTransaction.custody = 'The seed caller supplies exactly amount0Max. A zero maximum needs no creator ETH inventory; a positive maximum refunds only its excess over exact debt.';
+    normalized.launchLifecycle.trading.valueFlow = 'Each canonical swap follows its gross native fee quadrant. An initially empty PoolManager requires buyer ETH settlement before the callback takes its fee; pinned V4Router SETTLE, SWAP_EXACT_IN_SINGLE, TAKE_ALL is locally verified, with deployed provider routing still unresolved.';
     normalized.launchLifecycle.feesAndClaims.custody = 'The hook holds native liabilities until successful payment to the authorized beneficiary destination.';
     normalized.pool.currency0 = 'native';
     normalized.pool.orderingRule = 'Native ETH uses zero Currency and is always currency0; HKMN is currency1.';
@@ -514,7 +515,7 @@ export function normalizePhaseThreeSubmissionDraft(submission, { native = false 
     afterSwap.bounds = 'Only the native fee component is positive, bounded by the inclusive 3% gross-volume rule and cumulative remainders.';
     ownerSeed.asset = 'native and hkmn';
     ownerSeed.amountRule = 'The explicit reviewed native amount0Max and the complete 1000000000000000000000000000 HKMN amount1Max bound the seed.';
-    ownerSeed.settlement = 'msg.value equals amount0Max. Only HKMN uses Permit2 approval; read current slot0 after approval, pay exact native debt, clear approvals and refund the difference to payer. Any HKMN residual or rejected refund reverts.';
+    ownerSeed.settlement = 'msg.value equals amount0Max, including zero. Only HKMN uses Permit2 approval; exact native debt is paid and allowances cleared. Zero-native maximal inventory locks only its mechanical HKMN remainder in permanent custody. Funded graph seeds reject residual HKMN; rejected refunds revert.';
     const feeFlow = normalized.valueFlows.find(flow => flow.asset === 'usdg');
     if (feeFlow) { feeFlow.asset = 'native'; feeFlow.settlement = 'Native PoolManager settlement backs all three cumulative liabilities before callback return.'; }
     const reconstruction = normalized.integration.dataReconstruction.reserveReconstruction;
@@ -1097,7 +1098,7 @@ export function materializePhaseThreePriceSelection({ launchInputs, submission, 
   if (native && currentSelection?.selectedOrdering !== 'nativeCurrency0') fail('INVALID_VALUE', '/launchInputs/pool/priceCandidates/selection');
   if (currentSelection.status !== 'OPEN_FACT') fail('INVALID_VALUE', '/launchInputs/pool/priceCandidates/selection/status');
   if (native) {
-    const expected = deriveNativePriceCandidate({ nativeWei: materializedLaunchInputs.pool.quoteAsset.amountAtomic, hkmnAtomic: materializedLaunchInputs.pool.baseAsset.amountAtomic });
+    const expected = deriveNativeSeedCandidate({ nativeWei: materializedLaunchInputs.pool.quoteAsset.amountAtomic, hkmnAtomic: materializedLaunchInputs.pool.baseAsset.amountAtomic, tickLower: materializedLaunchInputs.pool.fullRange.minimumTick, tickUpper: materializedLaunchInputs.pool.fullRange.maximumTick, tickSpacing: materializedLaunchInputs.pool.tickSpacing });
     if (canonicalJson(candidates.nativeCurrency0) !== canonicalJson(expected) || materializedLaunchInputs.seed.nativeFunding.amountWei !== expected.amount0Max) fail('INVALID_VALUE', '/launchInputs/pool/priceCandidates');
   }
   const selected = selectionFromMaterializedManifest(materializedLaunchInputs, materializedManifest);
@@ -1338,7 +1339,7 @@ function verifyNativeFrozenSeedPolicy(manifest, policy) {
   }
   same(inputs.pool.fee, policy.pool.fee);
   same(inputs.pool.tickSpacing, policy.pool.tickSpacing);
-  const candidate = deriveNativePriceCandidate({ nativeWei: inputs.pool.seedMaximumWei, hkmnAtomic: inputs.pool.hkmnAtomic });
+  const candidate = deriveNativeSeedCandidate({ nativeWei: inputs.pool.seedMaximumWei, hkmnAtomic: inputs.pool.hkmnAtomic, ...inputs.seedIntent, tickSpacing: inputs.pool.tickSpacing });
   same(inputs.pool.hkmnAtomic, '1000000000000000000000000000');
   for (const field of ['sqrtPriceX96', 'liquidity', 'amount0Max', 'amount1Max']) same(candidate[field], policy.pool.priceCandidates.nativeCurrency0[field]);
   for (const field of ['payer', 'tickLower', 'tickUpper', 'maxDeadlineSeconds']) same(inputs.seedIntent[field], policy.seedIntent[field]);
@@ -1388,7 +1389,7 @@ function assertConstructorUnsignedWord(word, expectedValue, label) {
 function materializedHookSeedIntentDigest(materializedManifest) {
   if (materializedManifest.schemaVersion === 'hookemon.phase3.address-manifest.v2') {
     const inputs = materializedManifest.launchInputs;
-    const candidate = deriveNativePriceCandidate({ nativeWei: inputs.pool.seedMaximumWei, hkmnAtomic: inputs.pool.hkmnAtomic });
+    const candidate = deriveNativeSeedCandidate({ nativeWei: inputs.pool.seedMaximumWei, hkmnAtomic: inputs.pool.hkmnAtomic, ...inputs.seedIntent, tickSpacing: inputs.pool.tickSpacing });
     return deriveSeedIntent({ ...candidate, ...inputs.seedIntent }).digest;
   }
   return `0x${constructorWords(materializedManifest, 'hook', HOOK_CONSTRUCTOR_CONFIG_WORDS)[
@@ -1617,7 +1618,7 @@ function validatePhaseThreeAddressDerivationDraft(launchInputs, addressManifest,
   ], `${launchPath}/pool`);
   if (launchInputs.pool.fee !== 0 || launchInputs.pool.tickSpacing !== 60) fail('INVALID_VALUE', `${launchPath}/pool`);
   assertExactKeys(launchInputs.pool.fullRange, ['minimumTick', 'maximumTick'], `${launchPath}/pool/fullRange`);
-  if (launchInputs.pool.fullRange.minimumTick !== -887220 || launchInputs.pool.fullRange.maximumTick !== 887220) {
+  if ((!native || launchInputs.pool.quoteAsset.amountAtomic !== '0') && (launchInputs.pool.fullRange.minimumTick !== -887220 || launchInputs.pool.fullRange.maximumTick !== 887220)) {
     fail('INVALID_VALUE', `${launchPath}/pool/fullRange`);
   }
   assertPhaseThreeAmount(launchInputs.pool.quoteAsset, `${launchPath}/pool/quoteAsset`, {
@@ -1631,11 +1632,11 @@ function validatePhaseThreeAddressDerivationDraft(launchInputs, addressManifest,
     assertExactKeys(launchInputs.pool.priceCandidates, ['nativeCurrency0', 'selection'], path);
     const amount = launchInputs.pool.quoteAsset.amountAtomic;
     const candidate = launchInputs.pool.priceCandidates.nativeCurrency0;
-    if (amount === null) {
+    if (amount === null || (amount === '0' && launchInputs.pool.fullRange.minimumTick === null && launchInputs.pool.fullRange.maximumTick === null)) {
       if (candidate !== null) fail('INVALID_VALUE', `${path}/nativeCurrency0`);
     } else {
-      assertString(amount, `${launchPath}/pool/quoteAsset/amountAtomic`, /^[1-9][0-9]*$/);
-      const expected = deriveNativePriceCandidate({ nativeWei: amount, hkmnAtomic: launchInputs.pool.baseAsset.amountAtomic });
+      assertString(amount, `${launchPath}/pool/quoteAsset/amountAtomic`, /^(?:0|[1-9][0-9]*)$/);
+      const expected = deriveNativeSeedCandidate({ nativeWei: amount, hkmnAtomic: launchInputs.pool.baseAsset.amountAtomic, tickLower: launchInputs.pool.fullRange.minimumTick, tickUpper: launchInputs.pool.fullRange.maximumTick, tickSpacing: launchInputs.pool.tickSpacing });
       if (canonicalJson(candidate) !== canonicalJson(expected)) fail('INVALID_VALUE', `${path}/nativeCurrency0`);
     }
     const selection = launchInputs.pool.priceCandidates.selection;

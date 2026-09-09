@@ -5,6 +5,9 @@ import { HookemonHook } from "../../src/HookemonHook.sol";
 import { PermanentPositionCustody } from "../../src/bindings/RobinhoodBindings.sol";
 import { HKMNToken } from "../../src/launch/HKMNToken.sol";
 import { PhaseThreeReleasePlan } from "../../script/release/PhaseThreeReleasePlan.sol";
+import { Pool } from "@uniswap/v4-core/src/libraries/Pool.sol";
+import { TickMath } from "@uniswap/v4-core/src/libraries/TickMath.sol";
+import { SqrtPriceMath } from "@uniswap/v4-core/src/libraries/SqrtPriceMath.sol";
 import { Test } from "forge-std/Test.sol";
 
 contract PhaseThreeReleasePlanTest is Test {
@@ -107,6 +110,77 @@ contract PhaseThreeReleasePlanTest is Test {
         (bool succeeded,) = address(subject).call(abi.encodeCall(subject.validateDraft, (draft)));
 
         require(!succeeded, "missing graph issuance authority was accepted");
+    }
+
+    function _inventoryDraft(PhaseThreeReleasePlan plan, int24 upper)
+        private
+        view
+        returns (PhaseThreeReleasePlan.Draft memory draft)
+    {
+        draft = _draft(plan);
+        draft.nativeSeedWei = 0;
+        draft.amount0Max = 0;
+        draft.tickUpper = upper;
+        draft.sqrtPriceX96 = TickMath.getSqrtPriceAtTick(upper);
+        draft.liquidity = uint128(
+            (plan.POOL_ALLOCATION() << 96)
+                / (uint256(draft.sqrtPriceX96) - TickMath.getSqrtPriceAtTick(draft.tickLower))
+        );
+    }
+
+    function test_zeroNativeInventoryFeasibilityBindsPriceMaximalLiquidityAndUpfrontAllocation()
+        external
+    {
+        PhaseThreeReleasePlan plan = new PhaseThreeReleasePlan();
+        PhaseThreeReleasePlan.Draft memory draft = _inventoryDraft(plan, 6000);
+        assertEq(plan.validateDraft(draft), plan.draftDigest(draft));
+        uint256 tokenDebt = SqrtPriceMath.getAmount1Delta(
+            TickMath.getSqrtPriceAtTick(draft.tickLower), draft.sqrtPriceX96, draft.liquidity, true
+        );
+        assertEq(draft.amount1Max - tokenDebt, 1);
+        assertEq(draft.poolAllocation, plan.TOTAL_SUPPLY());
+        assertEq(draft.remainderCustodyAllocation, 0);
+    }
+
+    function test_zeroNativeInventoryRejectsChangedPriceLiquidityValueAndRange() external {
+        PhaseThreeReleasePlan plan = new PhaseThreeReleasePlan();
+        PhaseThreeReleasePlan.Draft memory draft = _inventoryDraft(plan, 60);
+        draft.sqrtPriceX96 -= 1;
+        vm.expectRevert(PhaseThreeReleasePlan.InvalidDraft.selector);
+        plan.validateDraft(draft);
+        draft = _inventoryDraft(plan, 60);
+        draft.liquidity -= 1;
+        vm.expectRevert(PhaseThreeReleasePlan.InvalidDraft.selector);
+        plan.validateDraft(draft);
+        draft = _inventoryDraft(plan, 60);
+        draft.amount0Max = 1;
+        vm.expectRevert(PhaseThreeReleasePlan.InvalidDraft.selector);
+        plan.validateDraft(draft);
+        draft = _inventoryDraft(plan, 60);
+        draft.tickLower = -887280;
+        vm.expectRevert(PhaseThreeReleasePlan.InvalidDraft.selector);
+        plan.validateDraft(draft);
+        draft.tickLower = 61;
+        vm.expectRevert(PhaseThreeReleasePlan.InvalidDraft.selector);
+        plan.validateDraft(draft);
+        draft.tickLower = -61;
+        vm.expectRevert(PhaseThreeReleasePlan.InvalidDraft.selector);
+        plan.validateDraft(draft);
+        draft = _inventoryDraft(plan, 60);
+        draft.amount1Max -= 1;
+        vm.expectRevert(PhaseThreeReleasePlan.InvalidDraft.selector);
+        plan.validateDraft(draft);
+    }
+
+    function test_zeroNativeInventoryRejectsSignedAndPerTickOverflow() external {
+        PhaseThreeReleasePlan plan = new PhaseThreeReleasePlan();
+        PhaseThreeReleasePlan.Draft memory draft = _inventoryDraft(plan, 60);
+        draft.liquidity = Pool.tickSpacingToMaxLiquidityPerTick(60) + 1;
+        vm.expectRevert(PhaseThreeReleasePlan.InvalidDraft.selector);
+        plan.validateDraft(draft);
+        draft.liquidity = uint128(type(int128).max) + 1;
+        vm.expectRevert(PhaseThreeReleasePlan.InvalidDraft.selector);
+        plan.validateDraft(draft);
     }
 
     function _draft(PhaseThreeReleasePlan subject)

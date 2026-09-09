@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import test from 'node:test';
 import { buildLaunchPackage, normalizePhaseThreeSubmissionDraft, normalizePhaseThreeAddressManifestDraft } from '../programmable/lib/package.mjs';
+import { deriveNativeSeedCandidate } from '../programmable/lib/phase3-release.mjs';
 import { validateJsonSchema } from '../programmable/lib/json-schema.mjs';
 
 const root = resolve(import.meta.dirname, '../..');
@@ -32,10 +33,12 @@ test('native draft binds real compiler artifacts without inventing seed or claim
     const draft = JSON.parse(readFileSync(resolve(value.directory, 'package/graph-draft.json')));
     assert.equal(draft.schemaVersion, 'hookemon.phase3.graph-draft.v2');
     assert.equal(value.inputs.pool.quoteAsset.assetId, 'native');
-    assert.equal(value.inputs.pool.quoteAsset.amountAtomic, null);
+    assert.equal(value.inputs.pool.quoteAsset.amountAtomic, '0');
+    assert.deepEqual(value.inputs.pool.fullRange, { minimumTick: null, maximumTick: null });
+    assert.equal(value.inputs.pool.priceCandidates.nativeCurrency0, null);
     assert.equal(value.manifest.targets[2].constructor.processClaimLimit6hWei, null);
     assert.equal(value.manifest.targets[2].constructor.processClaimLimitMaxWei, null);
-    assert.equal(draft.seed.nativeFunding.amountWei, null);
+    assert.equal(draft.seed.nativeFunding.amountWei, '0');
     assert.equal('permit2Allowance' in draft.seed, false);
     for (const name of ['address-manifest.schema.json', 'address-manifest-draft.schema.json']) {
       assert.deepEqual(validateJsonSchema(read(`release/phase3/${name}`), value.manifest), []);
@@ -46,7 +49,7 @@ test('native draft binds real compiler artifacts without inventing seed or claim
 test('native draft rejects mixed historical assets and one-sided or zero claim limits', () => {
   for (const change of [
     inputs => { inputs.pool.quoteAsset.decimals = 6; },
-    inputs => { inputs.pool.quoteAsset.amountAtomic = '0'; },
+    inputs => { inputs.pool.quoteAsset.amountAtomic = '1'; },
     inputs => { inputs.roles.usdg = '0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168'; },
     (inputs, manifest) => { manifest.targets[2].constructor.processClaimLimit6hWei = '0'; manifest.targets[2].constructor.processClaimLimitMaxWei = '1'; },
     (inputs, manifest) => { manifest.targets[2].constructor.processClaimLimit6hWei = '1'; },
@@ -116,4 +119,18 @@ test('native address schemas require the IR launch profile and preserve historic
   assert.equal(schema.$defs.nativeCompilerProfile.properties.viaIR.const, true);
   assert.equal(schema.$defs.compilerProfile.properties.optimizer.properties.runs.const, 1000);
   assert.equal(schema.$defs.compilerProfile.properties.viaIR.const, false);
+});
+
+test('zero-native drafts retain unselected ranges and validate explicit inventory with locked dust', () => {
+  for (const tickUpper of [null, 60, 6000]) {
+    const value = fixture(inputs => {
+      inputs.pool.quoteAsset.amountAtomic = '0';
+      inputs.seed.nativeFunding.amountWei = '0';
+      inputs.pool.fullRange = { minimumTick: tickUpper === null ? null : -887220, maximumTick: tickUpper };
+      inputs.pool.priceCandidates.nativeCurrency0 = tickUpper === null ? null : deriveNativeSeedCandidate({
+        nativeWei: '0', hkmnAtomic: inputs.pool.baseAsset.amountAtomic, tickLower: -887220, tickUpper, tickSpacing: 60 });
+    });
+    try { assert.equal(value.build().mode, 'address-derivation-pending'); }
+    finally { rmSync(value.directory, { recursive: true, force: true }); }
+  }
 });

@@ -29,7 +29,7 @@
       "status": "OPEN_FACT",
       "localBuildInfoCount": 1,
       "sourceCount": 36,
-      "sourceContentSha256": "sha256:bbd4568c007e1394c4268e5c641759ad344df4547f9a84180e805ca6cab885ca",
+      "sourceContentSha256": "sha256:d9cccd70bb4199e045def57cd6d6e8457a7beb1559810def24647fd547788f97",
       "reason": "Missing: address-bound constructor values and provider route fields. Resolve: materialize the provider graph after preflight and retain a fresh launch build. Verified alternative: this single pinned-profile build binds template bytecode and source content while all signable graph fields remain unset."
     },
     "solcLongVersion": "0.8.26+commit.8a97fa7a"
@@ -66,7 +66,7 @@
       "creationBytecodeHash": "0x07c73a86681594f0605efd4caa948a53aaf05db1ca9abf2779364b3d2618c374",
       "runtimeTemplateCodeHash": "0x7ff51070f093ca0416aaf3407fbdfb6b2f45f63e1f9395261ac7b6920f188e15",
       "runtimeCodeHash": null,
-      "artifactSha256": "sha256:7b3b75b1ddf253a3bcab2f7c9fecf18fc1085d44cb1db0f4b753d58d16c7c100",
+      "artifactSha256": "sha256:021386a1bfe2c753c658e82add866f0c7d1e393cad71046994fd0e03f1c46d0a",
       "libraries": []
     },
     {
@@ -98,7 +98,7 @@
       "creationBytecodeHash": "0x612740484e055828758b43eaccb7d5fdc6927423e6ab84b433221999a2ebce77",
       "runtimeTemplateCodeHash": "0xf66dd925b98becf4c6f4410abf52e0c95e31b407eb99115f19d1357b6cbf5334",
       "runtimeCodeHash": null,
-      "artifactSha256": "sha256:d618a60be3470c29cef847a9db46bd2c7870a7b1b262c607c98e0ef30ef8811a",
+      "artifactSha256": "sha256:943bf17d52aaf90de70640b18175430c043db9cb7e862468131da694c2fc0b3d",
       "libraries": []
     },
     {
@@ -155,10 +155,10 @@
         "decimals": 18,
         "amountAtomic": "0"
       },
-      "creationBytecodeHash": "0xefe377c78f3143219f2bbde8b98d48ade578ec858a318c97ed03bd247a542cd7",
-      "runtimeTemplateCodeHash": "0x48b586046a8849c27094560246a5e0feabe8a08c60b0a23c1008a0704482bfb0",
+      "creationBytecodeHash": "0xe82cda5819ee3ac8019358dcd1059b19ff5613e9586015423571e7a1db6b0ba3",
+      "runtimeTemplateCodeHash": "0x2a0f13f5f62c644c19223bf641fbe3ed93a6e7a2e5f02ff478a0eb7086c5f6ba",
       "runtimeCodeHash": null,
-      "artifactSha256": "sha256:3f1d8c2c6c0e12e4d2633c9003623c36abd419ebb5ba40c11f436a1295a23080",
+      "artifactSha256": "sha256:c823286da7036b9a31d66d2726e0297fd60405f01f34745606fbd70aa4c3ed6b",
       "libraries": []
     }
   ],
@@ -223,6 +223,6 @@
     "Missing: address-bound constructor arguments and encoded graph calls. Resolve: derive final target addresses, bind authority values and encode the required graph-call sequence. Verified alternative: retain null initializer calldata and prohibit signing.",
     "Missing: the minted position token ID. Resolve: read the PositionManager mint result after the owner seed transaction and bind it through PermanentPositionCustody.bindMintedPosition. Verified alternative: deploy custody with constructor tokenId 0 and do not claim a bound position before seed.",
     "Missing: final token and hook addresses. Resolve: derive the approved native graph and its canonical PoolKey and PoolId. Verified alternative: retain the native-currency0 price candidate and leave pool identifiers unset.",
-    "Missing: native seed maximum and explicit wei claim ceilings. Resolve: bind reviewed per-action native limits and gas reserves. The owner defers complete EUR 250 affordability proof until functional testing. Verified alternative: no seed or address-bound graph is materialized."
+    "Missing: any unselected inventory range and explicit wei claim ceilings. Resolve: bind reviewed seed inputs, native limits and transaction gas reserves. Verified alternative: no seed or address-bound graph is materialized until those required inputs are selected."
   ]
 }

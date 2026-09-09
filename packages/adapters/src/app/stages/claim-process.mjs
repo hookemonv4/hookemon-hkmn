@@ -497,6 +497,7 @@ export async function mutateClaimProcess({
     requireClaimMutationAuthority(preflightAuthority);
     // After the authority check, which needs no network, and still before any signer call.
     await assertClaimStillCoveredByHookLiability({ adapters, configured, context, request });
+    await cycleRepository.reserveProcessClaimUsd(context.cycleId, { hook: configured.hook, amountWei: request.amount.amountAtomic, limitMicroUsd: config.processClaimLimit6hMicroUsd ?? '25000000000' });
     const signed = await signerClient.evm.sign({
       transaction: approved.transaction,
       transactionPolicy: approved.policy,
@@ -525,6 +526,7 @@ export async function mutateClaimProcess({
     assertChainAttemptHash(record.attempt, material.hash);
     await assertClaimWalletNonce({ cycleRepository, context, reservation: walletReservation });
     requireClaimMutationAuthority(preflightAuthority);
+    await cycleRepository.reserveProcessClaimUsd(context.cycleId, { hook: configured.hook, amountWei: request.amount.amountAtomic, limitMicroUsd: config.processClaimLimit6hMicroUsd ?? '25000000000' });
     const transactionHash = await sendRawTransaction(adapters.robinhood.client, record.attempt.rawBytes);
     if (typeof transactionHash !== 'string' || transactionHash.toLowerCase() !== record.attempt.hash.toLowerCase()) {
       throw new Error('claim-process broadcaster returned a hash that does not match the persisted signed bytes');
@@ -787,6 +789,7 @@ export async function reconcileLiveClaimProcess({ adapters, config, cycleReposit
         source: configured.operations, recipient: request.call.to, amountWei: '0', calldataDigest: keccak256(request.call.data),
         nonce: String(parseTransaction(chain.attempt.rawBytes).nonce) } });
     await recordClaimCustodyLedger(cycleRepository, cycle, request, configured, adapters, gasProof, { creditPrincipal: false });
+    await cycleRepository.finalizeProcessClaimUsd(context.cycleId, { hook: configured.hook, proof: gasProof });
     throw new StageMutationRevertedError(
       'claim-process',
       `claimProcess transaction ${transactionHash} reverted on-chain`,
@@ -827,6 +830,7 @@ export async function reconcileLiveClaimProcess({ adapters, config, cycleReposit
     destination: request.destination,
   });
   await recordClaimCustodyLedger(cycleRepository, cycle, request, configured, adapters, nativeProof);
+  await cycleRepository.finalizeProcessClaimUsd(context.cycleId, { hook: configured.hook, proof: nativeProof });
   await cycleRepository.recordFinality(context.cycleId, 'claim-process', chain.attempt.requestDigest, evidence);
   await releaseClaimWalletNonce({ cycleRepository, context, configured });
   return evidence;
