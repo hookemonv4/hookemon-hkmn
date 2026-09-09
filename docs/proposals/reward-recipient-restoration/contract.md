@@ -43,7 +43,7 @@ Extend the existing paused local wrapper narrowly to accept rewardRecipientLimit
 
 ## Ownership and exact planned write set
 
-Canonical ledger CLI cwd: `/Users/kerim/Documents/ChatGPT/gacha/.worktrees/launch-repair/.worktrees/instruction-alignment-20260908`; resolved ledger: `/Users/kerim/Documents/ChatGPT/gacha/.worktrees/launch-repair/.v4`. Task REWARD-RECIPIENT-RESTORE-20260909 is claimed by reward-recipient-coordinator with token 1. Worktree: `.worktrees/reward-recipient-restore-20260909` under launch-repair, branch `codex/reward-recipient-restore-20260909`.
+Canonical ledger CLI cwd: `.worktrees/instruction-alignment-20260908` under the launch-repair repository; resolved ledger: `.v4` at that repository root. Task REWARD-RECIPIENT-RESTORE-20260909 is claimed by reward-recipient-coordinator with token 1. Worktree: `.worktrees/reward-recipient-restore-20260909` under launch-repair, branch `codex/reward-recipient-restore-20260909`.
 
 The main coordinator transferred implementation and integration-preparation ownership of PR52, PR54, PR50, PR56 and PR53 after the dashboard task was archived. Their published heads have been integrated as dependencies, and the canonical coordinator retains the serial main merge queue. PR59 remains independent. The approved source changes below are implemented in PR60; native EVM acceptance, current required CI and local deployment are tracked separately.
 

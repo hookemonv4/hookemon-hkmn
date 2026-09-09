@@ -1,6 +1,6 @@
 # Restoration proposal validation
 
-Baseline: `20eb8e4e`, Node v24.19.0, 2026-09-09. The initial proposal was owner-approved and its implementation is now present. Final local EVM acceptance, required CI and deployment are still tracked as pending until observed.
+Baseline: `20eb8e4e`, Node v24.19.0, 2026-09-09. The initial proposal was owner-approved and its implementation is now present. Local EVM acceptance and isolated Docker/browser checks are complete. Final integrated CI and the HTTPS deployment remain pending.
 
 The existing native characterization suite passed: 27 tests, zero failures, zero skips. Command:
 
@@ -14,7 +14,7 @@ This confirms existing native floor-rounding dust, manifest validation and full-
 
 An independent read-only review found no financial or compatibility defect in the contract. It found one unrelated JSON escape normalization in the proposed diff; the patch was regenerated preserving every unrelated serialized line, and its applicability was rechecked. This is proposal review only, not the final implementation money-path review.
 
-## Implementation acceptance to run after approval
+## Acceptance boundaries
 
 | Boundary | Required evidence |
 | --- | --- |
@@ -34,4 +34,8 @@ The isolated EVM uses test-only assets/accounts and local endpoint configuration
 
 Core selection and legacy distribution validation passed 118 focused tests. Cycle freezing, adapter eligibility, direct/supplementary handler compatibility and automation passed 124 focused tests. Composed service, production graph and stage-driver regression checks passed 143 tests. Operator configuration/API/persistence checks cover all ten values and fresh-process restart. Dashboard DOM checks passed 15 tests, including both alternating pack/reward saves without reload after the independently reproduced CAS defect was fixed. The local-only selection command guard passed 12 tests.
 
-The independent source money-path review found no allocation, frozen-cycle, legacy compatibility, supplementary or authorization defect. Its one reproduced dashboard CAS issue was fixed and the reviewer closed it. The opt-in Anvil suite exercises the actual native handler; see `docs/evidence/reward-selection-native/README.md` for its command and explicit fixture boundaries. Full six-case results and final required CI are reported in PR60 only once complete. These source tests do not establish a deployed selector or connected live runner.
+The independent source money-path review found no allocation, frozen-cycle, legacy compatibility, supplementary or authorization defect. Its one reproduced dashboard CAS issue was fixed and the reviewer closed it. The opt-in Anvil suite exercises the actual native handler; see `docs/evidence/reward-selection-native/README.md` for its command and explicit fixture boundaries. All six requested sizes now have passing local-EVM results: the first run passed 100 through 500 and lost the Anvil socket during 600; after bounding historical account-state retention, the unchanged 600-recipient assertions passed in 338.4 seconds. The failure cause was not proven. Together the successful cases finalized 2,100 payments and verified historical receipts, unique nonces, conservation and recovery without duplicate broadcasts.
+
+The isolated Docker candidate passed all ten settings through authenticated HTTP and browser save/readback. Restart preserved 600; a fresh browser page read the authoritative 200 value. An unavailable API visibly reported `Not confirmed: Failed to fetch`; a stale revision reported `Not confirmed: COMMAND_REJECTED`, without overwriting the saved value. These candidate checks do not establish the final HTTPS deployment or a connected live runner.
+
+The initial CI test suites passed, but integration checks rejected a stale native requirements binding and exact clean-room recognition after the approved spec delta. Clean-room checks also found two developer-home paths in the proposal and harness; those paths were removed. The binding and recognition refresh must preserve the reviewed final native/spec integration before the current required CI is considered complete.
