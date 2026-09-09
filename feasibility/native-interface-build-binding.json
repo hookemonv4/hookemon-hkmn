@@ -18,7 +18,7 @@
     "feasibility/phase3-offchain-interface-amendment.json": "3e91a11ca644f1664f670979a772628690caf4f3eeda53e0ecb2722f91daa6b0",
     "packages/contracts/foundry.toml": "2b1d724039460a2ca32166acddc989ef190a79d0f63b4a061c6ffb5ec2f8e258",
     "packages/contracts/remappings.txt": "1c4a68fb5b2e49b88df6bfbd52d85b24bc899aaf3cbb4367a680e2d455d02341",
-    "product/dependency-pins.json": "08dfb5908be991bdb57cb179564dacea8b88f04292547f67ecd2861f219e956f",
+    "product/dependency-pins.json": "f0005e9d7dfc35a885c2d170fc45e3e1c094d841695b6ce54efb106f58cade66",
     "specs/requirements.json": "750a12abf47a771d1181dd6a1782c1b6fbcc4eebb4632e5d1927bf52f4193425"
   }
 }
