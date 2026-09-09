@@ -82,3 +82,5 @@ The active Hookemon archive fixtures settle native ETH through zero Currency; re
 The native fixture binds its zero quote separately from `HISTORICAL_USDG`. The fork preflight still verifies the historical proxy, implementation, block and all external runtime pins before requesting RPC evidence.
 
 Quote rollback snapshots read account balances for native Currency and ERC20 balances for token Currency. The measured synthetic native graph hashes are recorded in `docs/evidence/native-archive-fork-20260908/observation.json`; they are distinct from production release approval.
+
+The buyer-funded inventory hook fixture binds the hook runtime and graph deployment hashes observed in the authorized archive run for source `f72dee56e906acfa9ec8a420f7d3471f0d57623b`. External infrastructure pins remain bound to the original archive checkpoint. A fixture hash observation alone is not a passing router or gas-envelope proof; all assertions must complete in the corrected run.
