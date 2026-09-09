@@ -80,7 +80,7 @@ const ARCHIVE_FORK_PROOF_TEST = readFileSync(join(REPO_ROOT, ARCHIVE_FORK_PROOF_
 const ARCHIVE_FORK_PROOF_TEST_SHA256 = sha256(ARCHIVE_FORK_PROOF_TEST);
 // Use the owner-approved current policy bytes with the current workflow; mutation tests remain below.
 const GITLEAKS_CONFIG = readFileSync(join(REPO_ROOT, '.gitleaks.toml'), 'utf8');
-assert.equal(sha256(GITLEAKS_CONFIG), '671e9b2dfa054104604ebffa452a592e3ec9ee6a534357f5261e9c83449fa195');
+assert.equal(sha256(GITLEAKS_CONFIG), '3d927f799e2adf7271a4b6d54018bf780b7bb4116478cdbd8b3b34d87322a074');
 const GITLEAKS_CONFIG_SHA256 = sha256(GITLEAKS_CONFIG);
 const CANONICAL_WORKFLOW = readFileSync(join(REPO_ROOT, '.github', 'workflows', 'v4-gates.yml'), 'utf8');
 const CANONICAL_FORK_PIN_CANARY = readFileSync(join(REPO_ROOT, '.github', 'workflows', 'fork-pin-canary.yml'), 'utf8');

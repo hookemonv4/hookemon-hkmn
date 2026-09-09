@@ -178,3 +178,34 @@ test('identity gate extracts the base checker despite ref and replacement poison
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+for (const scenario of [
+  { name: 'project GitHub merge', pass: true },
+  { name: 'ordinary commit with GitHub metadata', singleParent: true, pass: false },
+  { name: 'foreign repository merge', subject: 'Merge pull request #46 from foreign/codex/change', pass: false },
+  { name: 'foreign author email', email: 'foreign.invalid', pass: false },
+  { name: 'wrong GitHub committer email', committerEmail: 'wrong.invalid', pass: false },
+  { name: 'merge with attribution trailer', trailer: true, pass: false },
+]) {
+  test(`commit scanner checks ${scenario.name}`, () => {
+    const { root, base } = repository();
+    try {
+      commit(root, 'branch change');
+      const parent = head(root);
+      const tree = gitTree(root);
+      const args = ['-C', root, '-c', 'commit.gpgsign=false', 'commit-tree', tree, '-p', base];
+      if (!scenario.singleParent) args.push('-p', parent);
+      const subject = scenario.subject ?? 'Merge pull request #46 from hookemonv4/codex/change';
+      const message = subject + (scenario.trailer ? '\n\n' + ['Co-', 'Authored-By: Person <person.invalid>'].join('') : '');
+      const tip = execFileSync('git', args, { input: message, encoding: 'utf8', env: {
+        ...process.env, GIT_AUTHOR_NAME: 'hookemon', GIT_AUTHOR_EMAIL: scenario.email ?? projectIdentity.email,
+        GIT_COMMITTER_NAME: 'GitHub', GIT_COMMITTER_EMAIL: scenario.committerEmail ?? 'noreply@github.com',
+      } }).trim();
+      const result = scan(root, base, tip);
+      assert.equal(result.status, scenario.pass ? 0 : 1, result.stdout + result.stderr);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+}
+function gitTree(root) {
+  return execFileSync('git', ['-C', root, 'rev-parse', 'HEAD^{tree}'], { encoding: 'utf8' }).trim();
+}
