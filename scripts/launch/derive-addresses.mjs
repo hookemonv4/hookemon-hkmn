@@ -29,7 +29,7 @@ import {
   satisfiesMask,
 } from '../mine-hook-address.mjs';
 import { deriveSeedIntent } from '../programmable/lib/seed-intent.mjs';
-import { deriveNativePriceCandidate } from '../programmable/lib/phase3-release.mjs';
+import { deriveNativeSeedCandidate } from '../programmable/lib/phase3-release.mjs';
 import { keccak256 } from '../../packages/contracts/tooling/payout/canonical-merkle-sum.mjs';
 
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/;
@@ -825,10 +825,10 @@ function validateLaunchInputs(value) {
   let priceCandidates;
   if (native) {
     if (value.pool.hkmnAtomic !== '1000000000000000000000000000') fail('pool.hkmnAtomic must bind the complete HKMN stock');
-    const candidate = deriveNativePriceCandidate({ nativeWei: value.pool.seedMaximumWei, hkmnAtomic: value.pool.hkmnAtomic });
     expectExactKeys(value.seedIntent, ['payer', 'tickLower', 'tickUpper', 'maxDeadlineSeconds'], 'seedIntent');
+    const candidate = deriveNativeSeedCandidate({ nativeWei: value.pool.seedMaximumWei, hkmnAtomic: value.pool.hkmnAtomic, ...value.seedIntent, tickSpacing: value.pool.tickSpacing });
     deriveSeedIntent({ ...candidate, ...value.seedIntent });
-    if (value.seedIntent.tickLower !== -887220 || value.seedIntent.tickUpper !== 887220) fail('native seed intent must bind the full range');
+    if (value.pool.seedMaximumWei !== '0' && (value.seedIntent.tickLower !== -887220 || value.seedIntent.tickUpper !== 887220)) fail('native seed intent must bind the full range');
     expectExactKeys(value.pool.priceCandidates.nativeCurrency0, ['sqrtPriceX96'], 'pool.priceCandidates.nativeCurrency0');
     if (value.pool.priceCandidates.nativeCurrency0.sqrtPriceX96 !== candidate.sqrtPriceX96) fail('native price does not bind the explicit seed maximum and complete stock');
     priceCandidates = { nativeCurrency0: { sqrtPriceX96: candidate.sqrtPriceX96 } };

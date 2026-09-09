@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { deriveNativePriceCandidate } from '../programmable/lib/phase3-release.mjs';
+import { deriveNativePriceCandidate, deriveNativeSeedCandidate, deriveTokenInventoryCandidate, sqrtPriceAtTick } from '../programmable/lib/phase3-release.mjs';
 import { SEED_CANONICAL_LIQUIDITY_SELECTOR, deriveSeedIntent, verifyMaterializedSeedTransaction } from '../programmable/lib/seed-intent.mjs';
 
 const address = (digit) => `0x${digit.repeat(40)}`;
@@ -49,4 +49,41 @@ test('native full-stock candidate preserves exact stock and maximum/refund conse
     assert.throws(() => deriveNativePriceCandidate({ nativeWei, hkmnAtomic: stock }), /canonical integer|uint128/);
   }
   assert.throws(() => deriveNativePriceCandidate({ usdgAtomic: '1000', hkmnAtomic: stock }), /nativeWei/);
+});
+
+test('zero-native inventory binds explicit aligned upper price and mechanical locked rounding', () => {
+  for (const [tickUpper, expectedDust] of [[0, '0'], [60, '0'], [6000, '1'], [60000, '13']]) {
+    const candidate = deriveNativeSeedCandidate({ nativeWei: '0', hkmnAtomic: stock,
+      tickLower: -887220, tickUpper, tickSpacing: 60 });
+    assert.equal(candidate.sqrtPriceX96, sqrtPriceAtTick(tickUpper).toString());
+    assert.equal(candidate.sqrtPriceX96, candidate.sqrtUpperX96);
+    assert.equal(candidate.amount0Max, '0');
+    assert.equal(candidate.consumedAmount0, '0');
+    assert.equal(candidate.lockedHkmnDust, expectedDust);
+    assert.equal(BigInt(candidate.consumedHkmn) + BigInt(candidate.lockedHkmnDust), BigInt(stock));
+    const span = BigInt(candidate.sqrtUpperX96) - BigInt(candidate.sqrtLowerX96);
+    const Q96 = 1n << 96n;
+    assert.equal(BigInt(candidate.liquidity), BigInt(stock) * Q96 / span);
+    assert((BigInt(candidate.liquidity) + 1n) * span > BigInt(stock) * Q96);
+    const intent = deriveSeedIntent({ ...candidate, payer: address('1'), tickLower: -887220, tickUpper, maxDeadlineSeconds: 900 });
+    const transaction = { to: address('2'), value: { chainId: '4663', assetId: 'native', decimals: 18, amountAtomic: '0' },
+      data: encode({ ...intent, deadline: '1700000900', custody: address('3') }) };
+    const verify = () => verifyMaterializedSeedTransaction({ transaction, chainId: '4663', expectedHook: address('2'),
+      expectedCustody: address('3'), expectedIntent: intent, referenceTimestamp: '1700000000' });
+    assert.equal(verify().digest, intent.digest);
+    transaction.value.amountAtomic = '1';
+    assert.throws(verify, /native amount0Max/);
+  }
+});
+
+test('inventory derivation refuses missing inputs, invalid ranges and liquidity beyond pinned limits', () => {
+  const input = { hkmnAtomic: stock, tickLower: -887220, tickUpper: 60, tickSpacing: 60 };
+  for (const change of [{ tickLower: null }, { tickUpper: undefined }, { tickSpacing: undefined },
+    { tickLower: 60 }, { tickUpper: -887220 }, { tickLower: -887280 }, { tickUpper: 887280 },
+    { tickUpper: 61 }, { tickSpacing: 0 }, { tickSpacing: 32768 }]) {
+    assert.throws(() => deriveTokenInventoryCandidate({ ...input, ...change }), /explicit valid aligned/);
+  }
+  assert.throws(() => deriveTokenInventoryCandidate({ ...input, tickLower: -887272, tickUpper: 887272, tickSpacing: 1 }), /initialization bounds/);
+  assert.throws(() => deriveTokenInventoryCandidate({ ...input, hkmnAtomic: ((1n << 128n) - 1n).toString(), tickLower: 0 }), /per-tick bounds/);
+  assert.throws(() => deriveTokenInventoryCandidate({ ...input, hkmnAtomic: '1', tickUpper: 887220 }), /per-tick bounds/);
 });

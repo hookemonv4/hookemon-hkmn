@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import test from 'node:test';
 import { buildLaunchPackage, normalizePhaseThreeSubmissionDraft, normalizePhaseThreeAddressManifestDraft } from '../programmable/lib/package.mjs';
+import { deriveNativeSeedCandidate } from '../programmable/lib/phase3-release.mjs';
 import { validateJsonSchema } from '../programmable/lib/json-schema.mjs';
 
 const root = resolve(import.meta.dirname, '../..');
@@ -116,4 +117,18 @@ test('native address schemas require the IR launch profile and preserve historic
   assert.equal(schema.$defs.nativeCompilerProfile.properties.viaIR.const, true);
   assert.equal(schema.$defs.compilerProfile.properties.optimizer.properties.runs.const, 1000);
   assert.equal(schema.$defs.compilerProfile.properties.viaIR.const, false);
+});
+
+test('zero-native drafts retain unselected ranges and validate explicit inventory with locked dust', () => {
+  for (const tickUpper of [null, 60, 6000]) {
+    const value = fixture(inputs => {
+      inputs.pool.quoteAsset.amountAtomic = '0';
+      inputs.seed.nativeFunding.amountWei = '0';
+      inputs.pool.fullRange = { minimumTick: tickUpper === null ? null : -887220, maximumTick: tickUpper };
+      inputs.pool.priceCandidates.nativeCurrency0 = tickUpper === null ? null : deriveNativeSeedCandidate({
+        nativeWei: '0', hkmnAtomic: inputs.pool.baseAsset.amountAtomic, tickLower: -887220, tickUpper, tickSpacing: 60 });
+    });
+    try { assert.equal(value.build().mode, 'address-derivation-pending'); }
+    finally { rmSync(value.directory, { recursive: true, force: true }); }
+  }
 });
