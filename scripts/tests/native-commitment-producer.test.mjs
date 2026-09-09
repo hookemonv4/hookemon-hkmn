@@ -1,6 +1,41 @@
 import assert from 'node:assert/strict';
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
-import { prepareNativeCommitmentInputs } from '../programmable/lib/native-commitment-producer.mjs';
+import { prepareNativeCommitmentInputs, readNativeRequirementsBytes } from '../programmable/lib/native-commitment-producer.mjs';
+
+test('requirements binding accepts the approved revision 74 and refuses changed bytes', (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'native-requirements-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  mkdirSync(join(root, 'specs'));
+  const approved = readFileSync(new URL('../../specs/requirements.json', import.meta.url));
+  assert.equal(JSON.parse(approved).revision, 74);
+  const target = join(root, 'specs/requirements.json');
+  writeFileSync(target, approved);
+  assert.deepEqual(readNativeRequirementsBytes(root), approved);
+
+  const changed = JSON.parse(approved);
+  changed.requirements[0].statement += ' Changed input.';
+  writeFileSync(target, JSON.stringify(changed));
+  assert.throws(() => readNativeRequirementsBytes(root), /frozen revision-74 requirements mismatch/);
+  writeFileSync(target, Buffer.concat([approved, Buffer.from('\n')]));
+  assert.throws(() => readNativeRequirementsBytes(root), /frozen revision-74 requirements mismatch/);
+});
+
+test('requirements binding refuses linked files and linked specs directories', (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'native-requirements-link-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const real = join(root, 'real');
+  mkdirSync(real);
+  writeFileSync(join(real, 'requirements.json'), readFileSync(new URL('../../specs/requirements.json', import.meta.url)));
+  symlinkSync(real, join(root, 'specs'), 'dir');
+  assert.throws(() => readNativeRequirementsBytes(root), /regular file without symlinks/);
+  rmSync(join(root, 'specs'));
+  mkdirSync(join(root, 'specs'));
+  symlinkSync(join(real, 'requirements.json'), join(root, 'specs/requirements.json'));
+  assert.throws(() => readNativeRequirementsBytes(root), /regular file without symlinks/);
+});
 
 // These are refusal-boundary tests. They do not synthesize live observer provenance, run a
 // compiler, or claim that the currently incomplete external runtime evidence has become usable.
