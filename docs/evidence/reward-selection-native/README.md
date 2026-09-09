@@ -10,4 +10,4 @@ The explicit test authority wraps a local signer. A small atomic JSON store impl
 
 Assertions require exactly N positive finalized payments with distinct transaction hashes and nonces, recipient balances equal to allocations, zero balances for all 17 unselected holders, exact paid-principal plus dust conservation, receipt-authenticated gas amounts, and an Operations balance decrease equal to principal plus gas. The selected count, full eligible count and excluded amount are checked independently.
 
-The acceptance entrypoint deliberately lacks the `.test.mjs` suffix so ordinary unit-test discovery does not launch this explicit local-EVM suite. Missing Anvil or unsuccessful cases fail; the suite has no successful skip fallback. The companion run record contains only observed results.
+The acceptance entrypoint deliberately lacks the `.test.mjs` suffix so ordinary unit-test discovery does not launch this explicit local-EVM suite. Missing Anvil or unsuccessful cases fail; the suite has no successful skip fallback. The command emits one observed-result record for each completed size.

@@ -45,9 +45,9 @@ Extend the existing paused local wrapper narrowly to accept rewardRecipientLimit
 
 Canonical ledger CLI cwd: `/Users/kerim/Documents/ChatGPT/gacha/.worktrees/launch-repair/.worktrees/instruction-alignment-20260908`; resolved ledger: `/Users/kerim/Documents/ChatGPT/gacha/.worktrees/launch-repair/.v4`. Task REWARD-RECIPIENT-RESTORE-20260909 is claimed by reward-recipient-coordinator with token 1. Worktree: `.worktrees/reward-recipient-restore-20260909` under launch-repair, branch `codex/reward-recipient-restore-20260909`.
 
-The current change owns only `docs/proposals/reward-recipient-restoration/{contract.md,requirements.patch,validation.md}`. The dashboard coordinator retains PR52, PR54, PR50, PR56 and PR53 in that serial order. Their shared source files must not be edited until integration ownership is handed over. PR59 remains independent.
+The main coordinator transferred implementation and integration-preparation ownership of PR52, PR54, PR50, PR56 and PR53 after the dashboard task was archived. Their published heads have been integrated as dependencies, and the canonical coordinator retains the serial main merge queue. PR59 remains independent. The approved source changes below are implemented in PR60; native EVM acceptance, current required CI and local deployment are tracked separately.
 
-After approval and integration handoff, the planned source write set is:
+The implementation source write set is:
 
 - `specs/requirements.json` through the reviewed revision, and supported task-binding/evidence outputs only through the CLI;
 - `packages/runner/src/config/reward-recipient-selection.mjs` (new shared policy), `config/state-schema.mjs`, `operator/state-file.mjs`, `operator/control.mjs`;
@@ -59,11 +59,11 @@ After approval and integration handoff, the planned source write set is:
 - affected `docs/modules/{operator-controls,cycle-repository,eligibility-snapshot,direct-payout,automation,composition-root,dashboard}.md` cards;
 - the local wrapper `.session/local-dashboard.mjs`, Docker build copy `.session/docker-dashboard/app/.session/local-dashboard.mjs` and Docker build context in the dashboard-post-test worktree, only after explicit coordinator handoff. These local deployment files are not part of the source PR.
 
-No Solidity, signing policy, dependency manifest, lockfile or unrelated CI edit is planned. Inspect `apps/web` for shared-contract compatibility; expand the write set only on a demonstrated incompatible consumer, recording exact files before edits.
+No Solidity, signing policy, dependency manifest, lockfile or unrelated CI source was changed. Two demonstrated `apps/web` active-cycle null-compatibility fixes affect `app/operator/OperatorControlPanel.tsx` and `app/operator/operator-types.ts`. The local wrapper delegates to the new tested `packages/dashboard/src/local-selection-policy.mjs` guard.
 
 ## Authority and requirement binding
 
-The owner's pasted request establishes the selectable count and preservation of native payment boundaries. The direct-balance versus historical time-weighted interpretation, native floor-and-carry preservation, and version/migration contract above are the concrete revision offered for approval under repository R2. Do not label this proposal authoritative or record owner approval before an affirmative response. Once approved, bind the restoration task and tests to the four requirements at the applied revision through supported ledger tools.
+The owner's pasted request establishes the selectable count and preservation of native payment boundaries. The owner approved the direct-balance interpretation, native floor-and-carry preservation and version/migration contract under R2; `owner-approval.md` records the exact source. Bind the restoration task and tests to the four requirements at the applied revision through supported ledger tools; this remains canonical coordinator work, not a manual projection edit.
 
 Task creation persisted and claim readback succeeded, but task projection reports the existing historical completion commit 34fc4006e3f05a60d6a3cd9fc8383b445330aa62 as unreachable from the coordinator HEAD. This proposal does not repair unrelated history, edit generated projections or fabricate a completion. Binding and completion must use a coordinator state where the supported checks succeed.
 

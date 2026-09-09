@@ -1,6 +1,6 @@
 # Restoration proposal validation
 
-Baseline: `20eb8e4e`, Node v24.19.0, 2026-09-09. No restored selector or payout implementation exists in this change.
+Baseline: `20eb8e4e`, Node v24.19.0, 2026-09-09. The initial proposal was owner-approved and its implementation is now present. Final local EVM acceptance, required CI and deployment are still tracked as pending until observed.
 
 The existing native characterization suite passed: 27 tests, zero failures, zero skips. Command:
 
@@ -29,3 +29,9 @@ An independent read-only review found no financial or compatibility defect in th
 | Final integration | Independent implementation money-path review, only reproduced fixes and affected retests, current required CI, serial non-draft merge under applicable authority. |
 
 The isolated EVM uses test-only assets/accounts and local endpoint configuration. No live wallet or mainnet broadcast belongs to these acceptance tests. Synthetic FINALIZED records alone are insufficient for the actual-handler row. Capacity PR59 remains independently useful, not restoration acceptance evidence.
+
+## Implementation checks
+
+Core selection and legacy distribution validation passed 118 focused tests. Cycle freezing, adapter eligibility, direct/supplementary handler compatibility and automation passed 124 focused tests. Composed service, production graph and stage-driver regression checks passed 143 tests. Operator configuration/API/persistence checks cover all ten values and fresh-process restart. Dashboard DOM checks passed 15 tests, including both alternating pack/reward saves without reload after the independently reproduced CAS defect was fixed. The local-only selection command guard passed 12 tests.
+
+The independent source money-path review found no allocation, frozen-cycle, legacy compatibility, supplementary or authorization defect. Its one reproduced dashboard CAS issue was fixed and the reviewer closed it. The opt-in Anvil suite exercises the actual native handler; see `docs/evidence/reward-selection-native/README.md` for its command and explicit fixture boundaries. Full six-case results and final required CI are reported in PR60 only once complete. These source tests do not establish a deployed selector or connected live runner.
