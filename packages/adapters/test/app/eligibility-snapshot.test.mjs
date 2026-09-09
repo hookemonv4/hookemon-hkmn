@@ -2,7 +2,7 @@ import { compileDirectPayoutPlan, createNativePayoutAmount } from '../../../runn
 import { createDirectPayoutState, assertPayoutManifestUnchanged } from '../../src/app/stages/payout.mjs';
 import { createRewardSelectionSnapshot } from '../../../runner/src/automation/reward-selection-snapshot.mjs';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -12,6 +12,7 @@ import { ERC20_TRANSFER_TOPIC } from '../../src/robinhood-rpc.mjs';
 import { CycleRepository } from '../../src/app/cycle-repository.mjs';
 import {
   freezeEligibilityBeforeClaim,
+  evaluatePayoutFeasibility,
   reconcileLiveEligibilitySnapshot,
 } from '../../src/app/stages/eligibility-snapshot.mjs';
 
@@ -903,5 +904,92 @@ for (const limit of [100,200,300,400,500,600]) {
     assert.doesNotThrow(() => assertPayoutManifestUnchanged(restored, plan));
     config.eligibilitySnapshot.feasibility.nativeBalanceWei = '1';
     await assert.rejects(freezeEligibilityBeforeClaim({ adapters: dualSourceAdapters(client), config, context: { cycleId: cycle.cycleId, rewardSelection: cycle.rewardSelection } }), /feasibility/);
+  });
+}
+
+for (const count of [100, 200, 300, 400, 500, 600]) {
+test(`capacity matrix accepts ${count} recipients through the actual eligibility gate`, async t => {
+  const { directory, repository, cycleId } = await durableCycle(t);
+  const holders = Array.from({ length: count }, (_, index) => `0x${(index + 5000).toString(16).padStart(40, '0')}`);
+  const client = fakeRpc({
+    hashes: new Map([[8n, hash('7')]]),
+    logs: holders.map((holder, index) => rawTransfer({
+      blockNumber: 1,
+      logIndex: index,
+      from: ZERO_ADDRESS,
+      to: holder,
+      value: 1,
+    })),
+  });
+  const launchManifest = {
+    ...baseConfig().eligibilitySnapshot.launchManifest,
+    supply: { chainId: '4663', assetId: TOKEN, decimals: 18, amountAtomic: String(count) },
+  };
+  const config = baseConfig({
+    eligibilitySnapshot: {
+      ...baseConfig().eligibilitySnapshot,
+      launchManifest,
+      launchManifestDigest: launchManifestDigest(launchManifest),
+      feasibility: {
+        ...baseConfig().eligibilitySnapshot.feasibility,
+        maxRecipientCount: count,
+        maxTransactionCount: count,
+        nativeBalanceWei: '2000000000',
+      },
+    },
+  });
+
+  const manifest = await freezeEligibilityBeforeClaim({
+    adapters: dualSourceAdapters(client),
+    config,
+    context: { cycleId, assertLease() {} },
+  });
+
+  assert.equal(manifest.entries.length, count);
+  assert.equal(manifest.feasibility.recipientCount, count);
+  assert.equal(manifest.feasibility.transactionCount, count);
+  await repository.prepareStage(cycleId, 'eligibility-snapshot');
+  await repository.completeStage(cycleId, 'eligibility-snapshot', manifest);
+  // Paging actually happened: the durable store wrote its stage-evidence manifest for this cycle.
+  const stageDirectory = join(directory, 'stage-evidence', encodeURIComponent(cycleId), encodeURIComponent('eligibility-snapshot'));
+  const pagedManifest = JSON.parse(await readFile(join(stageDirectory, 'manifest.json'), 'utf8'));
+  assert.equal(pagedManifest.schema, 'hookemon.durable-cycle-store.paged-stage-evidence-manifest.v1');
+  assert.equal(pagedManifest.cycleId, cycleId);
+  assert.equal(pagedManifest.stage, 'eligibility-snapshot');
+  const reopened = await CycleRepository.open(directory);
+  const persisted = await reopened.readStage(cycleId, 'eligibility-snapshot');
+  assert.equal(persisted.status, 'COMPLETE');
+  assert.deepEqual(persisted.evidence, manifest);
+  // Every eligible holder remains present at the configured boundary.
+  assert.equal(manifest.feasibility.maxRecipientCount, count);
+  assert.equal(manifest.feasibility.maxTransactionCount, count);
+  assert.equal(manifest.feasibility.feasible, true);
+  assert.equal(manifest.feasibility.reason, null);
+});
+
+}
+
+for (const count of [100, 200, 300, 400, 500, 600]) {
+  test(`capacity matrix ${count} preserves all recipients and rejects count or fee deficits`, () => {
+    const entries = Array.from({ length: count }, (_, index) => ({ recipient: `0x${(index + 5000).toString(16).padStart(40, '0')}` }));
+    const required = 10n + BigInt(count) * 50000n * 2n;
+    const feasibility = { chainId: '4663', maxRecipientCount: count, maxTransactionCount: count,
+      measuredTransferGas: 50000n, maxGasPriceWei: 2n, nativeReserveWei: 10n, nativeBalanceWei: required };
+    const accepted = evaluatePayoutFeasibility({ entries, feasibility });
+    assert.equal(accepted.feasible, true);
+    assert.equal(accepted.requiredNativeAmount.amountAtomic, String(required));
+    for (const [field, reason] of [
+      ['maxRecipientCount', 'recipient-count-exceeds-configured-maximum'],
+      ['maxTransactionCount', 'transaction-count-exceeds-configured-maximum'],
+    ]) {
+      const refused = evaluatePayoutFeasibility({ entries, feasibility: { ...feasibility, [field]: count - 1 } });
+      assert.equal(refused.feasible, false);
+      assert.equal(refused.recipientCount, count);
+      assert.equal(refused.reason, reason);
+    }
+    const short = evaluatePayoutFeasibility({ entries, feasibility: { ...feasibility, nativeBalanceWei: required - 1n } });
+    assert.equal(short.feasible, false);
+    assert.equal(short.reason, 'native-balance-below-reserve-and-fee(deficitWei=1)');
+    assert.equal(entries.length, count);
   });
 }

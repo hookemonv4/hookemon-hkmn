@@ -26,7 +26,8 @@ The runtime configuration requires `chainId`, `hkmn.{address,deployBlock,decimal
 - The stage only emits `dual-source` completeness evidence. Source IDs distinguish configured clients but do not themselves authenticate provider provenance; a frozen provider-authority binding is required before that provenance can be treated as independent.
 - The excluded set comes only from the launch manifest and role history. Unlisted contract recipients remain eligible at their own addresses.
 - Full holder replay remains complete. A cycle with a frozen reward policy selects the top N positive non-excluded direct balances, breaking ties by normalized address. Its v2 manifest binds the complete holder snapshot, selected count, policy digest and selected/unselected/excluded balance totals. Historical cycles without a policy retain all eligible holders.
-- Selected-cycle feasibility uses the selected recipient count conservatively and never shrinks selection to fit gas or transaction limits. The independent direct-payout capacity ceiling is 10,000; selected limits are 100 through 1000. Full replay must also fit its separately validated evidence storage bounds.
+- Feasibility never shrinks the applicable holder set to fit gas or transaction limits. Selected-cycle feasibility uses the selected recipient count conservatively; historical cycles evaluate every eligible holder. Recipient and transaction admission limits remain the lower of the configured maximum and the independent 10,000-recipient implementation ceiling (`DIRECT_PAYOUT_RECIPIENT_LIMIT`). The owner selection options of 100 through 1000 are separate from these capacity limits.
+- Completed manifests that exceed the journal payload limit use immutable paged stage evidence. The journal retains a content-addressed reference; reopening resolves and verifies the full manifest, including full replay evidence for selected cycles. Real eligibility-manifest persistence is tested at 100 through 600 holders; the ceiling alone does not establish persistence capacity.
 
 ## State transitions
 
@@ -34,13 +35,15 @@ The runtime configuration requires `chainId`, `hkmn.{address,deployBlock,decimal
 - `AutomatedCycleService` durably completes `eligibility-snapshot` from that evidence before it can prepare `claim-process`.
 - A hash, log, source, supply, or configuration verification failure holds the cycle as `HELD_DATA_UNVERIFIED`; an exceeded envelope holds it as `HELD_UNAVAILABLE`.
 - A detected stale lease is rethrown without issuing a terminal hold. The repository transition remains responsible for atomic fencing across workers.
-- A held envelope refusal records block identity, holder-snapshot digest, source evidence, and feasibility summary without shortening the holder set. The current bounded journal cannot persist a complete large entry array.
+- A held envelope refusal records block identity, holder-snapshot digest, source evidence, and feasibility summary without shortening the holder set. The hold summary does not replace the complete successful manifest.
 
 ## Operational commands
 
 - Provide a verified depth for `robinhood-stage-finality-v1`; an absent depth is refused before any RPC read.
 - Supply a content-addressed launch manifest and two genuinely independent log sources before reconciling.
-- Keep measured transfer gas, gas-price ceiling, native reserve, native balance and transaction capacity current. Store large evidence through the existing content-addressed paged-stage path; a selected count does not permit truncating full replay evidence.
+- Keep measured transfer gas, gas-price ceiling, native reserve, native balance, and recipient/transaction limits current before reconciliation. Raising a configured maximum never bypasses the 10,000-recipient implementation ceiling or the native fee check.
+- Run `node --test --test-name-pattern='capacity matrix' packages/adapters/test/app/eligibility-snapshot.test.mjs` for the 100, 200, 300, 400, 500 and 600-holder cases: admission through the actual gate, `completeStage` persistence that writes the paged `stage-evidence/<cycleId>/eligibility-snapshot/manifest.json`, reopen of the full manifest, and the exact `recipient-count-exceeds-configured-maximum`, `transaction-count-exceeds-configured-maximum` and `native-balance-below-reserve-and-fee(deficitWei=1)` refusals. This matrix verifies historical all-holder manifests. The `selection` tests in the same file additionally persist real v2 manifests and v3 payout plans for 100 through 600 selected holders, retain excess and excluded holders in full evidence, and reopen the frozen selection. Repository-only fixtures do not replace these adapter-produced manifest checks. RPC logs are fixtures; these checks do not measure live payment throughput.
+- Do not read the 10,000-recipient ceiling as tested persistence capacity. The 10,000-holder test in the same file (`accepts 10,000 recipients through the actual feasibility gate`) proves gate arithmetic and admission in memory only; it never completes a stage or reopens a repository. The 10,000-recipient durable proofs cover payout state, not this manifest: `packages/adapters/test/app/payout-resume-scale.test.mjs` persists and reopens prepared and synthetic finalized payout state for 10,000 recipients through `DurableCycleStore.persistPagedPayoutState`.
 - Ensure the production composition supplies token decimals, snapshot configuration, and both log clients. Missing values fail closed before claim processing.
 
 ## Recovery pointers

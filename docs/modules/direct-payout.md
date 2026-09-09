@@ -39,3 +39,9 @@ Inspect the frozen plan, paged recipient state, wallet nonce reservation, native
 Recovery pointers: [rejected recipient](../runbooks/payout-recipient-frozen.md), [holder envelope](../runbooks/payout-holder-envelope.md), [nonce interference](../runbooks/evm-nonce-interference.md), and [ambiguous transaction](../runbooks/evm-transaction-ambiguity.md).
 
 Supplementary payout initialization requires an independently read canonical native balance before persisting recipient state. The balance must cover the distributable principal still unpaid, maximum gas for unresolved recipients, and the fixed native reserve. Finalized principal and completed transaction gas are not charged again on resume; dust and quarantined principal remain reserved. Missing or malformed balance evidence refuses before persistence or signing. A fully terminal recipient set needs no new spending admission.
+
+## Recipient capacity verification
+
+The focused scale matrix covers 100, 200, 300, 400, 500 and 600 recipients. It checks complete allocation, unique recipients, principal-plus-dust conservation, prepared and synthetic finalized payout states through the actual paged store, and rejection of insufficient recipient, transaction or fee envelopes. Synthetic finality validates state shape and persistence; it is not evidence of on-chain payments or live throughput.
+
+Run `node --test --test-name-pattern='(?:100|200|300|400|500|600) recipients' packages/adapters/test/app/payout-resume-scale.test.mjs` with the locked adapter dependencies installed. The recipient count is derived from the full eligible snapshot. A configured maximum does not choose a fixed number of recipients, and the owner dashboard does not expose this maximum as a setting.
