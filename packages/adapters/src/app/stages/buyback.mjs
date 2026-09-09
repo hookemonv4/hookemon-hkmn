@@ -17,7 +17,8 @@ import {
 } from '../../signing/transaction-policy.mjs';
 import { collectorPolicyForStage } from '../../signing/collector-policy-loader.mjs';
 import {
-  COLLECTOR_BUYBACK_SETTLE_INSTRUCTION_INDEX,
+  collectorBuybackProgramId,
+  isCollectorCoreBuybackBinding,
   createCollectorBuybackPolicy,
 } from '../../signing/collector-buyback-policy.mjs';
 import { resolveCollectorProductionBinding } from '../../signing/collector-production-binding.mjs';
@@ -147,15 +148,16 @@ export function buildCollectorBuybackRequest({ config, mint }) {
   return Object.freeze(request);
 }
 
-function trustedSolanaDecodeOptions({ adapters, config }) {
-  if (typeof config?.solana?.blockhashContextResolver !== 'function') {
+function trustedSolanaDecodeOptions({ adapters, config, coreProfile = false }) {
+  const resolver = coreProfile ? config?.solana?.originalBlockhashContextResolver : config?.solana?.blockhashContextResolver;
+  if (typeof resolver !== 'function') {
     throw new Error('buyback requires a trusted Solana blockhashContextResolver');
   }
   return Object.freeze({
     family: 'solana',
     chainId: config.solana.chainId,
     lookupTableResolver: config.solana.lookupTableResolver,
-    blockhashContextResolver: config.solana.blockhashContextResolver,
+    blockhashContextResolver: resolver,
     currentBlockHeightResolver: async () => readBlockHeight(adapters.solana.client),
   });
 }
@@ -224,7 +226,7 @@ async function holdPack(cycleRepository, config, context, packIndex, memo, mint,
 }
 
 function decodedBindsBuyback({ decoded, owner, mint, buyback, proceedsAccount = null }) {
-  const hasOwner = decoded.feePayer === owner && decoded.requiredSigners.includes(owner);
+  const hasOwner = decoded.requiredSigners.includes(owner) && (buyback.coreProfile ? decoded.requiredSigners[1] === owner : decoded.feePayer === owner);
   const hasProgram = decoded.programIds.includes(buyback.collectorProgramId);
   const hasRecipient = decoded.destination === buyback.collectorRecipient
     || decoded.instructions.some(instruction => instruction.accounts.some(account => account.address === buyback.collectorRecipient));
@@ -249,10 +251,11 @@ async function decodeAndSign({ transaction, mint, adapters, config, money, signe
   const productionBinding = productionBindingInput === null ? null : createCollectorBuybackPolicy(productionBindingInput);
   const buyback = productionBinding === null ? configuredBuyback(config) : {
     policy: productionBinding,
-    collectorProgramId: productionBindingInput.binding.instructions[COLLECTOR_BUYBACK_SETTLE_INSTRUCTION_INDEX].programId,
+    collectorProgramId: collectorBuybackProgramId(productionBindingInput.binding),
+    coreProfile: isCollectorCoreBuybackBinding(productionBindingInput.binding),
     collectorRecipient: productionBindingInput.binding.collectorRecipient,
   };
-  const decodeOptions = trustedSolanaDecodeOptions({ adapters, config });
+  const decodeOptions = trustedSolanaDecodeOptions({ adapters, config, coreProfile: buyback.coreProfile === true });
   const decoded = await decodeProviderTransaction({ ...decodeOptions, transaction });
   if (!decoded.blockhash || !(await readBlockhashValidity(adapters.solana.client, decoded.blockhash))) {
     throw new Error('buyback provider transaction blockhash is not valid before signing');
@@ -283,6 +286,7 @@ async function decodeAndSign({ transaction, mint, adapters, config, money, signe
       },
     },
     policy: buyback.policy,
+    solanaOperatorAddress: buyback.coreProfile ? config.accounts.solana : undefined,
     decodeOptions,
     broadcast: async signed => {
       if (!(await readBlockhashValidity(adapters.solana.client, decoded.blockhash))) {
@@ -475,6 +479,9 @@ async function sellPack({ adapters, config, signerClient, cycleRepository, conte
       stage: 'buyback',
       config,
     });
+  if (config?.execution?.profile === 'production' && resolvedBinding === null) {
+    throw new Error('production buyback requires a resolved production binding before provider mutation');
+  }
   // The resolved binding's own proceeds asset identity must already agree with the configured
   // settlement asset before any provider mutation: a mismatched trusted registry entry refuses
   // here rather than generating a candidate and relying on a later transfer/receipt failure.
@@ -483,6 +490,9 @@ async function sellPack({ adapters, config, signerClient, cycleRepository, conte
     return holdPack(cycleRepository, config, context, pack.packIndex, pack.memo, pack.mint, 'HELD_DATA_UNVERIFIED', {
       stage: 'buyback', memo: pack.memo, mint: pack.mint, reason: 'resolved buyback binding proceeds asset does not match the configured settlement asset',
     });
+  }
+  if (isCollectorCoreBuybackBinding(resolvedBinding?.binding) && typeof config.solana.originalBlockhashContextResolver !== 'function') {
+    throw new Error('Core buyback requires an original blockhash resolver before provider mutation');
   }
   // From here on, a thrown error is provider-ambiguous: the mutation may or may not have landed
   // server-side. This pack is marked "unknown", not held — reconciliation resolves it from
@@ -504,8 +514,21 @@ async function sellPack({ adapters, config, signerClient, cycleRepository, conte
     // context is read fresh here, per pack, like purchase.mjs's own per-pack blockhash read.
     let productionBindingInput = null;
     if (resolvedBinding !== null) {
-      const latest = await readUsableLatestBlockhash(adapters.solana.client);
-      const currentHeight = await readBlockHeight(adapters.solana.client);
+      let blockhashContext;
+      const coreProfile = isCollectorCoreBuybackBinding(resolvedBinding.binding);
+      if (coreProfile) {
+        if (typeof config.solana.originalBlockhashContextResolver !== 'function') throw new Error('Core buyback requires an original blockhash resolver');
+        const observed = await decodeProviderTransaction({ ...trustedSolanaDecodeOptions({ adapters, config, coreProfile: true }), transaction: built.serializedTransaction });
+        if (observed.deadline?.type !== 'rpc-blockhash-validity' || observed.deadline.valid !== true) throw new Error('Core buyback original blockhash is invalid');
+        // The decoder has already required the RPC observation's hash to equal the message hash.
+        // Its normalized deadline deliberately omits that duplicate hash field.
+        const { type, valid, observedSlot } = observed.deadline;
+        blockhashContext = { type, blockhash: observed.blockhash, valid, observedSlot };
+      } else {
+        const latest = await readUsableLatestBlockhash(adapters.solana.client);
+        const currentHeight = await readBlockHeight(adapters.solana.client);
+        blockhashContext = { blockhash: latest.blockhash, lastValidBlockHeight: String(latest.lastValidBlockHeight), currentBlockHeight: currentHeight.toString() };
+      }
       productionBindingInput = {
         binding: resolvedBinding.binding,
         expectedDigest: resolvedBinding.expectedDigest,
@@ -514,16 +537,13 @@ async function sellPack({ adapters, config, signerClient, cycleRepository, conte
           proceedsDestination: prepared.settlementAccount,
           openedAssetMint: pack.mint,
           currentOwner: observedOwner,
+          ...(coreProfile ? { memoValue: pack.memo } : {}),
           quoteAtomic: quote.amountAtomic,
           minimumAtomic: quote.amountAtomic,
           refundAtomic: refundAmount.amountAtomic,
           requestDigest: digest({ schema: 'hookemon.collector-buyback-request.v1', cycleId: context.cycleId, memo: pack.memo }),
         },
-        blockhashContext: Object.freeze({
-          blockhash: latest.blockhash,
-          lastValidBlockHeight: String(latest.lastValidBlockHeight),
-          currentBlockHeight: currentHeight.toString(),
-        }),
+        blockhashContext: Object.freeze(blockhashContext),
       };
     }
     const { signer, signed } = await decodeAndSign({
@@ -794,7 +814,7 @@ async function reconcileUnknownPack({ adapters, config, cycleRepository, context
     return null;
   }
   if (!plainObject(check) || typeof check.exists !== 'boolean' || !check.exists) return null;
-  if (typeof check.status !== 'string' || check.status === '' || check.status !== 'complete') return null;
+  if (typeof check.status !== 'string' || check.status !== 'complete') return null;
   const asset = configuredSettlementAsset(config);
   let checkedQuote;
   try {
@@ -830,26 +850,82 @@ async function reconcileUnknownPack({ adapters, config, cycleRepository, context
 
 export async function reconcileLiveBuyback({ adapters, config, cycleRepository, context }) {
   const record = await cycleRepository.readOperationalStageAttempt(context.cycleId, 'buyback');
-  const evidence = record?.responseEvidence;
+  let evidence = record?.responseEvidence;
+  const overdue = Number.isSafeInteger(record?.sentAtMs) && pastDeadline(record.sentAtMs, config, context);
   if (!plainObject(evidence) || !Array.isArray(evidence.packs)) {
-    if (record?.attempt?.state === 'SENT_UNKNOWN' && Number.isSafeInteger(record.sentAtMs)
-      && pastDeadline(record.sentAtMs, config, context)) {
-      return holdLegacySentUnknownDeadline({ cycleRepository, config, context, record });
+    if (record?.attempt?.state !== 'SENT_UNKNOWN') return null;
+    const epic = await cycleRepository.readStage(context.cycleId, 'epic-gate');
+    const open = await cycleRepository.readStage(context.cycleId, 'open');
+    if (epic?.status === 'COMPLETE' && Array.isArray(epic.evidence?.packs)
+      && open?.status === 'COMPLETE' && Array.isArray(open.evidence?.packs)) {
+      // The completed decision and opened-asset records predate the ambiguous mutation.
+      // Recover by their memos only; never regenerate a buyback or assume no send occurred.
+      const packs = epicGatePacks(epic);
+      for (const pack of packs) if (pack.decision !== 'held') boundOpenEvidence(open.evidence.packs, pack);
+      evidence = { packs: packs.map(pack => pack.decision === 'held' ? pack : {
+        packIndex: pack.packIndex, decision: 'unknown', memo: pack.memo, mint: pack.mint, quote: pack.offer,
+      }) };
+    } else {
+      return overdue ? holdLegacySentUnknownDeadline({ cycleRepository, config, context, record }) : null;
     }
-    return null;
   }
-  if (!adapters?.collectorCrypt || !adapters?.solana?.client) return null;
-
+  const canReconcile = Boolean(adapters?.collectorCrypt && adapters?.solana?.client);
+  if (!canReconcile && !overdue) return null;
   const open = await cycleRepository.readStage(context.cycleId, 'open');
-  const openEvidencePacks = plainObject(open.evidence) && Array.isArray(open.evidence.packs) ? open.evidence.packs : [];
+  const openEvidencePacks = plainObject(open?.evidence) && Array.isArray(open.evidence.packs) ? open.evidence.packs : [];
 
   const outcomes = [];
   for (const submitted of evidence.packs) {
     const assetKind = assetKindOf(openEvidencePacks, submitted.packIndex);
-    const outcome = submitted.decision === 'unknown'
+    let outcome = submitted.decision === 'held' ? submitted : !canReconcile ? null : submitted.decision === 'unknown'
       ? await reconcileUnknownPack({ adapters, config, cycleRepository, context, unknown: submitted, assetKind })
       : await reconcilePack({ adapters, config, cycleRepository, context, submitted, assetKind });
-    if (outcome === null) return null;
+    if (outcome === null) {
+      if (!overdue) return null;
+      // A deadline ends automatic waiting; it does not prove that Operations still owns the card.
+      // Missing transports, ownership uncertainty or a finalized outgoing transfer hold the cycle
+      // without inventing a held-asset position or treating unattributed proceeds as available.
+      let verificationStep = 'transports';
+      try {
+        if (!canReconcile) throw new Error('verification transports are unavailable');
+        verificationStep = 'finalized-ownership';
+        await verifyFinalizedOwnership({ adapters, config, pack: submitted, openEvidencePacks });
+        if (typeof submitted.signature === 'string') {
+          verificationStep = 'finalized-signature';
+          const status = await readFinalizedSignatureStatus(adapters.solana.client, submitted.signature);
+          if (status !== null && !status.err) {
+            verificationStep = 'finalized-transfer';
+            if (await cardLeftOperator({ adapters, signature: submitted.signature,
+              mint: submitted.mint, owner: config.accounts.solana, assetKind })) {
+              verificationStep = 'confirmed-outgoing-transfer';
+              throw new Error('finalized outgoing card transfer remains unresolved with the provider');
+            }
+          }
+        }
+      } catch (error) {
+        // Preserve explicit cancellation. Transport failures can also be TypeError or SyntaxError;
+        // at the deadline they must stop the cycle without asserting card custody.
+        const seen = new Set();
+        for (let cause = error; cause && !seen.has(cause); cause = cause.cause) {
+          seen.add(cause);
+          if (cause.name === 'AbortError') throw error;
+        }
+        return holdWholeCycleForUnattributableCard(cycleRepository, context, {
+          stage: 'buyback', memo: submitted.memo, mint: submitted.mint,
+          ...(typeof submitted.signature === 'string' ? { signature: submitted.signature } : {}),
+          sentAtMs: record.sentAtMs, deadlineMinutes: unresolvedCardDeadlineMinutes(config),
+          reason: verificationStep === 'confirmed-outgoing-transfer'
+            ? 'finalized outgoing card transfer has unresolved proceeds at the buyback deadline'
+            : 'buyback custody or settlement verification is incomplete at its deadline',
+          verificationStep,
+        });
+      }
+      outcome = await holdPack(cycleRepository, config, context, submitted.packIndex, submitted.memo, submitted.mint, 'HELD_UNRESOLVED', {
+        stage: 'buyback', ...submitted, attempt: record.attempt, sentAtMs: record.sentAtMs,
+        deadlineMinutes: unresolvedCardDeadlineMinutes(config),
+        reason: 'buyback outcome remained unverified past the reconcile deadline',
+      }, 'SENT_UNKNOWN_DEADLINE');
+    }
     outcomes.push(outcome);
   }
 

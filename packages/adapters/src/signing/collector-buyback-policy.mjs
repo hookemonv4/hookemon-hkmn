@@ -229,6 +229,7 @@ export function assertCollectorBuybackBindingV1(bindingInput, expectedDigest) {
     fail('Collector buyback binding digest does not match the externally supplied expected digest');
   }
 
+  if (parsed.profile === 'core-transfer-v1') return assertCoreBinding(parsed);
   exactKeys(parsed, BINDING_FIELDS, 'Collector buyback binding');
   if (parsed.schema !== COLLECTOR_BUYBACK_BINDING_SCHEMA) fail('Collector buyback binding schema is invalid');
   if (parsed.version !== COLLECTOR_BUYBACK_BINDING_VERSION) fail('Collector buyback binding version is invalid');
@@ -393,6 +394,7 @@ function resolveInstruction(template, binding, facts) {
 export function createCollectorBuybackPolicy(input) {
   exactKeys(input, FACTORY_INPUT_FIELDS, 'Collector buyback policy factory input');
   const binding = assertCollectorBuybackBindingV1(input.binding, input.expectedDigest);
+  if (binding.profile === 'core-transfer-v1') return createCoreBuybackPolicy(binding, input);
   const facts = assertCollectorBuybackCycleFacts(input.cycleFacts);
   const trusted = assertCollectorBuybackBlockhashContext(input.blockhashContext);
 
@@ -456,4 +458,86 @@ export function createCollectorBuybackPolicy(input) {
   };
 
   return createTransactionPolicy({ policy: canonicalPolicy, rules: [rule] });
+}
+
+// TransferV1 source: metaplex-foundation/mpl-core commit
+// e72d63e4118a0a95ac9b40221e81b19d49e1e102, clients/js/src/generated/instructions/transferV1.ts.
+// This structural profile conveys no authority for the deployed program or live binding values.
+const CORE_PROGRAM = 'CoREENxT6tW1HoK8ypY1SxRMZTcVPm7R94rH4PZNhX7d';
+const CLASSIC_TOKEN = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
+const ATA_PROGRAM = 'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL';
+const SYSTEM_PROGRAM = '11111111111111111111111111111111';
+const MEMO_PROGRAM = 'MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr';
+const USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
+const role = (name, isSigner = false, isWritable = false) => ({ role: name, isSigner, isWritable });
+const CORE_ACCOUNTS = [
+ [],
+ [role('opened-asset-mint',false,true),role('collection'),role('collector-authority',true,true),role('operator-owner',true),role('collector-recipient'),role('core-program'),role('core-program')],
+ [],
+ [role('collector-authority',true,true),role('proceeds-destination',false,true),role('operator-owner',true),role('proceeds-mint'),role('system-program'),role('token-program')],
+ [role('proceeds-source',false,true),role('proceeds-mint'),role('proceeds-destination',false,true),role('collector-authority',true,true)],
+ [],
+];
+const CORE_KINDS = ['compute-budget-set-unit-limit','unknown','compute-budget-set-unit-price','unknown','spl-transfer-checked','unknown'];
+const CORE_PROGRAMS = [COMPUTE_BUDGET_PROGRAM_ID,CORE_PROGRAM,COMPUTE_BUDGET_PROGRAM_ID,ATA_PROGRAM,CLASSIC_TOKEN,MEMO_PROGRAM];
+export function isCollectorCoreBuybackBinding(binding) { return binding?.profile === 'core-transfer-v1'; }
+export function collectorBuybackProgramId(binding) {
+ return binding.instructions[isCollectorCoreBuybackBinding(binding) ? 1 : SETTLE_INSTRUCTION_INDEX].programId;
+}
+function assertCoreBinding(binding) {
+ exactKeys(binding,[...BINDING_FIELDS,'profile','collection'],'Collector Core binding');
+ if(binding.schema!==COLLECTOR_BUYBACK_BINDING_SCHEMA || binding.version!==1 || binding.provider!=='collector-crypt'
+  || binding.chainId!=='solana-mainnet' || binding.format!=='legacy' || !Array.isArray(binding.addressLookupTables) || binding.addressLookupTables.length) fail('invalid Core binding identity');
+ exactKeys(binding.proceeds,PROCEEDS_FIELDS,'Core proceeds');
+ if(binding.proceeds.mint!==USDC_MINT || binding.proceeds.decimals!==6) fail('Core proceeds must be canonical USDC');
+ for(const key of ['collectorAuthority','collectorRecipient','collection']) assertSolanaPublicKey(binding[key],`Core ${key}`);
+ assertSolanaPublicKey(binding.proceeds.source,'Core proceeds source');
+ if(new Set([binding.collectorAuthority,binding.collectorRecipient,binding.collection,binding.proceeds.source]).size!==4) fail('Core binding roles must be distinct');
+ if(!Array.isArray(binding.instructions)||binding.instructions.length!==6) fail('Core buyback requires exactly six instructions');
+ binding.instructions.forEach((t,i)=>{
+  exactKeys(t,INSTRUCTION_TEMPLATE_FIELDS,`Core instruction ${i}`);
+  if(t.kind!==CORE_KINDS[i] || t.programId!==CORE_PROGRAMS[i] || digest(t.accounts)!==digest(CORE_ACCOUNTS[i])) fail(`Core instruction ${i} shape mismatch`);
+  if(i===0 || i===2) {
+   // The existing compute template checker expects price at index 1.
+   assertInstructionTemplate(t,i===0?0:1,`Core compute instruction ${i}`);
+  } else if(t.computeUnitLimit!==null || t.priorityFeeCapAtomic!==null || t.discriminatorHex!==(i===1?'0e00':i===3?'01':null)) fail(`Core instruction ${i} data mismatch`);
+ });
+ return deepFreeze(structuredClone(binding));
+}
+function createCoreBuybackPolicy(binding,input) {
+ assertPlainDataDeep(input.cycleFacts,'Core cycle facts');
+ exactKeys(input.cycleFacts,[...CYCLE_FACT_FIELDS,'memoValue'],'Core cycle facts');
+ const {memoValue,...legacyFacts}=input.cycleFacts;
+ const facts=assertCollectorBuybackCycleFacts(legacyFacts);
+ if(typeof memoValue!=='string'||!/^cc-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(memoValue)) fail('Core memo must be the durable Collector memo');
+ if(BigInt(facts.minimumAtomic)<=0n || facts.operatorFeePayer===binding.collectorAuthority || facts.operatorFeePayer===binding.collectorRecipient) fail('invalid Core owner or minimum');
+ const [ata]=PublicKey.findProgramAddressSync([new PublicKey(facts.operatorFeePayer).toBuffer(),new PublicKey(CLASSIC_TOKEN).toBuffer(),new PublicKey(USDC_MINT).toBuffer()],new PublicKey(ATA_PROGRAM));
+ if(facts.proceedsDestination!==ata.toBase58() || facts.proceedsDestination===binding.proceeds.source) fail('Core proceeds destination must be canonical Operations ATA');
+ const context=input.blockhashContext;
+ assertPlainDataDeep(context,'Core blockhash context');
+ exactKeys(context,['type','blockhash','valid','observedSlot'],'Core blockhash context');
+ if(context.type!=='rpc-blockhash-validity'||context.valid!==true) fail('Core buyback requires valid original blockhash');
+ assertSolanaPublicKey(context.blockhash,'Core original blockhash');assertCanonicalAtomic(context.observedSlot,'Core observed slot');
+ const addresses={
+  'operator-owner':facts.operatorFeePayer,'opened-asset-mint':facts.openedAssetMint,collection:binding.collection,
+  'collector-authority':binding.collectorAuthority,'collector-recipient':binding.collectorRecipient,
+  'proceeds-source':binding.proceeds.source,'proceeds-destination':facts.proceedsDestination,'proceeds-mint':binding.proceeds.mint,
+  'core-program':CORE_PROGRAM,'system-program':SYSTEM_PROGRAM,'token-program':CLASSIC_TOKEN,
+ };
+ const instructions=binding.instructions.map((t,i)=>{
+  if(i===0||i===2||i===4) return resolveInstruction(t,binding,facts);
+  const data=i===1?Buffer.from('0e00','hex'):i===3?Buffer.from([1]):Buffer.from(`${memoValue}:buyback`,'utf8');
+  return {kind:'unknown',programId:t.programId,instructionId:`0x${data[0].toString(16).padStart(2,'0')}`,data:data.toString('base64'),
+   accounts:t.accounts.map(a=>({address:addresses[a.role],isSigner:a.isSigner,isWritable:a.isWritable})),
+   source:null,destination:null,mint:null,token:null,amount:null,nativeValue:null,computeUnitLimit:null,priorityFee:null};
+ });
+ const primary=instructions[4],price=instructions[2].priorityFee,programIds=[...new Set(CORE_PROGRAMS)];
+ const rule={id:'collector-core-buyback-v1',family:'solana',format:'legacy',chainId:binding.chainId,nonce:null,
+  programIds,addressLookupTables:[],target:null,selector:null,source:primary.source,destination:primary.destination,mint:primary.mint,token:primary.token,
+  amount:primary.amount,nativeValue:null,gas:{computeUnitLimit:instructions[0].computeUnitLimit,pricePerComputeUnit:price},
+  feePayer:binding.collectorAuthority,requiredSigners:[binding.collectorAuthority,facts.operatorFeePayer],coSigners:[facts.operatorFeePayer],
+  instructions,extraInstructions:instructions.filter((_,i)=>i!==4),blockhash:context.blockhash,
+  deadline:{type:'rpc-blockhash-validity',valid:true,minObservedSlot:context.observedSlot},priorityFee:price};
+ return createTransactionPolicy({policy:{schema:TRANSACTION_POLICY_SCHEMA,chainId:binding.chainId,stage:'buyback',requestDigest:facts.requestDigest,
+  expectedRecipient:primary.destination,amount:primary.amount.exact,allowedTargets:[],allowedPrograms:programIds},rules:[rule]});
 }

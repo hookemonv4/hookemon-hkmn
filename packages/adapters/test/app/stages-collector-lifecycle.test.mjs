@@ -2053,6 +2053,126 @@ test('carves an overdue SENT_UNKNOWN buyback into a held position without anothe
   assert.equal(cycleRepository.heldPositions[0].costMicroUsd, '35000000');
 });
 
+for(const absentBinding of [false,true,'omitted','null'])test(`Core buyback stage ${absentBinding?`refuses ${absentBinding} authority before mutation`:'reaches Operations second-slot signing through the production registry'}`,async()=>{
+ const {syntheticCoreBuyback}=await import('../fixtures/collector-core-buyback.mjs');
+ const memo='cc-12345678-1234-1234-1234-123456789abc';
+ const candidate=syntheticCoreBuyback({operator:OPERATOR_KEYPAIR,asset:CARD_ASSET,amountAtomic:'85',memo});
+ const config=offlineBoundaryConfig(matchingBuybackRegistry(candidate.binding));
+ config.solana.originalBlockhashContextResolver=async blockhash=>({type:'rpc-blockhash-validity',blockhash,valid:true,observedSlot:'500'});
+ if(absentBinding===true)config.collectorCrypt.productionBindingRegistry=loadCollectorProductionBindingRegistry({...matchingBuybackRegistry(candidate.binding),entries:[]});
+ if(absentBinding==='omitted')delete config.collectorCrypt.productionBindingRegistry;
+ if(absentBinding==='null')config.collectorCrypt.productionBindingRegistry=null;
+ const cycleRepository=repository({stages:{'epic-gate':{status:'COMPLETE',evidence:{packs:[sellDecisionPack({memo})]}},open:{status:'COMPLETE',evidence:{packs:[openedPack({memo,assetKind:'mpl-core'})]}}}});
+ const rpc=rpcClient({tokenAccount:tokenAccountResponse({mint:SETTLEMENT_ASSET}),cardOwner:OPERATOR});
+ const quote={...settlementAsset(),amountAtomic:'85'};let providerCalls=0,signCalls=0;
+ const execute=()=>mutateBuyback({liveMode:true,config,cycleRepository,context:{cycleId:CYCLE_ID,assertLease:async()=>{}},preflightAuthority:TEST_PROFILE_MUTATION_AUTHORITY,
+  adapters:{solana:{client:rpc},collectorCrypt:{async getBuybackAvailable(){return {available:true,amount:quote};},async buyback(){providerCalls++;return {memo,refundAmount:quote,serializedTransaction:candidate.serializedTransaction};},async submitTransaction(){throw new Error('test stops at signer');}}},
+  signerClient:{solana:{async sign(bytes){signCalls++;const tx=Transaction.from(Buffer.from(bytes,'base64'));assert.equal(tx.signatures[1].publicKey.toBase58(),OPERATOR);assert.equal(tx.verifySignatures(false),true);throw new Error('deliberate test stop before signing');}}}});
+ assert.equal(config.execution.profile,'production');
+ if(absentBinding)await assert.rejects(execute,/production binding/);else {const result=await execute();assert.equal(result.packs[0].decision,'unknown');}
+ assert.equal(providerCalls,absentBinding?0:1);assert.equal(signCalls,absentBinding?0:1);
+});
+
+for (const decision of ['unknown', 'submitted']) {
+  for (const providerFailure of ['missing', 'error']) {
+    test(`buyback ${decision} ${providerFailure} outcome holds its exact card at the deadline`, async () => {
+      const sentAtMs = 1_700_000_000_000;
+      const amount = { ...settlementAsset(), amountAtomic: '85' };
+      const pack = { packIndex: 0, decision, memo: MEMO, mint: CARD_ASSET, quote: amount,
+        ...(decision === 'submitted' ? { signature: BUYBACK_SIGNATURE, refundAmount: amount } : {}) };
+      const cycleRepository = repository({
+        stages: { open: { status: 'COMPLETE', evidence: { packs: [openedPack()] } } },
+        attempts: { buyback: { attempt: { state: 'RESPONSE_RECORDED' }, sentAtMs, responseEvidence: { packs: [pack] } } },
+      });
+      let reads = 0;
+      const input = { config: baseConfig(), cycleRepository, adapters: {
+        collectorCrypt: { async getBuybackCheck() { reads++; if (providerFailure === 'error') throw new Error('temporary failure'); return { exists: false }; } },
+        solana: { client: rpcClient() },
+      } };
+      assert.equal(await reconcileLiveBuyback({ ...input, context: { cycleId: CYCLE_ID, nowMs: sentAtMs + 1 } }), null);
+      const result = await reconcileLiveBuyback({ ...input, context: { cycleId: CYCLE_ID, nowMs: sentAtMs + 30 * 60_000 } });
+      assert.equal(result.soldCount, 0);
+      assert.equal(result.packs[0].terminalState, 'HELD_UNRESOLVED');
+      assert.equal(result.packs[0].memo, MEMO);
+      assert.equal(cycleRepository.heldPositions.length, 1);
+      assert.equal(cycleRepository.ledgers.length, 0);
+      assert.equal(reads, 2);
+    });
+  }
+}
+
+test('buyback crash before response persistence recovers a batch card by its durable memo', async () => {
+  const amount = { ...settlementAsset(), amountAtomic: '85' };
+  const cycleRepository = repository({
+    stages: { open: { status: 'COMPLETE', evidence: { packs: [openedPack()] } },
+      'epic-gate': { status: 'COMPLETE', evidence: { packs: [sellDecisionPack()] } } },
+    attempts: { buyback: { attempt: { state: 'SENT_UNKNOWN' }, sentAtMs: 1_700_000_000_000, responseEvidence: null } },
+  });
+  const input = { config: baseConfig(), cycleRepository, adapters: {
+    collectorCrypt: { async getBuybackCheck({ memo }) { assert.equal(memo, MEMO); return { exists: true, status: 'complete',
+      buybackAmount: 85, playerWallet: OPERATOR, nft: CARD_ASSET, transactionSignature: BUYBACK_SIGNATURE, createdAt: '2026-01-01T00:00:00.000Z' }; } },
+    solana: { client: rpcClient({ entries: [
+      { tokenAccount: deriveAssociatedTokenAddress(OPERATOR, CARD_ASSET).toBase58(), owner: OPERATOR, mint: CARD_ASSET, preAmount: '1', postAmount: '0' },
+      { tokenAccount: deriveAssociatedTokenAddress(OPERATOR, SETTLEMENT_ASSET).toBase58(), owner: OPERATOR, mint: SETTLEMENT_ASSET, preAmount: '7', postAmount: '92' },
+    ] }) },
+  }, context: { cycleId: CYCLE_ID, nowMs: 1_700_000_000_001 } };
+  const result = await reconcileLiveBuyback(input);
+  assert.equal(result.soldCount, 1);
+  assert.deepEqual(result.packs[0].proceeds, amount);
+  assert.equal(cycleRepository.heldPositions.length, 0);
+});
+
+for (const failure of ['no-transports', 'outgoing-finalized', 'owner-changed', 'fetch-failed']) {
+  test(`overdue buyback ${failure} holds the cycle without inventing held card custody`, async () => {
+    const amount = { ...settlementAsset(), amountAtomic: '85' };
+    const submitted = { packIndex: 0, decision: 'submitted', memo: MEMO, mint: CARD_ASSET,
+      signature: BUYBACK_SIGNATURE, quote: amount, refundAmount: amount };
+    const cycleRepository = repository({
+      stages: { open: { status: 'COMPLETE', evidence: { packs: [openedPack()] } } },
+      attempts: { buyback: { attempt: { state: 'RESPONSE_RECORDED' }, sentAtMs: 1_700_000_000_000, responseEvidence: { packs: [submitted] } } },
+    });
+    const adapters = failure === 'no-transports' ? {} : {
+      collectorCrypt: { async getBuybackCheck() { return { exists: false }; } },
+      solana: { client: rpcClient({ cardOwner: failure === 'fetch-failed' ? () => { throw new TypeError('fetch failed'); } : failure === 'owner-changed' ? COLLECTOR_RECIPIENT : OPERATOR,
+        entries: failure === 'outgoing-finalized' ? [
+          { tokenAccount: deriveAssociatedTokenAddress(OPERATOR, CARD_ASSET).toBase58(), owner: OPERATOR, mint: CARD_ASSET, preAmount: '1', postAmount: '0' },
+          { tokenAccount: deriveAssociatedTokenAddress(OPERATOR, SETTLEMENT_ASSET).toBase58(), owner: OPERATOR, mint: SETTLEMENT_ASSET, preAmount: '7', postAmount: '92' },
+        ] : [] }) },
+    };
+    assert.equal(await reconcileLiveBuyback({ adapters, config: baseConfig(), cycleRepository,
+      context: { cycleId: CYCLE_ID, nowMs: 1_700_001_800_000 } }), null);
+    assert.equal(cycleRepository.heldPositions.length, 0);
+    assert.equal(cycleRepository.held.length, 1);
+    assert.equal(cycleRepository.held[0].terminalState, 'HELD_DATA_UNVERIFIED');
+    assert.equal(cycleRepository.held[0].evidence.verificationStep, {
+      'no-transports': 'transports', 'owner-changed': 'finalized-ownership', 'fetch-failed': 'finalized-ownership',
+      'outgoing-finalized': 'confirmed-outgoing-transfer',
+    }[failure]);
+    assert.equal(cycleRepository.ledgers.length, 0);
+  });
+}
+
+for (const errorName of ['AbortError']) {
+  test(`overdue buyback propagates ${errorName} without a custody mutation`, async () => {
+    const amount = { ...settlementAsset(), amountAtomic: '85' };
+    const submitted = { packIndex: 0, decision: 'submitted', memo: MEMO, mint: CARD_ASSET,
+      signature: BUYBACK_SIGNATURE, quote: amount, refundAmount: amount };
+    const cycleRepository = repository({
+      stages: { open: { status: 'COMPLETE', evidence: { packs: [openedPack()] } } },
+      attempts: { buyback: { attempt: { state: 'RESPONSE_RECORDED' }, sentAtMs: 1_700_000_000_000, responseEvidence: { packs: [submitted] } } },
+    });
+    const original = new Error('verification interrupted'); original.name = errorName;
+    const client = rpcClient({ cardOwner: () => { throw original; } });
+    await assert.rejects(reconcileLiveBuyback({
+      adapters: { collectorCrypt: { async getBuybackCheck() { return { exists: false }; } }, solana: { client } },
+      config: baseConfig(), cycleRepository, context: { cycleId: CYCLE_ID, nowMs: 1_700_001_800_000 },
+    }), error => error === original || error.cause === original);
+    assert.equal(cycleRepository.held.length, 0);
+    assert.equal(cycleRepository.heldPositions.length, 0);
+    assert.equal(cycleRepository.ledgers.length, 0);
+  });
+}
+
 test('purchase provider errors become a bounded hold after the reconcile deadline', async()=>{
  const cycleRepository=repository({batches:{purchase:{requestedAtMs:0,packs:[{packIndex:0,memo:MEMO,expectedCardCount:1,packType:null}]}},intents:{purchase:{recordedAtMs:0,intent:{quantity:1,packType:null,expectedCardCountPerPack:1,playerAddress:OPERATOR}}}});
  const args={adapters:{collectorCrypt:{async getPackStatus(){throw new Error('provider unavailable');}},solana:{client:rpcClient()}},config:baseConfig(),cycleRepository,context:{cycleId:CYCLE_ID,nowMs:1000}};

@@ -906,13 +906,13 @@
       "bytes": 11654,
       "kind": "dependency-lock",
       "path": "product/dependency-pins.json",
-      "sha256": "534b96bfaeaa6a3334d377b46ab6410f2c35ecafb13f57b200d0f47f32ff5451"
+      "sha256": "8934677f1ac305f4841199bb01490bf431df9a810084560e8a1a83f92fb24f55"
     },
     {
-      "bytes": 2365,
+      "bytes": 2673,
       "kind": "package:EVIDENCE.md",
       "path": "release/phase3/EVIDENCE.md",
-      "sha256": "2e343d11cd5686958dfc011bbd8d8e3dc73ae72bf660daeea18c391afd014e3f"
+      "sha256": "8ed5208603d9a8444bf78f7d158cacc085f7c6171d48a0c5fa02f970dd398b9b"
     },
     {
       "bytes": 1780,
@@ -1083,10 +1083,10 @@
       "sha256": "ad9dda427d009b525f081a4f33990d453b0b15e1a43e4746c61f4332acef066e"
     },
     {
-      "bytes": 119856,
+      "bytes": 123600,
       "kind": "specification",
       "path": "specs/requirements.json",
-      "sha256": "750a12abf47a771d1181dd6a1782c1b6fbcc4eebb4632e5d1927bf52f4193425"
+      "sha256": "b0f2f2a0a6dcce44a08940d70be107988800c58b950ae1dcc660d32de62329c3"
     }
   ],
   "importResolutions": [
@@ -2388,7 +2388,7 @@
     }
   ],
   "javascriptImportResolutions": [],
-  "reviewTargetHash": "sha256:69677c1a6e50c81c96248efc3d62cade3b1679896901c1c6763219e6c6058ab7",
+  "reviewTargetHash": "sha256:8c2856b7094d4b268deeacb5f92f1e84cef1b8262d5578c58cfe16c1261bbb54",
   "schemaVersion": 1,
   "standardVersion": "1.5.0",
   "submissionHash": "sha256:2050a999d23af7df709e8454621feed76eb76c74168d32b9330eea4485168c75"

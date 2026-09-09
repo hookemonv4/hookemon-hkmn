@@ -526,13 +526,14 @@ function ed25519PublicKey(address) {
   }
 }
 
-function assertSolanaSignatureSlots(transaction, { expectedCoSignerSignatures, firstRequiredSlot = 0 } = {}) {
+function assertSolanaSignatureSlots(transaction, { expectedCoSignerSignatures, firstRequiredSlot = 0, excludedSlot = null, operatorSignerIndex = 0 } = {}) {
   const required = transaction.message.header.numRequiredSignatures;
   if (!Array.isArray(transaction.signatures) || transaction.signatures.length !== required) {
     fail('signed Solana transaction does not contain every required signature slot');
   }
   const serializedMessage = Buffer.from(transaction.message.serialize());
   for (let index = firstRequiredSlot; index < required; index += 1) {
+    if (index === excludedSlot) continue;
     const signature = transaction.signatures[index];
     if (!signatureIsNonzero(signature)) {
       fail(`signed Solana transaction required signature slot ${index} is missing or zero`);
@@ -551,8 +552,10 @@ function assertSolanaSignatureSlots(transaction, { expectedCoSignerSignatures, f
   if (!Array.isArray(expectedCoSignerSignatures) || expectedCoSignerSignatures.length !== Math.max(0, required - 1)) {
     fail('expected Solana co-signer signatures do not match the required signature slots');
   }
-  for (let index = 1; index < required; index += 1) {
-    const expected = expectedCoSignerSignatures[index - 1];
+  let expectedIndex = 0;
+  for (let index = 0; index < required; index += 1) {
+    if (index === operatorSignerIndex) continue;
+    const expected = expectedCoSignerSignatures[expectedIndex++];
     if (typeof expected !== 'string') fail('expected Solana co-signer signatures must be base64 strings');
     if (!Buffer.from(transaction.signatures[index]).equals(Buffer.from(expected, 'base64'))) {
       fail(`signed Solana co-signer signature slot ${index} changed after approval`);
@@ -561,12 +564,13 @@ function assertSolanaSignatureSlots(transaction, { expectedCoSignerSignatures, f
 }
 
 /** Captures existing co-signer signatures before the operator signs a provider transaction. */
-export function captureSolanaCoSignerSignatures(transactionBase64) {
+export function captureSolanaCoSignerSignatures(transactionBase64, operatorSignerIndex = 0) {
   const transaction = fullSignedSolanaTransaction(transactionBase64);
   const required = transaction.message.header.numRequiredSignatures;
+  if (!Number.isInteger(operatorSignerIndex) || operatorSignerIndex < 0 || operatorSignerIndex >= required) fail('invalid Operations signature slot');
   if (required <= 1) return Object.freeze([]);
-  assertSolanaSignatureSlots(transaction, { firstRequiredSlot: 1 });
-  return Object.freeze(transaction.signatures.slice(1).map(signature => Buffer.from(signature).toString('base64')));
+  assertSolanaSignatureSlots(transaction, { excludedSlot: operatorSignerIndex });
+  return Object.freeze(transaction.signatures.filter((_, index) => index !== operatorSignerIndex).map(signature => Buffer.from(signature).toString('base64')));
 }
 
 async function resolveAddressLookupTables(message, input) {
@@ -1045,6 +1049,7 @@ export async function revalidateSignedMessage(signedMessage, approved, options =
     }
     assertSolanaSignatureSlots(fullSignedSolanaTransaction(transaction), {
       expectedCoSignerSignatures: options.expectedCoSignerSignatures,
+      operatorSignerIndex: options.operatorSignerIndex ?? 0,
     });
     input.lastValidBlockHeight = options.lastValidBlockHeight ?? approvedDescription.deadline?.lastValidBlockHeight;
     input.currentBlockHeight = options.currentBlockHeight ?? approvedDescription.deadline?.observedBlockHeight;

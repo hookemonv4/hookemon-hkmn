@@ -34,7 +34,7 @@ function activeControlInputs() {
   return [...registryInputs, ...gateInputs];
 }
 
-test('the machine-readable delivery boundary keeps Phase 3 open under native revision 71 and architecture revision 11', () => {
+test('the machine-readable delivery boundary keeps Phase 3 open under native revision 74 and architecture revision 11', () => {
   const boundary = readJson('product/delivery-boundary.json');
   const requirements = readJson('specs/requirements.json');
   const interfaces = readJson('architecture/interfaces.json');
@@ -45,11 +45,11 @@ test('the machine-readable delivery boundary keeps Phase 3 open under native rev
     2: 'COMPLETE',
     3: 'OPEN',
   });
-  assert.equal(requirements.revision, 71);
+  assert.equal(requirements.revision, 74);
   assert.equal(readJson('feasibility/phase3-offchain-interface-amendment.json').approvedRequirementsRevision, 70,
-    'the retained amendment is historical and does not approve native revision 71');
+    'the retained amendment is historical and does not approve native revision 74');
   assert.equal(interfaces.productPhase, 3);
-  assert.equal(interfaces.requirementsRevision, 71);
+  assert.equal(interfaces.requirementsRevision, 74);
   assert.equal(interfaces.architectureRevision, 11);
 });
 
@@ -74,10 +74,10 @@ test('native Phase 3 interfaces retain the provisional module registry without f
   const provisionalIds = provisional.modules.map(module => module.id);
   const indexIds = moduleIndex.modules.map(module => module.id);
 
-  assert.equal(interfaces.requirementsRevision, 71);
+  assert.equal(interfaces.requirementsRevision, 74);
   assert.equal(interfaces.architectureRevision, 11);
   assert.equal(provisional.productPhase, 3);
-  assert.equal(provisional.requirementsRevision, 71);
+  assert.equal(provisional.requirementsRevision, 74);
   assert.equal(provisional.architectureRevision, 9);
   for (const artifact of [capabilityMap, moduleIndex]) {
     assert.equal(artifact.productPhase, 3);

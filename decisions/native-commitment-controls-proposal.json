@@ -1,0 +1,44 @@
+{
+  "schema": "hookemon.native-commitment-control-proposal.v1",
+  "status": "OWNER_APPROVAL_REQUIRED",
+  "purpose": "Bind the owner-approved revision-72 implementation to exact clean-room recognitions and public evidence hashes without weakening secret detection. This is not launch or transaction authority.",
+  "baseCommit": "5bef8002ea0eca1e8da75f06343590cbc88b606a",
+  "proposedControlGatePinBump": {
+    "schema": "hookemon.control-gate-pin-bump.v2",
+    "approvalToken": null,
+    "basePinsSha256": "a125fe9564b49f50d71f4e1dd2a76de38115be3db644201d1e660b4ad913456e",
+    "candidatePinsSha256": "33afd567022c9617dab23a751fe33ff48aed07a56205d58488cd014f9330b8e5",
+    "baseChecker": {
+      "path": "scripts/verify-control-dependencies.mjs",
+      "blobId": "9faac6f636cc872c8dc5e46f17ed799f0407b1a7"
+    },
+    "controls": [
+      {
+        "path": ".github/workflows/v4-gates.yml",
+        "previousSha256": "5a530f2f4705673a2e101170c284ef6c39da95b6ef17089571fdf502c1c99e25",
+        "sha256": "ecccae212a38753fbc4a60eaba7e5e10451355d4121e3b8efb05e10a0f026c1e"
+      },
+      {
+        "path": "scripts/verify-control-dependencies.mjs",
+        "previousSha256": "c9a155d541258b5aa4ce886b2df8ed1adfb73f5f915542cc97e08638be413a8a",
+        "sha256": "372de46fa3e9a466e06e9344a3ae24dbf520f18df7d02237e06d18bad1c3b8ae"
+      }
+    ]
+  },
+  "supportingFiles": [
+    {
+      "path": ".gitleaks.toml",
+      "sha256": "671e9b2dfa054104604ebffa452a592e3ec9ee6a534357f5261e9c83449fa195"
+    },
+    {
+      "path": "scripts/check-cleanroom.mjs",
+      "sha256": "945d33af888afbb7621347978a1f44357046a9978d726c2246bd804c3d3b7b6d"
+    },
+    {
+      "path": "scripts/native-cleanroom-recognition.json",
+      "sha256": "e3462633be8673c66390eb48c3e7480a1cea57f714ac746592426d5831974c66"
+    }
+  ],
+  "recognitionChanges": "Relocate unchanged approved native/Collector terms after revision72 edits; add one exact official compiler source URL and one accidental marker inside a checksummed compressed public runtime/ABI fixture. Secret scanner adds only the two resulting public token digests at the exact recognition-manifest path and line shape.",
+  "limits": "No owner approval is recorded by this proposal. Financial fields, signing, deployment, broadcast and provider admission remain separate."
+}

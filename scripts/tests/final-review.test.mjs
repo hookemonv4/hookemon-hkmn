@@ -114,6 +114,7 @@ test('init I6 binds the exact current control surface without mutable projection
     'scripts/verify-phase1-release.mjs',
     'scripts/verify-phase1-reproducibility.mjs',
     'scripts/release/build-local-candidate.mjs',
+    'scripts/programmable/lib/native-universal-router-reproduction.mjs',
   ]);
   function filesUnder(relativeDirectory, extension) {
     return readdirSync(join(templateRoot, relativeDirectory), { withFileTypes: true })
@@ -433,7 +434,7 @@ test('current Phase 3 interface evidence remains non-authoritative', () => {
   const freeze = JSON.parse(readFileSync(join(templateRoot, 'feasibility', 'interface-freeze.json'), 'utf8'));
 
   assert.equal(interfaces.productPhase, 3);
-  assert.equal(interfaces.requirementsRevision, 71);
+  assert.equal(interfaces.requirementsRevision, 74);
   assert.equal(interfaces.architectureRevision, 11);
   assert.equal(interfaces.bindingManifestDigest, null);
   assert.equal(interfaces.providerBinding.status, 'INTEGRATION_PENDING');
