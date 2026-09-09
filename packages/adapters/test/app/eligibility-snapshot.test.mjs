@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -902,6 +902,12 @@ test(`capacity matrix accepts ${count} recipients through the actual eligibility
   assert.equal(manifest.feasibility.transactionCount, count);
   await repository.prepareStage(cycleId, 'eligibility-snapshot');
   await repository.completeStage(cycleId, 'eligibility-snapshot', manifest);
+  // Paging actually happened: the durable store wrote its stage-evidence manifest for this cycle.
+  const stageDirectory = join(directory, 'stage-evidence', encodeURIComponent(cycleId), encodeURIComponent('eligibility-snapshot'));
+  const pagedManifest = JSON.parse(await readFile(join(stageDirectory, 'manifest.json'), 'utf8'));
+  assert.equal(pagedManifest.schema, 'hookemon.durable-cycle-store.paged-stage-evidence-manifest.v1');
+  assert.equal(pagedManifest.cycleId, cycleId);
+  assert.equal(pagedManifest.stage, 'eligibility-snapshot');
   const reopened = await CycleRepository.open(directory);
   const persisted = await reopened.readStage(cycleId, 'eligibility-snapshot');
   assert.equal(persisted.status, 'COMPLETE');
@@ -924,15 +930,18 @@ for (const count of [100, 200, 300, 400, 500, 600]) {
     const accepted = evaluatePayoutFeasibility({ entries, feasibility });
     assert.equal(accepted.feasible, true);
     assert.equal(accepted.requiredNativeAmount.amountAtomic, String(required));
-    for (const field of ['maxRecipientCount', 'maxTransactionCount']) {
+    for (const [field, reason] of [
+      ['maxRecipientCount', 'recipient-count-exceeds-configured-maximum'],
+      ['maxTransactionCount', 'transaction-count-exceeds-configured-maximum'],
+    ]) {
       const refused = evaluatePayoutFeasibility({ entries, feasibility: { ...feasibility, [field]: count - 1 } });
       assert.equal(refused.feasible, false);
       assert.equal(refused.recipientCount, count);
-      assert.match(refused.reason, /count-exceeds-configured-maximum/);
+      assert.equal(refused.reason, reason);
     }
     const short = evaluatePayoutFeasibility({ entries, feasibility: { ...feasibility, nativeBalanceWei: required - 1n } });
     assert.equal(short.feasible, false);
-    assert.match(short.reason, /deficitWei=1/);
+    assert.equal(short.reason, 'native-balance-below-reserve-and-fee(deficitWei=1)');
     assert.equal(entries.length, count);
   });
 }
