@@ -9,7 +9,7 @@ import { readOperatorState, mutateOperatorState } from '../../src/operator/state
 import { canonicalJson } from '../../src/cycle/journal.mjs';
 
 function legacyConfiguration() {
-  const { packPlan, rewardRecipientLimit, ...current } = createDefaultOperatorConfiguration();
+  const { packPlan, rewardRecipientLimit, processClaimLimit6hMicroUsd, ...current } = createDefaultOperatorConfiguration();
   return { ...current, schema: 'hookemon.operator-configuration.v4', allowedPackIds: ['alpha', 'beta'], requestedOrders: 2, maxBoostersPerCycle: 3, maxUnitPriceMicroUsd: '100', maxCycleBudgetMicroUsd: '200', perCycleCapMicroUsd: '200', max24HourBudgetMicroUsd: '400', configurationRevision: 12 };
 }
 
@@ -25,17 +25,18 @@ test('v4 migration preserves every prior value and never promotes an allowlist i
   const legacy = legacyConfiguration();
   const migrated = migrateOperatorConfiguration(legacy);
   assert.equal(migrated.migrated, true);
-  const { packPlan, schema, rewardRecipientLimit, ...fields } = migrated.configuration;
+  const { packPlan, schema, rewardRecipientLimit, processClaimLimit6hMicroUsd, ...fields } = migrated.configuration;
   const { schema: oldSchema, ...oldFields } = legacy;
   assert.deepEqual(fields, oldFields);
   assert.equal(schema, 'hookemon.operator-configuration.v6');
+  assert.equal(processClaimLimit6hMicroUsd, '25000000000');
   assert.deepEqual(packPlan, { schema: 'hookemon.pack-plan.v1', revision: 0, orders: [] });
   assert.equal(migrateOperatorConfiguration(migrated.configuration).migrated, false);
   assert.throws(() => assertOperatorConfiguration(legacy), /exact schema/);
 });
 
 test('legacy migration refuses malformed fields and unexpected plan or secret injection', () => {
-  for (const patch of [{ maxBoostersPerCycle: -1 }, { packPlan: { orders: [] } }, { privateKey: 'not-a-key' }]) {
+  for (const patch of [{ processClaimLimit6hMicroUsd: '50000000000' }, { maxBoostersPerCycle: -1 }, { packPlan: { orders: [] } }, { privateKey: 'not-a-key' }]) {
     assert.throws(() => migrateOperatorConfiguration({ ...legacyConfiguration(), ...patch }));
   }
   const { cycleLedger, ...missing } = legacyConfiguration();
@@ -102,7 +103,7 @@ test('all recipient options persist through CAS and fresh-process restart; inval
 
 test('native v5 migration persists once, preserving nonempty pack plan, flags and configuration revision', async t => {
   const current = applyOperatorConfiguration(createDefaultOperatorConfiguration(), { packPlan: { orders: [{ pack: 'alpha', quantity: 2 }] }, paused: true, executionPaused: true });
-  const { rewardRecipientLimit, ...legacy } = current;
+  const { rewardRecipientLimit, processClaimLimit6hMicroUsd, ...legacy } = current;
   legacy.schema = 'hookemon.operator-configuration.v5';
   const path = await stateFile(t, legacy);
   const migrated = await readOperatorState(path);
