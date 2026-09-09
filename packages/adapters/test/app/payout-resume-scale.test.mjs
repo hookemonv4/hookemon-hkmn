@@ -115,7 +115,9 @@ test('DIRECT_PAYOUT_RECIPIENT_LIMIT is exactly the literal 10,000 acceptance tar
   assert.equal(DIRECT_PAYOUT_RECIPIENT_LIMIT, 10_000);
 });
 
-for (const count of [1025, 1026, 10_000]) {
+const capacityCounts = [100, 200, 300, 400, 500, 600];
+
+for (const count of [...capacityCounts, 1025, 1026, 10_000]) {
   test(`durable payout state scales to ${count} recipients without truncation or duplication`, () => {
     const plan = planFor(count);
     assert.equal(plan.allocations.length, count);
@@ -131,25 +133,26 @@ for (const count of [1025, 1026, 10_000]) {
   });
 }
 
-test('a real compiled 10,000-recipient payout state persists and reopens through the actual durable paged store, not a synthetic fixture', async t => {
-  const count = 10_000;
-  const plan = planFor(count);
-  const state = createDirectPayoutState({ plan, operations: OPERATIONS, assetId: 'native', firstNonce: '0' });
+for (const count of [...capacityCounts, 10_000]) {
+  test(`prepared payout state for ${count} recipients persists and reopens through the actual durable paged store`, async t => {
+    const plan = planFor(count);
+    const state = createDirectPayoutState({ plan, operations: OPERATIONS, assetId: 'native', firstNonce: '0' });
 
-  const directory = await mkdtemp(join(tmpdir(), 'hookemon-payout-resume-scale-'));
-  t.after(() => rm(directory, { recursive: true, force: true }));
-  const store = await DurableCycleStore.open(directory);
-  await store.persistPagedPayoutState(state.cycleId, 'payout', state);
+    const directory = await mkdtemp(join(tmpdir(), 'hookemon-payout-resume-scale-'));
+    t.after(() => rm(directory, { recursive: true, force: true }));
+    const store = await DurableCycleStore.open(directory);
+    await store.persistPagedPayoutState(state.cycleId, 'payout', state);
 
-  const reopened = await DurableCycleStore.open(directory);
-  const read = await reopened.readPagedPayoutState(state.cycleId, 'payout');
+    const reopened = await DurableCycleStore.open(directory);
+    const read = await reopened.readPagedPayoutState(state.cycleId, 'payout');
 
-  assert.deepEqual(read, state);
-  assert.equal(read.recipients.length, count);
-  assert.equal(new Set(read.recipients.map(attempt => attempt.recipient)).size, count);
-  const totalAllocated = read.recipients.reduce((sum, attempt) => sum + BigInt(attempt.amount.amountAtomic), 0n);
-  assert.equal(totalAllocated + BigInt(read.dust.amountAtomic), BigInt(read.distributablePool.amountAtomic));
-});
+    assert.deepEqual(read, state);
+    assert.equal(read.recipients.length, count);
+    assert.equal(new Set(read.recipients.map(attempt => attempt.recipient)).size, count);
+    const totalAllocated = read.recipients.reduce((sum, attempt) => sum + BigInt(attempt.amount.amountAtomic), 0n);
+    assert.equal(totalAllocated + BigInt(read.dust.amountAtomic), BigInt(read.distributablePool.amountAtomic));
+  });
+}
 
 function sha256Digest(value) {
   return `sha256:${createHash('sha256').update(value).digest('hex')}`;
@@ -209,45 +212,65 @@ function finalizeRecipient(prepared, index, operations) {
 // replacement history, no quarantine, no held-position exclusions. It does not claim to cover the
 // bounded replacement/quarantine/held-exclusion envelope's own worst-case overhead -- that is a
 // narrower, separate claim this test does not make.
-test('a real compiled 10,000-recipient payout plan, upgraded to a domain-valid fully-FINALIZED state, persists and reopens through the durable paged store and stays isDirectPayoutComplete/assertPayoutManifestUnchanged-valid before and after', async t => {
-  const count = 10_000;
-  const plan = planFor(count);
-  const initial = createDirectPayoutState({ plan, operations: OPERATIONS, assetId: 'native', firstNonce: '0' });
+for (const count of [...capacityCounts, 10_000]) {
+  test(`synthetic finalized payout state for ${count} recipients persists and reopens with valid manifest and conservation`, async t => {
+    const plan = planFor(count);
+    const initial = createDirectPayoutState({ plan, operations: OPERATIONS, assetId: 'native', firstNonce: '0' });
 
-  const finalizedState = {
-    ...initial,
-    manifestFrozen: true,
-    feasibilityChecked: true,
-    nextNonce: String(count),
-    recipients: initial.recipients.map((prepared, index) => finalizeRecipient(prepared, index, OPERATIONS)),
-  };
+    const finalizedState = {
+      ...initial,
+      manifestFrozen: true,
+      feasibilityChecked: true,
+      nextNonce: String(count),
+      recipients: initial.recipients.map((prepared, index) => finalizeRecipient(prepared, index, OPERATIONS)),
+    };
 
-  // Domain validity before persistence: both normalizers walk every recipient/evidence field.
-  assert.equal(isDirectPayoutComplete(finalizedState), true);
-  assert.equal(assertPayoutManifestUnchanged(finalizedState, plan), true);
+    // Domain validity before persistence: both normalizers walk every recipient/evidence field.
+    assert.equal(isDirectPayoutComplete(finalizedState), true);
+    assert.equal(assertPayoutManifestUnchanged(finalizedState, plan), true);
 
-  const directory = await mkdtemp(join(tmpdir(), 'hookemon-payout-resume-scale-finalized-'));
-  t.after(() => rm(directory, { recursive: true, force: true }));
-  const store = await DurableCycleStore.open(directory);
-  await store.persistPagedPayoutState(finalizedState.cycleId, 'payout', finalizedState);
+    const directory = await mkdtemp(join(tmpdir(), 'hookemon-payout-resume-scale-finalized-'));
+    t.after(() => rm(directory, { recursive: true, force: true }));
+    const store = await DurableCycleStore.open(directory);
+    await store.persistPagedPayoutState(finalizedState.cycleId, 'payout', finalizedState);
 
-  const reopened = await DurableCycleStore.open(directory);
-  const read = await reopened.readPagedPayoutState(finalizedState.cycleId, 'payout');
+    const reopened = await DurableCycleStore.open(directory);
+    const read = await reopened.readPagedPayoutState(finalizedState.cycleId, 'payout');
 
-  // Every recipient/evidence field, including nonces, signature hashes, and finality evidence,
-  // survives the encode/page/decode round trip exactly.
-  assert.deepEqual(read, finalizedState);
+    // Every recipient/evidence field, including nonces, signature hashes, and finality evidence,
+    // survives the encode/page/decode round trip exactly.
+    assert.deepEqual(read, finalizedState);
 
-  // Domain validity after the round trip: proves resume normalization, not just raw byte equality.
-  assert.equal(isDirectPayoutComplete(read), true);
-  assert.equal(assertPayoutManifestUnchanged(read, plan), true);
+    // Domain validity after the round trip: proves resume normalization, not just raw byte equality.
+    assert.equal(isDirectPayoutComplete(read), true);
+    assert.equal(assertPayoutManifestUnchanged(read, plan), true);
 
-  assert.equal(read.recipients.length, count);
-  assert.equal(new Set(read.recipients.map(attempt => attempt.recipient)).size, count);
-  assert.equal(read.recipients.every(attempt => attempt.state === 'FINALIZED'), true);
-  const paid = read.recipients.reduce((sum, attempt) => sum + BigInt(attempt.amount.amountAtomic), 0n);
-  assert.equal(paid + BigInt(read.dust.amountAtomic), BigInt(read.distributablePool.amountAtomic));
-});
+    assert.equal(read.recipients.length, count);
+    assert.equal(new Set(read.recipients.map(attempt => attempt.recipient)).size, count);
+    assert.equal(read.recipients.every(attempt => attempt.state === 'FINALIZED'), true);
+    assert.equal(new Set(read.recipients.map(attempt => attempt.nonce)).size, count);
+    assert.equal(new Set(read.recipients.map(attempt => attempt.txHash)).size, count);
+    const paid = read.recipients.reduce((sum, attempt) => sum + BigInt(attempt.amount.amountAtomic), 0n);
+    assert.equal(paid + BigInt(read.dust.amountAtomic), BigInt(read.distributablePool.amountAtomic));
+  });
+}
+
+for (const count of capacityCounts) {
+  test(`payout plan for ${count} recipients rejects undersized recipient, transaction and fee envelopes`, () => {
+    const compile = manifest => compileDirectPayoutPlan({
+      cycleId: 'cycle-resume-scale', eligibilityManifest: manifest,
+      finalizedReturn: usdg(count), previousDust: usdg('0'), returnBinding: RETURN_BINDING,
+    });
+    for (const field of ['maxRecipientCount', 'maxTransactionCount']) {
+      const manifest = eligibilityManifest(count);
+      manifest.feasibility[field] = count - 1;
+      assert.throws(() => compile(manifest), /envelope cannot support every frozen recipient/);
+    }
+    const manifest = eligibilityManifest(count);
+    manifest.feasibility.nativeBalance.amountAtomic = (BigInt(manifest.feasibility.requiredNativeAmount.amountAtomic) - 1n).toString();
+    assert.throws(() => compile(manifest), /native-balance feasibility envelope is inconsistent/);
+  });
+}
 
 function memoryStore(initial) {
   let current = structuredClone(initial);
