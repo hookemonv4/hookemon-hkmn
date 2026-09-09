@@ -2522,7 +2522,7 @@
           "$ref": "#/$defs/draftDeployer"
         },
         "compiler": {
-          "$ref": "#/$defs/draftCompiler"
+          "$ref": "#/$defs/nativeDraftCompiler"
         },
         "targets": {
           "type": "array",
@@ -2651,7 +2651,7 @@
           "$ref": "#/$defs/graphAuthorization"
         },
         "compilerProfile": {
-          "$ref": "#/$defs/compilerProfile"
+          "$ref": "#/$defs/nativeCompilerProfile"
         },
         "roles": {
           "type": "object",
@@ -2936,6 +2936,166 @@
         },
         "sqrtPriceX96": {
           "$ref": "#/$defs/amount"
+        }
+      }
+    },
+    "nativeDraftCompiler": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "solc",
+        "solcLongVersion",
+        "standardJson",
+        "buildInfo"
+      ],
+      "properties": {
+        "solc": {
+          "const": "0.8.26+commit.8a97fa7a"
+        },
+        "solcLongVersion": {
+          "const": "0.8.26+commit.8a97fa7a"
+        },
+        "standardJson": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "optimizer",
+            "viaIR",
+            "evmVersion",
+            "metadata"
+          ],
+          "properties": {
+            "optimizer": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "enabled",
+                "runs"
+              ],
+              "properties": {
+                "enabled": {
+                  "const": true
+                },
+                "runs": {
+                  "const": 200
+                }
+              }
+            },
+            "viaIR": {
+              "const": true
+            },
+            "evmVersion": {
+              "const": "cancun"
+            },
+            "metadata": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "appendCBOR",
+                "bytecodeHash",
+                "useLiteralContent"
+              ],
+              "properties": {
+                "appendCBOR": {
+                  "const": false
+                },
+                "bytecodeHash": {
+                  "const": "none"
+                },
+                "useLiteralContent": {
+                  "const": false
+                }
+              }
+            }
+          }
+        },
+        "buildInfo": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status",
+            "localBuildInfoCount",
+            "sourceCount",
+            "sourceContentSha256",
+            "reason"
+          ],
+          "properties": {
+            "status": {
+              "const": "OPEN_FACT"
+            },
+            "localBuildInfoCount": {
+              "const": 1
+            },
+            "sourceCount": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "sourceContentSha256": {
+              "$ref": "#/$defs/digest"
+            },
+            "reason": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      }
+    },
+    "nativeCompilerProfile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "solc",
+        "optimizer",
+        "viaIR",
+        "evmVersion",
+        "metadata"
+      ],
+      "properties": {
+        "solc": {
+          "const": "0.8.26+commit.8a97fa7a"
+        },
+        "optimizer": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "enabled",
+            "runs"
+          ],
+          "properties": {
+            "enabled": {
+              "const": true
+            },
+            "runs": {
+              "const": 200
+            }
+          }
+        },
+        "viaIR": {
+          "const": true
+        },
+        "evmVersion": {
+          "const": "cancun"
+        },
+        "metadata": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "appendCBOR",
+            "bytecodeHash",
+            "useLiteralContent"
+          ],
+          "properties": {
+            "appendCBOR": {
+              "const": false
+            },
+            "bytecodeHash": {
+              "const": "none"
+            },
+            "useLiteralContent": {
+              "const": false
+            }
+          }
         }
       }
     }

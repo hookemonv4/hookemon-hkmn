@@ -266,7 +266,7 @@ function chainAttemptKey(stage, requestDigest) {
 }
 
 /** Mirrors the existing `supplementary-buyback.test.mjs` fixture exactly, except the default open
- *  evidence declares `assetKind: 'mpl-core'` -- the production binding path refuses any other kind
+ *  evidence declares `assetKind: 'mpl-core'` -- the production binding verifies that representation
  *  (see the "wrong memo/mint" tests below for the mismatched-identity cases). */
 function fakeChainAttemptRepository({ openPacks = [{ packIndex: 0, memo: MEMO, decision: 'opened', mint: CARD_ASSET, assetKind: 'mpl-core' }] } = {}) {
   const attempts = new Map();

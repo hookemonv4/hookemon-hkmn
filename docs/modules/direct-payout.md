@@ -6,7 +6,7 @@ Distribute finalized native ETH returned to Operations among the frozen pre-clai
 
 ## Public interface
 
-`compileDirectPayoutPlan` creates `hookemon.direct-payout-plan.v2`; `createNativePayoutAmount` requires chain 4663, asset `native`, and eighteen decimals. Return bindings contain Operations, `assetId: native`, and the finalized evidence digest. `preparePayoutRequest`, `initializeDirectPayout`, `advanceDirectPayout`, `mutatePayout`, and `reconcileLivePayout` use the same frozen plan. Supplementary plan, source, return boundary, and payout state use v2 and preserve the original held-position eligibility snapshot.
+`compileDirectPayoutPlan` creates `hookemon.direct-payout-plan.v2` for historical all-holder cycles and v3 for cycles with frozen recipient selection; `createNativePayoutAmount` requires chain 4663, asset `native`, and eighteen decimals. Return bindings contain Operations, `assetId: native`, and the finalized evidence digest. `preparePayoutRequest`, `initializeDirectPayout`, `advanceDirectPayout`, `mutatePayout`, and `reconcileLivePayout` use the same frozen plan. Supplementary plans use v2 for historical cycles and v3 for selected cycles, preserving the original held-position eligibility and complete selection evidence. Source, return boundary, and payout state retain their native contracts.
 
 `createCycleAttributableFinalizedAvailableReader` reloads the completed native return and its exact durable Relay leg association, native custody v3 row, and predecessor dust provenance. It returns only the attributed return plus dust, after a finalized public/archive/public native balance check. Unrelated wallet funds never increase the payout allocation. Zero attributed proceeds require no balance read.
 
@@ -14,7 +14,7 @@ Distribute finalized native ETH returned to Operations among the frozen pre-clai
 
 ## Invariants
 
-Holder weights, exclusions, floor rounding, residual dust, and bounded in-flight windows remain frozen. Native payment sends exact value to each recipient with empty calldata. Successful finalized signed-transaction inclusion proves payment, including to forwarding contracts; token logs or recipient balance deltas cannot prove native payment.
+Holder weights, exclusions, floor rounding, residual dust, and bounded in-flight windows remain frozen. Selected manifests validate the complete holder snapshot digest, supply reconciliation, frozen cycle policy, and deterministic balance-ranked top N before computing liabilities. Only selected balances enter the payout denominator. Selected holders with zero-rounded allocations remain selected and receive no transfer. The plan digest binds the entire selection evidence; historical v2 serialization remains unchanged. Native payment sends exact value to each recipient with empty calldata. Successful finalized signed-transaction inclusion proves payment, including to forwarding contracts; token logs or recipient balance deltas cannot prove native payment.
 
 Admission requires current native balance covering the distributable principal, frozen maximum payout fees, and gas reserve before consuming dust or persisting recipient state. The first signature rechecks the same combined requirement. Each signature uses exact transaction policy, Operations identity, approved bytes, nonce fencing, and fee bounds. Nonce interference and reverted transactions preserve unsent liability.
 

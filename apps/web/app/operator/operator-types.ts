@@ -28,7 +28,7 @@ export type ActiveCycle = {
   maxCycleBudgetMicroUsdg: string | null;
   max24HourBudgetMicroUsdg: string | null;
   revealedCards: number;
-  rewardRecipientLimit?: number;
+  rewardRecipientLimit?: number | null;
 };
 
 export type CardHistorySort = "recent" | "buyback-desc" | "buyback-asc";

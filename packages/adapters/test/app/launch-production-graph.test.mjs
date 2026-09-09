@@ -43,6 +43,7 @@ import {
 import { COLLECTOR_PURCHASE_BINDING_SCHEMA, COLLECTOR_PURCHASE_BINDING_VERSION } from '../../src/signing/collector-purchase-policy.mjs';
 import { COLLECTOR_BUYBACK_BINDING_SCHEMA, COLLECTOR_BUYBACK_BINDING_VERSION } from '../../src/signing/collector-buyback-policy.mjs';
 import {
+  createIsolatedKeychainChildSetup,
   COLLECTOR_PRODUCTION_BINDING_AUTHORITY_SYNTHETIC_OFFLINE,
   COLLECTOR_PRODUCTION_BINDING_ENTRY_SCHEMA,
   COLLECTOR_PRODUCTION_BINDING_REGISTRY_SCHEMA,
@@ -465,13 +466,13 @@ function buybackProductionBinding() {
  * pinned Collector program, then one exact SPL `TransferChecked` moving the real quoted proceeds
  * from the pinned Collector proceeds source to the operator's own real settlement ATA.
  */
-function buybackCandidateTransaction({ operationsSolana, cardMint, offerAtomic, blockhash }) {
+function buybackCandidateTransaction({ operationsSolana, cardMint, offerAtomic, blockhash, recipient = COLLECTOR_BUYBACK_RECIPIENT, discriminator = BUYBACK_SETTLE_DISCRIMINATOR_HEX }) {
   const settlementAta = deriveAssociatedTokenAddress(operationsSolana, SOLANA_MINT).toBase58();
   const transaction = new Transaction({ feePayer: new PublicKey(operationsSolana), recentBlockhash: blockhash });
   transaction.add(ComputeBudgetProgram.setComputeUnitLimit({ units: BUYBACK_COMPUTE_UNIT_LIMIT }));
   transaction.add(ComputeBudgetProgram.setComputeUnitPrice({ microLamports: Number(BUYBACK_PRIORITY_FEE_CAP_ATOMIC) }));
   const settleData = Buffer.alloc(24);
-  Buffer.from(BUYBACK_SETTLE_DISCRIMINATOR_HEX, 'hex').copy(settleData, 0);
+  Buffer.from(discriminator, 'hex').copy(settleData, 0);
   settleData.writeBigUInt64LE(offerAtomic, 8);
   settleData.writeBigUInt64LE(offerAtomic, 16);
   transaction.add(new TransactionInstruction({
@@ -480,7 +481,7 @@ function buybackCandidateTransaction({ operationsSolana, cardMint, offerAtomic, 
       { pubkey: new PublicKey(operationsSolana), isSigner: true, isWritable: true },
       { pubkey: COLLECTOR_AUTHORITY.publicKey, isSigner: true, isWritable: false },
       { pubkey: new PublicKey(cardMint), isSigner: false, isWritable: true },
-      { pubkey: new PublicKey(COLLECTOR_BUYBACK_RECIPIENT), isSigner: false, isWritable: true },
+      { pubkey: new PublicKey(recipient), isSigner: false, isWritable: true },
     ],
     data: settleData,
   }));
@@ -1239,6 +1240,7 @@ async function activateTwoPackPolicy(directory) {
   const configuration = applyOperatorConfiguration(null, {
     intervalMinutes: 5,
     allowedPackIds: ['return-fixture'],
+    packPlan: { orders: [{ pack: 'return-fixture', quantity: 2 }] },
     requestedOrders: 2,
     maxBoostersPerCycle: 2,
     maxUnitPriceMicroUsd: '17',
@@ -1718,9 +1720,9 @@ test('I-01/I-02 literal production loader pays ordinary and held N=2 proceeds ac
     authorizations: authority.diagnostics, terminalState: cycle.terminalState,
     admission: cycle.admission === null ? null : {
       quoteDigest: cycle.admission.quoteDigest,
-      unitFunding: cycle.admission.unitFundingQuote.amountAtomic,
+      unitFunding: cycle.admission.orders[0].unitFundingQuote.amountAtomic,
       aggregateFunding: cycle.admission.aggregateFundingQuote.amountAtomic,
-      unitPurchase: cycle.admission.unitPurchase.amountAtomic,
+      unitPurchase: cycle.admission.orders[0].unitPurchase.amountAtomic,
       aggregatePurchase: cycle.admission.aggregatePurchase.amountAtomic,
     },
     ledger: await readOperatorLedgers(directory), quotes: fixture.calls.quotes,
@@ -1757,9 +1759,9 @@ test('I-01/I-02 literal production loader pays ordinary and held N=2 proceeds ac
   assert.equal(recipient.finalizedTransfer.gasSpentWei, '42000');
   assert.equal(recipient.finalizedTransfer.calldataDigest, keccak256('0x'));
   assert.ok(ordinary.broadcasts.some(entry => entry.hash === recipient.transactionHash));
-  assert.equal(cycle.admission.unitFundingQuote.amountAtomic, '17');
+  assert.equal(cycle.admission.orders[0].unitFundingQuote.amountAtomic, '17');
   assert.equal(cycle.admission.aggregateFundingQuote.amountAtomic, '33');
-  assert.equal(cycle.admission.unitPurchase.amountAtomic, '8');
+  assert.equal(cycle.admission.orders[0].unitPurchase.amountAtomic, '8');
   assert.equal(cycle.admission.aggregatePurchase.amountAtomic, '16');
   assert.equal(ordinary.purchases.length, 2);
   assert.equal(ordinary.buybacks.length, 1);
@@ -1956,7 +1958,7 @@ const RELAY_SUPPLEMENTARY_RETURN_ORDER_ID = `0x${'4'.repeat(64)}`;
  * provider response exists.
  */
 const SYNTHETIC_RELAY_PROGRAM = '99vQwtBwYtrqqD9YSXbdum3KBdxPAVxYTaQ3cfnJSrN2';
-// Isolated quote rate: each USDC atomic source unit buys 101 wei, never a unit alias.
+// Isolated quote rate: each settlement token atomic source unit buys 101 wei, never a unit alias.
 const quotedNativeReturnWei = amount => BigInt(amount) * 101n;
 const capturedSourceInstruction = Object.freeze({ programId: SYNTHETIC_RELAY_PROGRAM,
   discriminatorHex: '0b9c60da27a3b413', dataLengthBytes: 48, amountOffsetBytes: 8, orderIdOffsetBytes: 16 });
@@ -2732,9 +2734,7 @@ test('N=2 composed offline scenario: real compose(config) drives purchase throug
   // pattern above. Syntactically valid, arbitrary base58 Solana addresses; they name no live
   // account. `BUYBACK_SELL_MINT` reuses pack 0's own card mint, itself independently pinned back
   // in `cardAwardsByMemo` before any purchase/open candidate ever existed.
-  const COLLECTOR_BUYBACK_PROGRAM_ID = Keypair.generate().publicKey.toBase58();
-  const COLLECTOR_BUYBACK_RECIPIENT = Keypair.generate().publicKey.toBase58();
-  const COLLECTOR_BUYBACK_INSTRUCTION_DATA = Buffer.from('collector-buyback:v1', 'utf8');
+  const COLLECTOR_BUYBACK_INSTRUCTION_DATA = Buffer.from(BUYBACK_SETTLE_DISCRIMINATOR_HEX, 'hex');
   const BUYBACK_SELL_MINT = cardAwardsByMemo.get(MEMO_PACK_0).mint;
   // Pack 1's own card mint, reused for its later real supplementary sale once it becomes available.
   const SUPPLEMENTARY_SELL_MINT = cardAwardsByMemo.get(MEMO_PACK_1).mint;
@@ -2757,16 +2757,9 @@ test('N=2 composed offline scenario: real compose(config) drives purchase throug
    * never to the policy itself.
    */
   function buildBuybackTransactionBytes({ recipient, mint, blockhash, data }) {
-    const transaction = new Transaction({ feePayer: operator.publicKey, recentBlockhash: blockhash });
-    transaction.add(new TransactionInstruction({
-      programId: new PublicKey(COLLECTOR_BUYBACK_PROGRAM_ID),
-      keys: [
-        { pubkey: new PublicKey(recipient), isSigner: false, isWritable: true },
-        { pubkey: new PublicKey(mint), isSigner: false, isWritable: false },
-      ],
-      data,
-    }));
-    return Buffer.from(transaction.serialize({ requireAllSignatures: false, verifySignatures: false })).toString('base64');
+    return buybackCandidateTransaction({ operationsSolana: operator.publicKey.toBase58(), cardMint: mint,
+      offerAtomic: BigInt(mint === SUPPLEMENTARY_SELL_MINT ? EPIC_GATE_SUPPLEMENTARY_SELL_OFFER_ATOMIC : EPIC_GATE_SELL_OFFER_ATOMIC),
+      blockhash, recipient, discriminator: data.toString('hex') });
   }
 
   function decodeBuybackTransaction(transactionBase64) {
@@ -3472,8 +3465,18 @@ test('N=2 composed offline scenario: real compose(config) drives purchase throug
   const runtimeFixture = await nativeRelaySetup({ runtimeMutation: observation => { const bytes = Buffer.from(observation.value[1].data[0], 'base64'); bytes.writeBigUInt64LE(1n, 4); observation.value[1].data[0] = bytes.toString('base64'); } });
   const nativePaymentBinding = createTestNativePaymentBinding({ schema: 'hookemon.native-payment-binding.v1', chainId: '4663',
     hook: { address: COMPOSED_HOOK_ADDRESS, runtimeHash: keccak256('0x6000') }, relay: { ...runtimeFixture.route, sourceInstruction: capturedSourceInstruction, emitter: RELAY_RETURN_SOLVER_EVM } }, createTestProfileMutationAuthority());
+  const isolatedRoot = join(directory, 'composed-isolated-child');
+  await mkdir(isolatedRoot);
+  const isolatedSetup = await createIsolatedKeychainChildSetup({ directory: isolatedRoot });
+  const composedRegistry = collectorProductionBindingRegistry([
+    collectorProductionBindingRegistryEntry({ authority: COLLECTOR_PRODUCTION_BINDING_AUTHORITY_SYNTHETIC_OFFLINE, stage: 'purchase', binding: rawBinding }),
+    collectorProductionBindingRegistryEntry({ authority: COLLECTOR_PRODUCTION_BINDING_AUTHORITY_SYNTHETIC_OFFLINE, stage: 'buyback', binding: buybackProductionBinding() }),
+  ]);
   const config = {
     now: graphNow,
+    collectorProductionBindingRegistry: composedRegistry,
+    signer: { backend: 'keychain', liveMode: true, keychain: { command: isolatedSetup.command, isolatedChildSetup: isolatedSetup } },
+    robinhood: { rpcUrl: 'http://127.0.0.1:1/rpc', archiveRpcUrl: 'http://127.0.0.1:1/archive' },
     nativePaymentBinding,
     stateDir,
     statePath,
@@ -3488,14 +3491,17 @@ test('N=2 composed offline scenario: real compose(config) drives purchase throug
     // regardless of the real wall-clock time this scenario happens to run at -- this scenario does
     // not exercise the settlement-window boundary itself, only that a real, non-fabricated window
     // check runs and passes.
-    relay: { solanaMint: SOLANA_MINT, maxSettlementWindowSeconds: '999999999' },
+    relay: { baseUrl: 'http://127.0.0.1:1/relay', solanaMint: SOLANA_MINT, maxSettlementWindowSeconds: '999999999' },
     solana: {
+      rpcUrl: 'http://127.0.0.1:1/solana',
       chainId: NATIVE_SOLANA_CHAIN_ID,
       blockhashContextResolver: async blockhash => ({
         blockhash, lastValidBlockHeight: String(blockhashHeights.get(blockhash) ?? HEIGHT_PACK_1),
       }),
     },
     collectorCrypt: {
+      baseUrl: 'http://127.0.0.1:1/collector',
+      productionBindingAuthority: COLLECTOR_PRODUCTION_BINDING_AUTHORITY_SYNTHETIC_OFFLINE,
       settlementAsset: { chainId: NATIVE_SOLANA_CHAIN_ID, assetId: SOLANA_MINT, decimals: 6 },
       purchase: { testFixtureBinding: fixtureBinding },
       epicGate: {
@@ -3830,7 +3836,7 @@ test('N=2 composed offline scenario: real compose(config) drives purchase throug
   assert.equal(returnEvidence.relayLeg.state, 'SETTLED', `the real Relay return leg must reach SETTLED; ${diagnostics()}`);
   assert.equal(returnEvidence.relayLeg.netDeltaAtomic, '9090', `the settled leg's own independently observed net delta must be exactly pack 0's real 90-unit proceeds; ${diagnostics()}`);
   assert.equal(returnEvidence.relayLeg.destinationAssetId?.toLowerCase(), 'native', `the settled leg must credit ETH; ${diagnostics()}`);
-  assert.equal(returnEvidence.relayLeg.sourceAmountAtomic, '90', `the source remains 90 USDC atoms while the destination is the separately quoted 9090 wei; ${diagnostics()}`);
+  assert.equal(returnEvidence.relayLeg.sourceAmountAtomic, '90', `the source remains 90 settlement token atoms while the destination is the separately quoted 9090 wei; ${diagnostics()}`);
   const [[, settledReturnLeg]] = cycle.relayLegs instanceof Map ? [...cycle.relayLegs.entries()] : [];
   assert.equal(cycle.relayLegs.size, 1, `exactly one Relay leg (the real return bridge) may ever be recorded; ${diagnostics()}`);
   assert.equal(settledReturnLeg.direction, 'return', `the one recorded Relay leg must be the return leg; ${diagnostics()}`);

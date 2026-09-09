@@ -1,8 +1,8 @@
 {
   "schemaVersion": "hookemon.interfaces.v1",
-  "source": "Native revision 71 proposal 31b79355 applied to PR39 56f185e; pending coordinator integration and feasibility freeze",
+  "source": "Owner-approved native ETH implementation, Collector Core buyback profile and configurable reward recipient selection; feasibility remains provisional",
   "productPhase": 3,
-  "requirementsRevision": 71,
+  "requirementsRevision": 74,
   "architectureRevision": 11,
   "status": "PROVISIONAL_PHASE3_PENDING_FEASIBILITY",
   "bindingManifest": "release/phase3/deployment-manifest.json",
@@ -417,7 +417,7 @@
         "assertCollectorPurchaseBindingV1",
         "createCollectorPurchasePolicy"
       ],
-      "trustInputs": "binding bytes and expectedDigest are independently supplied and digest-verified before the schema is read; durable per-cycle facts; an independently observed RPC blockhash context; candidate transaction bytes are never a legal factory input and are evaluated only by this same hookemon.transaction-policy.v1 decode/evaluate kernel The exact generatePack profile admits Limit → Memo → Transfer → Price, a provider-only signed Memo ending :open, and duplicate identical operator authority. Its original blockhash is independently rechecked by RPC against an immutable minimum slot; recovery approval binds the full immutable rule sidecar and never alters original message bytes.",
+      "trustInputs": "binding bytes and expectedDigest are independently supplied and digest-verified before the schema is read; durable per-cycle facts; an independently observed RPC blockhash context; candidate transaction bytes are never a legal factory input and are evaluated only by this same hookemon.transaction-policy.v1 decode/evaluate kernel The exact generatePack profile admits Limit \u2192 Memo \u2192 Transfer \u2192 Price, a provider-only signed Memo ending :open, and duplicate identical operator authority. Its original blockhash is independently rechecked by RPC against an immutable minimum slot; recovery approval binds the full immutable rule sidecar and never alters original message bytes.",
       "integrationStatus": "WIRED_NO_LIVE_ENTRY",
       "liveBindingStatus": "packages/adapters/src/app/stages/purchase.mjs resolves this factory behind two mutually exclusive seams -- a Node-test-only fixture and the productionBindingRegistry below -- but no live Collector program, account, provider co-signer, mint, expectedDigest source, or repository binding path is approved; no bindings/index.json entry exists for this interface and production composition has no path to a resolvable live entry"
     },
@@ -530,6 +530,15 @@
       "launch-contracts",
       "historical-role-holders"
     ],
+    "recipientSelection": {
+      "allowedLimits": [100, 200, 300, 400, 500, 600, 700, 800, 900, 1000],
+      "defaultLimit": 200,
+      "freeze": "cycle identity, operator configuration revision and limit persisted atomically before stages; resumed cycles use the stored policy",
+      "ranking": "positive non-excluded direct HKMN balances descending, normalized address ascending for ties, at most the frozen limit",
+      "evidence": "full holder replay, selected and eligible counts, selected/unselected/excluded balance totals and recomputed policy/manifest digests",
+      "allocation": "floor(distributable native principal times selected holder balance divided by selected balance total); native dust carry and gas reservations unchanged",
+      "historical": "absent selection policy preserves original all-holder manifests, plans, journal bytes and signed/finalized evidence"
+    },
     "contractHolders": "pay-to-own-address",
     "feasibility": [
       "recipient-count",
@@ -823,8 +832,8 @@
   },
   "nativeMigration": {
     "status": "INTEGRATED_PENDING_REQUIRED_CI_AND_RELEASE_AUTHORITY",
-    "requirementsRevision": 71,
-    "requirementsSha256": "750a12abf47a771d1181dd6a1782c1b6fbcc4eebb4632e5d1927bf52f4193425",
+    "requirementsRevision": 74,
+    "requirementsSha256": "c89397d3ece140e601f2bb494f8f13a86996faca5f5b43d013abc770abfadf5c",
     "proposalCommit": "31b7935514ebf85da805677128e2555eecc7fef5",
     "historicalBaselineCommit": "56f185e07dfafe5533df617ec1dad473ecb63f68",
     "launchEligible": false,
@@ -882,7 +891,11 @@
     },
     "schemas": {
       "money-configuration": "hookemon.money-configuration.v2",
-      "operator-configuration": "hookemon.operator-configuration.v4",
+      "operator-configuration": "hookemon.operator-configuration.v6",
+      "reward-selection-snapshot": "hookemon.reward-selection-snapshot.v1",
+      "selected-eligibility-manifest": "hookemon.eligibility-payout-manifest.v2",
+      "selected-direct-payout-plan": "hookemon.direct-payout-plan.v3",
+      "selected-supplementary-payout-plan": "hookemon.supplementary-direct-payout-plan.v3",
       "policy-admission": "hookemon.policy-admission.v3",
       "policy-cycle": "hookemon.policy-cycle.v5",
       "process-liability-evidence": "hookemon.process-liability-evidence.v2",
@@ -1014,6 +1027,19 @@
         "cycleLoss"
       ],
       "valuationAuthority": "Only attributable verified USD evidence; native principal and Collector USDC never imply USD parity"
+    },
+    "issuanceCommitments": {
+      "schema": "hookemon.native-issuance-commitments.v1",
+      "bindingDocumentSchema": "hookemon.native-issuance-prebinding.v1",
+      "runtimeDocumentSchema": "hookemon.native-issuance-runtime-authority.v1",
+      "hashAlgorithm": "sha256",
+      "preimage": "ASCII(domain) || 0x00 || UTF8(canonical(document))",
+      "bindingDomain": "HOOKEMON_NATIVE_ISSUANCE_BINDING_V1",
+      "runtimeDomain": "HOOKEMON_NATIVE_ISSUANCE_RUNTIME_AUTHORITY_V1",
+      "schemaDefinition": "scripts/programmable/lib/native-issuance-commitments.mjs",
+      "bindingDigest": null,
+      "runtimeDigest": null,
+      "finalReleaseRecord": null
     }
   }
 }

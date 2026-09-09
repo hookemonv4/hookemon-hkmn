@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 
+import { assertPackPlan } from '../config/pack-plan.mjs';
 import { assertOperatorConfiguration } from '../config/state-schema.mjs';
 import { canonicalJson, digest } from '../cycle/journal.mjs';
 import { MAXIMUM_PACK_BATCH_SIZE, assertStandingAuthorityDecision } from '../cycle/money-schemas.mjs';
@@ -442,17 +443,82 @@ function normalizeFundingUsd(value, amount, quote) {
   return immutableCanonicalValue(value, 'policy funding USD valuation');
 }
 
+function admissionUnits(admission) {
+  return admission?.schema === 'hookemon.policy-admission.v4' ? admission.orders : [admission];
+}
+function admissionPackId(admission) {
+  return admission?.schema === 'hookemon.policy-admission.v4' ? admission.orders[0].packId : admission?.packId;
+}
+function allPacksAllowed(configuration, context) {
+  return context.admission?.schema === 'hookemon.policy-admission.v4'
+    ? context.admission.orders.every(order => configuration.allowedPackIds.includes(order.packId))
+    : configuration.allowedPackIds.includes(context.packId);
+}
 function hasFreshFundingUsd(admission, verify, now) {
   if (!admission || typeof verify !== 'function') return false;
-  return [['unitFundingUsd', 'unitFundingQuote', 'unitRelay'], ['aggregateFundingUsd', 'aggregateFundingQuote', 'relay']].every(([field, amount, quote]) => {
-    const valuation = admission[field];
-    return valuation && now >= valuation.observedAtMs && now < valuation.validUntilMs
-      && verify(valuation, { amount: admission[amount], quoteDigest: admission[quote].quoteDigest,
-        quoteRequestId: admission[quote].requestId, sourcePath: 'details.currencyIn.amountUsd', rounding: 'up' }) === true;
+  const legs = admissionUnits(admission).map(unit => [unit.unitFundingUsd, unit.unitFundingQuote, unit.unitRelay]);
+  legs.push([admission.aggregateFundingUsd, admission.aggregateFundingQuote, admission.relay]);
+  return legs.every(([valuation, amount, quote]) => valuation && now >= valuation.observedAtMs && now < valuation.validUntilMs
+    && verify(valuation, { amount, quoteDigest: quote.quoteDigest, quoteRequestId: quote.requestId,
+      sourcePath: 'details.currencyIn.amountUsd', rounding: 'up' }) === true);
+}
+
+function normalizePlanAdmission(value, operationsAccounts) {
+  const operations = assertOperationsAccounts(operationsAccounts);
+  const packPlan = assertPackPlan(value.packPlan);
+  if (!packPlan.orders.length || !Array.isArray(value.orders) || value.orders.length !== packPlan.orders.length) {
+    throw new Error('policy admission orders must match the nonempty cycle pack plan');
+  }
+  assertCycleId(value.cycleId);
+  function quoteLeg(purchaseValue, fundingValue, relay, quoteValue, usdValue, label) {
+    const purchase = assertPolicyAdmissionAmount(purchaseValue, `${label} purchase`);
+    const funding = assertPolicyAdmissionAmount(fundingValue, `${label} funding`);
+    assertAdmissionRoute(purchase, operations.settlementRoute, `${label} purchase`);
+    assertAdmissionRoute(funding, operations.fundingRoute, `${label} funding`);
+    if (!relay || relay.tradeType !== 'EXACT_OUTPUT' || typeof relay.requestId !== 'string' || !relay.requestId
+      || !/^0x[0-9a-fA-F]{64}$/.test(relay.orderId ?? '')
+      || !Number.isSafeInteger(relay.deadlineUnixSeconds) || relay.deadlineUnixSeconds <= 0
+      || relay.sender?.toLowerCase() !== operations.evm || relay.recipient !== operations.solana
+      || relay.destinationAmount !== purchase.amountAtomic || relay.destinationMinimumAmount !== purchase.amountAtomic
+      || !digestPattern.test(relay.quoteDigest ?? '')) throw new Error(`${label} exact-output identity is invalid`);
+    const quote = normalizeUnitRelayQuote(quoteValue, { unitFundingQuote: funding, unitPurchase: purchase,
+      unitRelay: relay, operations, label });
+    if (quote.quoteDigest !== relay.quoteDigest) throw new Error(`${label} quote digest mismatch`);
+    return { purchase, funding, relay: immutableCanonicalValue(relay, label), quote,
+      usd: normalizeFundingUsd(usdValue, funding, relay) };
+  }
+  const orders = value.orders.map((order, index) => {
+    const selected = packPlan.orders[index];
+    if (!order || order.orderIndex !== index || order.packId !== selected.pack || order.quantity !== selected.quantity) {
+      throw new Error('policy admission order differs from the cycle pack plan');
+    }
+    const leg = quoteLeg(order.unitPurchase, order.unitFundingQuote, order.unitRelay, order.unitRelayQuote,
+      order.unitFundingUsd, `order ${index} unit quote`);
+    return Object.freeze({ orderIndex: index, packId: selected.pack, quantity: selected.quantity,
+      unitPurchase: leg.purchase, unitFundingQuote: leg.funding, unitFundingUsd: leg.usd,
+      unitRelay: leg.relay, unitRelayQuote: leg.quote });
   });
+  const quantity = orders.reduce((total, order) => total + order.quantity, 0);
+  if (value.quantity !== quantity) throw new Error('policy admission quantity differs from the plan total');
+  const aggregate = quoteLeg(value.aggregatePurchase, value.aggregateFundingQuote, value.relay,
+    value.relayQuote, value.aggregateFundingUsd, 'aggregate quote');
+  const total = orders.reduce((amount, order) => amount + BigInt(order.unitPurchase.amountAtomic) * BigInt(order.quantity), 0n);
+  if (BigInt(aggregate.purchase.amountAtomic) !== total) throw new Error('policy admission aggregate differs from the plan purchase total');
+  if (value.quoteDigest !== aggregate.quote.quoteDigest) throw new Error('policy admission aggregate quote digest mismatch');
+  const liability = normalizeProcessLiabilityEvidence(value.processLiabilityEvidence, {
+    cycleId: value.cycleId, fundingRoute: operations.fundingRoute, operations, historical: false });
+  if (BigInt(aggregate.funding.amountAtomic) > BigInt(liability.ceilingAtomic)) {
+    throw new Error('policy admission aggregateFundingQuote exceeds the persisted process liability ceiling');
+  }
+  return Object.freeze({ schema: 'hookemon.policy-admission.v4', cycleId: value.cycleId, packPlan,
+    orders: Object.freeze(orders), quantity, quoteDigest: value.quoteDigest,
+    aggregatePurchase: aggregate.purchase, aggregateFundingQuote: aggregate.funding,
+    aggregateFundingUsd: aggregate.usd, relay: aggregate.relay, relayQuote: aggregate.quote,
+    processLiabilityEvidence: liability });
 }
 
 function normalizePolicyAdmission(value, operationsAccounts, { historical = false } = {}) {
+  if (!historical && value?.schema === 'hookemon.policy-admission.v4') return normalizePlanAdmission(value, operationsAccounts);
   const resolvedOperations = assertOperationsAccounts(operationsAccounts);
   const operations = historical ? { ...resolvedOperations, fundingRoute: { chainId: '4663', assetId: '0x5fc5360d0400a0fd4f2af552add042d716f1d168', decimals: 6 } } : resolvedOperations;
   if (!value || typeof value !== 'object' || Array.isArray(value)
@@ -722,7 +788,8 @@ export function deriveCyclePolicyDigest({ configuration, cycleId, releaseCostMic
   if (normalizedAdmission !== null && normalizedAdmission.cycleId !== cycleId) throw new Error('policy admission cycleId does not match cycle digest');
   return digestCyclePolicy({
     schema: 'hookemon.policy-cycle.v5',
-    policy: policyMaterial(normalized),
+    policy: policyMaterial(normalizedAdmission?.schema === 'hookemon.policy-admission.v4'
+      ? { ...normalized, requestedOrders: normalizedAdmission.quantity, allowedPackIds: normalizedAdmission.orders.map(order => order.packId) } : normalized),
     cycleId,
     releaseCostMicroUsd,
     releaseAmountWei,
@@ -760,7 +827,7 @@ function evaluateExistingCycleExecution({ configuration, custodyState, context }
   if (!context.cycleId || !context.packId || (context.releaseAmount === 0n || context.releaseAmountWei === 0n)) {
     throw new Error('policy execution guard requires cycleId, packId, and a positive release amount');
   }
-  if (!configuration.allowedPackIds.includes(context.packId)) return refused('PACK_NOT_ALLOWED');
+  if (!allPacksAllowed(configuration, context)) return refused('PACK_NOT_ALLOWED');
   if (context.releaseAmount > effectiveCycleCap(configuration, context)
     || context.releaseAmount > BigInt(configuration.maxCycleBudgetMicroUsd)) {
     return refused('PER_CYCLE_CAP');
@@ -847,14 +914,14 @@ function admissionContext(input) {
     if (releaseAmountWei !== BigInt(admission.aggregateFundingQuote.amountAtomic) || releaseAmount !== BigInt(admission.aggregateFundingUsd.amountMicroUsd)) {
       throw new Error('policy release amount does not match admitted aggregate funding quote');
     }
-    if (input.packId !== undefined && input.packId !== admission.packId) {
+    if (input.packId !== undefined && input.packId !== admissionPackId(admission)) {
       throw new Error('policy admission packId does not match policy context');
     }
     if (input.requestedOrders !== undefined && input.requestedOrders !== admission.quantity) {
       throw new Error('policy admission quantity does not match requested orders');
     }
-    if (['cycle-start', 'claim-process', 'purchase'].includes(boundary) && (now >= admission.relay.deadlineUnixSeconds * 1000 || now >= admission.unitRelay.deadlineUnixSeconds * 1000)) {
-      return { boundary, liveMode, mode, now, releaseAmount, releaseAmountWei, capMicroUsd, cycleId: input.cycleId ?? admission.cycleId, packId: input.packId ?? admission.packId, admission, operations, expiredAdmission: true };
+    if (['cycle-start', 'claim-process', 'purchase'].includes(boundary) && (now >= admission.relay.deadlineUnixSeconds * 1000 || admissionUnits(admission).some(unit => now >= unit.unitRelay.deadlineUnixSeconds * 1000))) {
+      return { boundary, liveMode, mode, now, releaseAmount, releaseAmountWei, capMicroUsd, cycleId: input.cycleId ?? admission.cycleId, packId: input.packId ?? admissionPackId(admission), admission, operations, expiredAdmission: true };
     }
   }
   return { boundary, liveMode, mode, now, releaseAmount, releaseAmountWei, capMicroUsd, cycleId: input.cycleId ?? admission?.cycleId ?? null, packId: input.packId ?? null, admission, operations };
@@ -889,6 +956,11 @@ function evaluateConfiguredPolicy({ configuration, custody, ...input }) {
     return evaluateExistingCycleExecution({ configuration: normalized, custodyState, context });
   }
 
+  if (context.admission?.schema === 'hookemon.policy-admission.v4' && context.admission.quantity > normalized.maxBoostersPerCycle) return refused('QUANTITY_LIMIT');
+  if (context.admission?.schema === 'hookemon.policy-admission.v4'
+    && ['cycle-start', 'claim-process', 'purchase'].includes(context.boundary)
+    && context.admission.orders.some(order => BigInt(order.unitFundingUsd.amountMicroUsd) > BigInt(normalized.maxUnitPriceMicroUsd))) return refused('UNIT_PRICE_CAP');
+
   if (context.boundary === 'cycle-start') {
     const cyclesInWindow = withinTrailingWindow(
       normalized.cycleLedger.filter(entry => entry.mode === context.mode),
@@ -908,9 +980,9 @@ function evaluateConfiguredPolicy({ configuration, custody, ...input }) {
       || custodyState.heldPositions.valueMicroUsd > BigInt(normalized.maxHeldValueMicroUsd)) {
       return refused('HELD_LIMIT');
     }
-    if (!normalized.allowedPackIds.includes(context.packId)) return refused('PACK_NOT_ALLOWED');
-    if (normalized.requestedOrders === 0) return refused('NO_ORDERS_REQUESTED');
-    if (context.admission !== null && context.admission.quantity !== normalized.requestedOrders) return refused('QUANTITY_MISMATCH');
+    if (!allPacksAllowed(normalized, context)) return refused('PACK_NOT_ALLOWED');
+    if (context.admission?.schema !== 'hookemon.policy-admission.v4' && normalized.requestedOrders === 0) return refused('NO_ORDERS_REQUESTED');
+    if (context.admission !== null && context.admission.schema !== 'hookemon.policy-admission.v4' && context.admission.quantity !== normalized.requestedOrders) return refused('QUANTITY_MISMATCH');
     if (context.releaseAmount > effectiveCycleCap(normalized, context)) return refused('PER_CYCLE_CAP');
     if (context.releaseAmount > BigInt(normalized.maxCycleBudgetMicroUsd)) return refused('PER_CYCLE_CAP');
 
@@ -989,9 +1061,9 @@ function evaluateConfiguredPolicy({ configuration, custody, ...input }) {
     if (context.cycleId === null || context.packId === null) throw new Error('policy purchase requires cycleId and packId');
     if (custodyState.unattributed) return refused('UNATTRIBUTED_CUSTODY');
     if (custodyState.unvaluedExposure) return refused('UNVALUED_CUSTODY');
-    if (!normalized.allowedPackIds.includes(context.packId)) return refused('PACK_NOT_ALLOWED');
-    const unitFundingAmount = context.admission === null ? context.releaseAmount : BigInt(context.admission.unitFundingUsd.amountMicroUsd);
-    if (unitFundingAmount > BigInt(normalized.maxUnitPriceMicroUsd)) return refused('UNIT_PRICE_CAP');
+    if (!allPacksAllowed(normalized, context)) return refused('PACK_NOT_ALLOWED');
+    const unitAmounts = context.admission === null ? [context.releaseAmount] : admissionUnits(context.admission).map(unit => BigInt(unit.unitFundingUsd.amountMicroUsd));
+    if (unitAmounts.some(amount => amount > BigInt(normalized.maxUnitPriceMicroUsd))) return refused('UNIT_PRICE_CAP');
     const existing = existingCycle(normalized, context.cycleId);
     if (!existing) return refused('CYCLE_POLICY_MISSING');
     const expectedDigest = matchingExistingCycleDigest({
@@ -1084,7 +1156,7 @@ export function evaluateQuoteRefresh(input) {
   if (normalized.liveMode !== liveMode) return refused('EXECUTION_MODE_MISMATCH');
   if (normalized.killSwitch) return refused('KILL_SWITCH');
   if (normalized.executionPaused) return refused('EXECUTION_PAUSED');
-  if (BigInt(normalizedReplacement.unitFundingUsd.amountMicroUsd) > BigInt(normalized.maxUnitPriceMicroUsd)) {
+  if (admissionUnits(normalizedReplacement).some(unit => BigInt(unit.unitFundingUsd.amountMicroUsd) > BigInt(normalized.maxUnitPriceMicroUsd))) {
     return refused('UNIT_PRICE_CAP');
   }
   const resolvedCapMicroUsd = capMicroUsd === undefined ? null : assertAmount(capMicroUsd, 'policy capMicroUsd');

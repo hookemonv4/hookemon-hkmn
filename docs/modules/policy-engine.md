@@ -12,8 +12,8 @@ Operator configuration v4 uses `MicroUsd` controls and ledgers. Policy admission
 
 ## Invariants
 
-- Funding identity is 4663/native/18. The wire adapters alone use the zero address; Solana settlement retains its configured USDC mint and six decimals.
-- The 55/165/495 USD unit, cycle and trailing-day outer rails remain fixed, with tighter owner caps. USD amounts use canonical integer micro-USD strings and never become transferable amounts. There is no ETH/USD or USDC/USD parity assumption.
+- Funding identity is 4663/native/18. The wire adapters alone use the zero address; Solana settlement retains its configured settlement token mint and six decimals.
+- The 55/165/495 USD unit, cycle and trailing-day outer rails remain fixed, with tighter owner caps. USD amounts use canonical integer micro-USD strings and never become transferable amounts. There is no ETH/USD or settlement token/USD parity assumption.
 - Every new claim and purchase requires producer-authenticated, current, exact-amount cost valuations with upward rounding. Persisted JSON preserves evidence and cost basis but cannot authenticate a new risk decision. Unit and aggregate quotes remain independent.
 - A reservation records the aggregate USD cost once. Retries keep that cost and the original timestamp; the current per-cycle custody exposure offsets only the reserved cost already represented in aggregate risk. Unknown retry exposure refuses admission. Per-cycle exposure cannot exceed total custody.
 - Held positions retain attributed purchase cost. Their outer limits remain ten positions and 5,000 USD; owner controls may tighten both. Insured or market value cannot replace purchase cost.
@@ -34,3 +34,7 @@ Run the focused policy, configuration, budget, wallet, service and canary tests 
 Retain old configuration, receipt and journal records as history. Start native execution with v4 configuration and v3 admission rather than relabeling historical USDG principal. Reauthenticate exact fetched-quote valuations before additional risk; use the original cost basis for observation and recovery. Restore unknown custody attribution before admitting another cycle.
 
 Recovery pointers: [wrong Relay asset](../runbooks/relay-wrong-asset.md), [wrong transaction recipient](../runbooks/transaction-policy-wrong-recipient.md), [held epic card](../runbooks/epic-card-held.md), [epic threshold equality](../runbooks/epic-threshold-equality.md), and [unattributed deposit](../runbooks/unattributed-deposit.md).
+
+`hookemon.policy-admission.v4` binds a nonempty `hookemon.pack-plan.v1` and an ordered price/quote record for every selected pack. Total quantity is at most 64; aggregate settlement equals the sum of each immutable unit price times its quantity. Each unit has an independently validated exact-output quote and USD valuation; one separate aggregate quote supplies executable funding and must fit attributable process liability. Legacy v2/v3 admission behavior remains explicit, without schema coercion.
+
+For v4, the cycle digest binds the entire admitted plan and uses its fixed quantity and selected pack IDs. Editing the configured plan or adding allowed IDs does not change an existing cycle's digest. The independent live allowlist still checks every admitted pack, and fresh pause, kill, unit price, quantity and aggregate safety caps still apply. Quote refresh retains every admitted purchase target and the original released principal.

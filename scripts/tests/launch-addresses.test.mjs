@@ -7,6 +7,7 @@ import test from 'node:test';
 
 import {
   ALL_HOOK_PERMISSION_MASK,
+  EXAMPLE_CONFIG,
   PROGRAMMABLE_GRAPH_FACTORY,
   PROGRAMMABLE_LAUNCH_STAMP_ROUTER,
   REQUIRED_HOOK_PERMISSION_MASK,
@@ -17,9 +18,11 @@ import {
   mineHookAddress,
   mineProgrammableSalt,
   mineSalt,
+  readHookLaunchArtifactBytecode,
   satisfiesMask,
 } from '../mine-hook-address.mjs';
 import { keccak256 } from '../../packages/contracts/tooling/payout/canonical-merkle-sum.mjs';
+import { sha256Bytes } from '../programmable/lib/canonical-json.mjs';
 import {
   deriveAddresses,
   deriveGraphCommitment,
@@ -217,12 +220,12 @@ function writeJson(file, value) {
   writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`);
 }
 
-function launchMetadata(compilationTarget) {
+function launchMetadata(compilationTarget, native = false) {
   return JSON.stringify({
     compiler: { version: '0.8.26+commit.8a97fa7a' },
     settings: {
-      optimizer: { enabled: true, runs: 1000 },
-      viaIR: false,
+      optimizer: { enabled: true, runs: native ? 200 : 1000 },
+      viaIR: native,
       evmVersion: 'cancun',
       metadata: {
         appendCBOR: false,
@@ -285,7 +288,7 @@ function makeFixture({ native = false } = {}) {
     }],
     bytecode: { object: TOKEN_CREATION_BYTECODE },
     deployedBytecode: { object: '0x60006000f3' },
-    metadata: launchMetadata({ 'src/launch/HKMNToken.sol': 'HKMNToken' }),
+    metadata: launchMetadata({ 'src/launch/HKMNToken.sol': 'HKMNToken' }, native),
   });
   writeJson(hookArtifactPath, {
     contractName: 'HookemonHook',
@@ -295,7 +298,7 @@ function makeFixture({ native = false } = {}) {
     }],
     bytecode: { object: HOOK_CREATION_BYTECODE },
     deployedBytecode: { object: '0x6001600055' },
-    metadata: launchMetadata({ 'src/HookemonHook.sol': 'HookemonHook' }),
+    metadata: launchMetadata({ 'src/HookemonHook.sol': 'HookemonHook' }, native),
   });
   writeJson(custodyArtifactPath, {
     contractName: 'PermanentPositionCustody',
@@ -308,7 +311,7 @@ function makeFixture({ native = false } = {}) {
     }],
     bytecode: { object: CUSTODY_CREATION_BYTECODE },
     deployedBytecode: { object: '0x6002600055' },
-    metadata: launchMetadata({ 'src/bindings/RobinhoodBindings.sol': 'PermanentPositionCustody' }),
+    metadata: launchMetadata({ 'src/bindings/RobinhoodBindings.sol': 'PermanentPositionCustody' }, native),
   });
 
   const fixture = {
@@ -425,6 +428,8 @@ function makeFixture({ native = false } = {}) {
   if (native) {
     const input = fixture.input;
     input.schemaVersion = 'hookemon.phase3.launch-inputs.v2';
+    input.compilerProfile.optimizer.runs = 200;
+    input.compilerProfile.viaIR = true;
     input.quoteCurrency = '0x0000000000000000000000000000000000000000';
     input.seedIntent = { payer: input.roles.launchAuthority, tickLower: -887220, tickUpper: 887220, maxDeadlineSeconds: 900 };
     delete input.usdg;
@@ -450,6 +455,109 @@ function makeFixture({ native = false } = {}) {
   }
   setCanonicalInitializerCalldata(fixture.input);
   return fixture;
+}
+
+const RELEASE_ARTIFACTS_DIRECTORY = resolve(root, 'release/phase3/artifacts');
+
+function readReleaseArtifacts() {
+  return Object.fromEntries(['token', 'hook', 'custody'].map((name) => {
+    const path = resolve(RELEASE_ARTIFACTS_DIRECTORY, `${name}.json`);
+    const bytes = readFileSync(path);
+    return [name, { path, bytes, artifact: JSON.parse(bytes.toString('utf8')) }];
+  }));
+}
+
+function syntheticImmutablePatches(artifact, byte) {
+  return Object.entries(artifact.deployedBytecode.immutableReferences).flatMap(([astId, references]) => (
+    references.map(({ start, length }) => ({ astId, start, length, value: `0x${byte.repeat(length)}` }))
+  ));
+}
+
+// Synthetic local roles, salts, digests and seed plan bound to the checked-in compiler exports.
+// Build-only derivation input; it is not a deployment record or a provider claim.
+function releaseArtifactLaunchInputs(artifacts) {
+  const roles = {
+    manager: address('1'),
+    positionManager: address('2'),
+    permit2: address('3'),
+    programmable: address('4'),
+    treasury: address('5'),
+    operations: address('6'),
+    launchAuthority: address('7'),
+    issuanceAuthority: PROGRAMMABLE_GRAPH_FACTORY,
+  };
+  const pool = { fee: 0, tickSpacing: 60, seedMaximumWei: '40000000000000000', hkmnAtomic: '1000000000000000000000000000' };
+  const candidate = deriveNativePriceCandidate({ nativeWei: pool.seedMaximumWei, hkmnAtomic: pool.hkmnAtomic });
+  const target = (name, targetIndex, targetIdHash, applicantSalt, byte) => ({
+    targetIndex,
+    targetId: name,
+    targetIdHash,
+    applicantSalt,
+    artifactPath: `${name}.json`,
+    contractName: { token: 'HKMNToken', hook: 'HookemonHook', custody: 'PermanentPositionCustody' }[name],
+    initializerCalldata: '0x00',
+    deploymentValue: nativeValue(),
+    initializerValue: nativeValue(),
+    runtimeImmutablePatches: syntheticImmutablePatches(artifacts[name].artifact, byte),
+  });
+  return {
+    schemaVersion: 'hookemon.phase3.launch-inputs.v2',
+    chain: {
+      chainId: '4663',
+      factory: PROGRAMMABLE_GRAPH_FACTORY,
+      authorizedLauncher: ROUTER,
+      routeNamespace: bytes32('a'),
+      routeNonce: bytes32('b'),
+    },
+    graphAuthorization: { topologyHash: bytes32('e'), totalValue: nativeValue() },
+    compilerProfile: {
+      solc: '0.8.26+commit.8a97fa7a',
+      optimizer: { enabled: true, runs: 200 },
+      viaIR: true,
+      evmVersion: 'cancun',
+      metadata: { appendCBOR: false, bytecodeHash: 'none', useLiteralContent: false },
+    },
+    quoteCurrency: '0x0000000000000000000000000000000000000000',
+    roles,
+    pool: { ...pool, priceCandidates: { nativeCurrency0: { sqrtPriceX96: candidate.sqrtPriceX96 } } },
+    seedIntent: { payer: roles.launchAuthority, tickLower: -887220, tickUpper: 887220, maxDeadlineSeconds: 900 },
+    hookConstructorConfig: {
+      manager: { ref: 'roles.manager' },
+      positionManager: { ref: 'roles.positionManager' },
+      permit2: { ref: 'roles.permit2' },
+      quoteCurrency: { ref: 'quoteCurrency' },
+      hkmn: { ref: 'addresses.token' },
+      tickSpacing: { ref: 'pool.tickSpacing' },
+      programmable: { ref: 'roles.programmable' },
+      treasury: { ref: 'roles.treasury' },
+      operations: { ref: 'roles.operations' },
+      launchAuthority: { ref: 'roles.launchAuthority' },
+      issuanceAuthority: { ref: 'roles.issuanceAuthority' },
+      expectedDecimals: 18,
+      bindingDigest: bytes32('c'),
+      runtimeDigest: bytes32('d'),
+      processClaimLimit6hWei: '10000000000000000',
+      processClaimLimitMaxWei: '20000000000000000',
+      processClaimMaxCount: '8',
+      operationsRotationDelay: '259200',
+    },
+    targets: {
+      token: {
+        ...target('token', 0, bytes32('1'), { mode: 'fixed', value: salt(4) }, '11'),
+        constructorArguments: [
+          { ref: 'chain.factory' },
+          { ref: 'quoteCurrency' },
+          18,
+          { ref: 'pool.selectedPriceCandidate.sqrtPriceX96' },
+        ],
+      },
+      hook: target('hook', 2, bytes32('2'), { mode: 'mine', start: '0', maxAttempts: '200000' }, '22'),
+      custody: {
+        ...target('custody', 1, bytes32('3'), { mode: 'fixed', value: salt(3) }, '33'),
+        constructorArguments: [{ ref: 'roles.positionManager' }, 0],
+      },
+    },
+  };
 }
 
 test('derives the provider effective salt from the pinned factory ABI preimage', () => {
@@ -1152,6 +1260,11 @@ test('ships a strict manifest schema and a visibly non-production input example'
   );
   assert.equal(example.exampleOnly, true);
   assert.match(JSON.stringify(example), /PLACEHOLDER/);
+  assert.equal(example.schemaVersion, 'hookemon.phase3.launch-inputs.v2');
+  assert.deepEqual(
+    validateJsonSchema({ $defs: schema.$defs, $ref: '#/$defs/nativeCompilerProfile' }, example.compilerProfile),
+    [],
+  );
 });
 
 
@@ -1166,6 +1279,299 @@ test('native version derives a single zero-quote graph from explicit wei and com
     assert.equal(result.pool.priceCandidate.sqrtPriceX96, '12527072418752396559322253362376889');
     assert.equal(verifyDerivedAddresses({ launchInputs: fixture.input, derived: result, inputDirectory: fixture.directory }), true);
   } finally { rmSync(fixture.directory, { recursive: true, force: true }); }
+});
+
+test('native version requires the IR launch profile while the historical version stays strict', () => {
+  const native = makeFixture({ native: true });
+  const historical = makeFixture();
+  try {
+    assert.deepEqual(native.input.compilerProfile.optimizer, { enabled: true, runs: 200 });
+    assert.equal(native.input.compilerProfile.viaIR, true);
+    assert.equal(deriveAddresses({ launchInputs: native.input, inputDirectory: native.directory }).targets.hook.applicantSaltMode, 'mined');
+    for (const [runs, viaIR, message] of [
+      [1000, false, /compilerProfile\.optimizer must use 200 enabled runs/],
+      [200, false, /compilerProfile uses an unsupported setting/],
+      [1000, true, /compilerProfile\.optimizer must use 200 enabled runs/],
+    ]) {
+      const input = structuredClone(native.input);
+      input.compilerProfile.optimizer.runs = runs;
+      input.compilerProfile.viaIR = viaIR;
+      assert.throws(() => deriveAddresses({ launchInputs: input, inputDirectory: native.directory }), message);
+    }
+    for (const [runs, viaIR, message] of [
+      [200, true, /compilerProfile\.optimizer must use 1000 enabled runs/],
+      [1000, true, /compilerProfile uses an unsupported setting/],
+      [200, false, /compilerProfile\.optimizer must use 1000 enabled runs/],
+    ]) {
+      const input = structuredClone(historical.input);
+      input.compilerProfile.optimizer.runs = runs;
+      input.compilerProfile.viaIR = viaIR;
+      assert.throws(() => deriveAddresses({ launchInputs: input, inputDirectory: historical.directory }), message);
+    }
+
+    const hookArtifactPath = resolve(native.directory, 'hook.json');
+    const hookArtifact = JSON.parse(readFileSync(hookArtifactPath, 'utf8'));
+    hookArtifact.metadata = launchMetadata({ 'src/HookemonHook.sol': 'HookemonHook' });
+    writeJson(hookArtifactPath, hookArtifact);
+    assert.throws(
+      () => deriveAddresses({ launchInputs: native.input, inputDirectory: native.directory }),
+      /hook artifact optimizer does not match the launch profile/,
+    );
+
+    const releaseToken = structuredClone(historical.input);
+    releaseToken.targets.token.artifactPath = resolve(RELEASE_ARTIFACTS_DIRECTORY, 'token.json');
+    assert.throws(
+      () => deriveAddresses({ launchInputs: releaseToken, inputDirectory: historical.directory }),
+      /token artifact optimizer does not match the launch profile/,
+    );
+  } finally {
+    rmSync(native.directory, { recursive: true, force: true });
+    rmSync(historical.directory, { recursive: true, force: true });
+  }
+});
+
+test('mines a native provider hook address from the native config identity and IR-profile artifact', () => {
+  const fixture = makeFixture({ native: true });
+  try {
+    const input = fixture.input;
+    const derived = deriveAddresses({ launchInputs: input, inputDirectory: fixture.directory });
+    const hookArtifactPath = resolve(fixture.directory, 'hook.json');
+    const nativeArtifact = JSON.parse(readFileSync(hookArtifactPath, 'utf8'));
+    const config = fixtureHookConfig(input, derived.targets.token.address);
+    const configPath = resolve(fixture.directory, 'native-config.json');
+    writeJson(configPath, config);
+    const providerSalt = {
+      chainId: input.chain.chainId,
+      factory: input.chain.factory,
+      routeNamespace: input.chain.routeNamespace,
+      routeNonce: input.chain.routeNonce,
+      targetIdHash: input.targets.hook.targetIdHash,
+      authorizedLauncher: input.chain.authorizedLauncher,
+    };
+    const options = {
+      configPath,
+      providerSalt,
+      hookArtifactPath,
+      contractsRoot: 'not-used',
+      forgeBinary: 'not-used',
+      startSalt: 0n,
+      maxAttempts: 200_000,
+    };
+
+    const report = mineHookAddress(options);
+    assert.equal(report.schemaVersion, 'hookemon.mined-provider-hook-address.v1');
+    assert.equal(report.initCodeHash, keccakHex(`${HOOK_CREATION_BYTECODE}${encodeNativeConstructorConfig(config).slice(2)}`));
+    assert.equal(report.initCodeHash, derived.targets.hook.initCodeHash);
+    assert.equal(report.applicantSalt, derived.targets.hook.applicantSalt);
+    assert.equal(report.effectiveSalt, derived.targets.hook.effectiveSalt);
+    assert.equal(toEip55Address(report.minedAddress), derived.targets.hook.address);
+    assert.equal(report.maskCheckPassed, true);
+
+    const cliReport = JSON.parse(execFileSync(process.execPath, [
+      resolve(root, 'scripts/mine-hook-address.mjs'),
+      '--config', configPath,
+      '--hook-artifact', hookArtifactPath,
+      '--provider-chain-id', providerSalt.chainId,
+      '--provider-factory', providerSalt.factory,
+      '--route-namespace', providerSalt.routeNamespace,
+      '--route-nonce', providerSalt.routeNonce,
+      '--target-id-hash', providerSalt.targetIdHash,
+      '--authorized-launcher', providerSalt.authorizedLauncher,
+      '--max-attempts', '200000',
+    ], { encoding: 'utf8', stdio: 'pipe' }));
+    assert.equal(cliReport.minedAddress, report.minedAddress);
+    assert.equal(cliReport.initCodeHash, report.initCodeHash);
+    assert.equal(cliReport.applicantSalt, report.applicantSalt);
+
+    const historicalArtifactPath = resolve(fixture.directory, 'historical-hook.json');
+    writeJson(historicalArtifactPath, {
+      ...nativeArtifact,
+      abi: [{ type: 'constructor', inputs: [{ name: 'config', type: 'tuple', components: hookConstructorComponents() }] }],
+      metadata: launchMetadata({ 'src/HookemonHook.sol': 'HookemonHook' }),
+    });
+    assert.throws(
+      () => mineHookAddress({ ...options, hookArtifactPath: historicalArtifactPath }),
+      /hook artifact optimizer must use 200 enabled runs/,
+    );
+    assert.throws(
+      () => mineHookAddress({ ...options, configPath: null }),
+      /hook artifact optimizer must use 1000 enabled runs/,
+    );
+    const historicalAbiArtifactPath = resolve(fixture.directory, 'historical-abi-hook.json');
+    writeJson(historicalAbiArtifactPath, {
+      ...nativeArtifact,
+      abi: [{ type: 'constructor', inputs: [{ name: 'config', type: 'tuple', components: hookConstructorComponents() }] }],
+    });
+    assert.throws(
+      () => mineHookAddress({ ...options, hookArtifactPath: historicalAbiArtifactPath }),
+      /constructor ABI does not match the native ConstructorConfig/,
+    );
+    const mixedConfigPath = resolve(fixture.directory, 'mixed-config.json');
+    writeJson(mixedConfigPath, { ...config, usdg: USDG });
+    assert.throws(
+      () => mineHookAddress({ ...options, configPath: mixedConfigPath }),
+      /either the historical or the complete native field set/,
+    );
+
+    const historicalReport = mineHookAddress({ ...options, configPath: null, hookArtifactPath: historicalArtifactPath });
+    assert.equal(historicalReport.initCodeHash, keccakHex(`${HOOK_CREATION_BYTECODE}${encodeConstructorConfig(EXAMPLE_CONFIG).slice(2)}`));
+    assert.equal(historicalReport.maskCheckPassed, true);
+  } finally { rmSync(fixture.directory, { recursive: true, force: true }); }
+});
+
+test('mines and derives a native v2 graph from the checked-in compiler exports without mutating them', () => {
+  const artifacts = readReleaseArtifacts();
+  const directory = mkdtempSync(join(tmpdir(), 'hookemon-release-artifacts-'));
+  try {
+    for (const { artifact } of Object.values(artifacts)) {
+      assert.equal(Object.hasOwn(artifact, 'contractName'), false);
+      assert.equal(Object.keys(artifact.metadata.settings.compilationTarget).length, 1);
+      assert.deepEqual(artifact.metadata.settings.metadata, { bytecodeHash: 'none', appendCBOR: false });
+    }
+    const input = releaseArtifactLaunchInputs(artifacts);
+    const sqrtPriceX96 = input.pool.priceCandidates.nativeCurrency0.sqrtPriceX96;
+    const effectiveSalt = (name) => deriveProgrammableEffectiveSalt({
+      ...input.chain,
+      targetIdHash: input.targets[name].targetIdHash,
+      applicantSalt: input.targets[name].applicantSalt.value,
+    });
+    const token = toEip55Address(computeCreate2Address(
+      input.chain.factory,
+      effectiveSalt('token'),
+      keccakHex(`${artifacts.token.artifact.bytecode.object}${addressWord(input.chain.factory)}${addressWord(input.quoteCurrency)}${uintWord(18)}${uintWord(sqrtPriceX96)}`),
+    ));
+    const custody = toEip55Address(computeCreate2Address(
+      input.chain.factory,
+      effectiveSalt('custody'),
+      keccakHex(`${artifacts.custody.artifact.bytecode.object}${addressWord(input.roles.positionManager)}${uintWord(0)}`),
+    ));
+    const config = fixtureHookConfig(input, token);
+    const configPath = resolve(directory, 'hook-config.json');
+    writeJson(configPath, config);
+
+    // One mining pass over the real hook preimage; derivation below reuses the mined salt.
+    const report = mineHookAddress({
+      configPath,
+      providerSalt: { ...input.chain, targetIdHash: input.targets.hook.targetIdHash },
+      hookArtifactPath: artifacts.hook.path,
+      contractsRoot: 'not-used',
+      forgeBinary: 'not-used',
+      startSalt: 0n,
+      maxAttempts: 200_000,
+    });
+    assert.equal(report.hookArtifact, artifacts.hook.path);
+    assert.equal(report.initCodeHash, keccakHex(`${artifacts.hook.artifact.bytecode.object}${encodeNativeConstructorConfig(config).slice(2)}`));
+    assert.equal(report.maskCheckPassed, true);
+
+    input.targets.hook.applicantSalt = { mode: 'fixed', value: report.applicantSalt };
+    input.targets.token.initializerCalldata = initializer('allocate(address)', [addressWord(report.minedAddress)]);
+    input.targets.custody.initializerCalldata = initializer('configureBindingHook(address)', [addressWord(report.minedAddress)]);
+    input.targets.hook.initializerCalldata = initializer('initializeGraphLaunch(address,uint160)', [
+      addressWord(custody),
+      uintWord(sqrtPriceX96),
+    ]);
+
+    const derived = deriveAddresses({ launchInputs: input, inputDirectory: RELEASE_ARTIFACTS_DIRECTORY });
+    assert.equal(derived.schemaVersion, 'hookemon.phase3.derived-addresses.v2');
+    assert.equal(derived.targets.token.address, token);
+    assert.equal(derived.targets.custody.address, custody);
+    assert.equal(derived.targets.hook.address, toEip55Address(report.minedAddress));
+    assert.equal(derived.targets.hook.applicantSaltMode, 'fixed');
+    assert.equal(derived.targets.hook.applicantSalt, report.applicantSalt);
+    assert.equal(derived.targets.hook.effectiveSalt, report.effectiveSalt);
+    assert.equal(derived.targets.hook.initCodeHash, report.initCodeHash);
+    assert.equal(derived.targets.hook.constructorArguments, encodeNativeConstructorConfig(config).toLowerCase());
+    assert.equal(derived.targets.hook.constructorArguments.length, 2 + 18 * 64);
+    assert.equal(satisfiesMask(derived.targets.hook.address, ALL_HOOK_PERMISSION_MASK, REQUIRED_HOOK_PERMISSION_MASK), true);
+    for (const name of ['token', 'hook', 'custody']) {
+      const { artifact, bytes } = artifacts[name];
+      assert.equal(derived.targets[name].creationBytecode, artifact.bytecode.object.toLowerCase());
+      assert.equal(derived.targets[name].compilerVersion, '0.8.26+commit.8a97fa7a');
+      assert.equal(derived.targets[name].artifactDigest, sha256Bytes(bytes));
+      assert.deepEqual(derived.targets[name].runtimeImmutableReferences, artifact.deployedBytecode.immutableReferences);
+      assert.equal(
+        derived.targets[name].runtimeImmutablePatches.length,
+        Object.values(artifact.deployedBytecode.immutableReferences).flat().length,
+      );
+      assert.notEqual(derived.targets[name].runtimeCodeHash, derived.targets[name].runtimeTemplateCodeHash);
+    }
+    assert.equal(derived.pool.currency0, input.quoteCurrency);
+    assert.equal(derived.pool.currency1, token);
+    assert.equal(derived.pool.selectedOrdering, 'nativeCurrency0');
+    assert.equal(derived.pool.sqrtPriceX96, sqrtPriceX96);
+    assert.deepEqual(derived.graph.orderedTargetIds, ['token', 'custody', 'hook']);
+    assert.equal(verifyDerivedAddresses({ launchInputs: input, derived, inputDirectory: RELEASE_ARTIFACTS_DIRECTORY }), true);
+
+    const manifest = buildAddressManifest({ launchInputs: input, inputDirectory: RELEASE_ARTIFACTS_DIRECTORY });
+    assert.equal(manifest.schemaVersion, 'hookemon.phase3.address-manifest.v2');
+    const schema = JSON.parse(readFileSync(resolve(root, 'release/phase3/address-manifest.schema.json'), 'utf8'));
+    assert.deepEqual(validateJsonSchema(schema, manifest), []);
+    assert.equal(verifyAddressManifest({ manifest, inputDirectory: RELEASE_ARTIFACTS_DIRECTORY }), true);
+
+    for (const { path, bytes } of Object.values(artifacts)) assert.equal(readFileSync(path).equals(bytes), true);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test('refuses compiler exports with conflicting identity or explicit non-default metadata settings', () => {
+  const artifacts = readReleaseArtifacts();
+  const directory = mkdtempSync(join(tmpdir(), 'hookemon-release-variants-'));
+  try {
+    const hookPath = resolve(directory, 'hook-variant.json');
+    const hookVariant = (change) => {
+      const copy = structuredClone(artifacts.hook.artifact);
+      change(copy);
+      writeJson(hookPath, copy);
+      return () => readHookLaunchArtifactBytecode(hookPath, { native: true });
+    };
+    assert.equal(readHookLaunchArtifactBytecode(artifacts.hook.path, { native: true }), artifacts.hook.artifact.bytecode.object);
+    assert.equal(hookVariant((a) => { a.contractName = 'HookemonHook'; })(), artifacts.hook.artifact.bytecode.object);
+    assert.equal(hookVariant((a) => { a.metadata.settings.metadata.useLiteralContent = false; })(), artifacts.hook.artifact.bytecode.object);
+    assert.throws(() => readHookLaunchArtifactBytecode(artifacts.hook.path), /hook artifact optimizer must use 1000 enabled runs/);
+    for (const [change, message] of [
+      [(a) => { a.contractName = 'HookemonHookV1'; }, /hook artifact\.contractName conflicts with metadata\.settings\.compilationTarget/],
+      [(a) => { delete a.metadata.settings.compilationTarget; }, /compilationTarget is required/],
+      [(a) => { a.metadata.settings.compilationTarget['src/Other.sol'] = 'Other'; }, /compilationTarget must identify exactly one contract/],
+      [(a) => { a.metadata.settings.compilationTarget = { 'src/HookemonHook.sol': 'OtherHook' }; }, /must compile src\/HookemonHook\.sol:HookemonHook/],
+      [(a) => { a.metadata.settings.compilationTarget = { 'src/Other.sol': 'HookemonHook' }; }, /must compile src\/HookemonHook\.sol:HookemonHook/],
+      [(a) => { a.metadata.settings.metadata.useLiteralContent = true; }, /hook artifact metadata is not launch-compatible/],
+      [(a) => { a.metadata.settings.metadata.useLiteralContent = null; }, /hook artifact metadata is not launch-compatible/],
+      [(a) => { a.metadata.settings.metadata.useLiteralContent = 'false'; }, /hook artifact metadata is not launch-compatible/],
+      [(a) => { a.metadata.settings.metadata.useLiteralContent = 0; }, /hook artifact metadata is not launch-compatible/],
+      [(a) => { delete a.metadata.settings.metadata.bytecodeHash; }, /hook artifact metadata is not launch-compatible/],
+      [(a) => { delete a.metadata.settings.metadata.appendCBOR; }, /hook artifact metadata is not launch-compatible/],
+      [
+        (a) => { a.abi.find((entry) => entry.type === 'constructor').inputs[0].components[3].name = 'usdg'; },
+        /constructor ABI does not match the native ConstructorConfig/,
+      ],
+    ]) {
+      assert.throws(hookVariant(change), message);
+    }
+
+    const tokenPath = resolve(directory, 'token-variant.json');
+    const tokenVariant = (change) => {
+      const copy = structuredClone(artifacts.token.artifact);
+      change(copy);
+      writeJson(tokenPath, copy);
+      const input = releaseArtifactLaunchInputs(artifacts);
+      input.targets.token.artifactPath = tokenPath;
+      return () => deriveAddresses({ launchInputs: input, inputDirectory: RELEASE_ARTIFACTS_DIRECTORY });
+    };
+    for (const [change, message] of [
+      [(a) => { a.contractName = 'HKMNTokenV1'; }, /token artifact\.contractName conflicts with metadata\.settings\.compilationTarget/],
+      [(a) => { delete a.metadata.settings.compilationTarget; }, /compilationTarget must be an object/],
+      [(a) => { a.metadata.settings.compilationTarget['src/Other.sol'] = 'Other'; }, /compilationTarget must identify exactly one contract/],
+      [(a) => { a.metadata.settings.compilationTarget = { 'src/launch/Other.sol': 'HKMNToken' }; }, /does not match the token deployment target/],
+      [(a) => { a.metadata.settings.compilationTarget = { 'src/launch/HKMNToken.sol': 'OtherToken' }; }, /does not match the token deployment target/],
+      [(a) => { a.metadata.settings.metadata.useLiteralContent = true; }, /token artifact metadata does not match the launch profile/],
+      [(a) => { a.metadata.settings.metadata.useLiteralContent = null; }, /token artifact metadata does not match the launch profile/],
+      [(a) => { a.metadata.settings.metadata.useLiteralContent = 'false'; }, /token artifact metadata does not match the launch profile/],
+      [(a) => { delete a.metadata.settings.metadata.bytecodeHash; }, /token artifact metadata does not match the launch profile/],
+      [(a) => { delete a.metadata.settings.metadata.appendCBOR; }, /token artifact metadata does not match the launch profile/],
+    ]) {
+      assert.throws(tokenVariant(change), message);
+    }
+    for (const { path, bytes } of Object.values(artifacts)) assert.equal(readFileSync(path).equals(bytes), true);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 
 test('native version refuses historical quote, implicit limits and unbound seed price', () => {

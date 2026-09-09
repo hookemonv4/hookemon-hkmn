@@ -563,7 +563,7 @@ function validatePhaseThreeBuildEvidence(artifactDirectory, standardInputDirecto
   } catch {
     fail('INVALID_JSON', '/standardInputDirectory');
   }
-  parseStandardInput(buildInfoBytes, `/standardInputDirectory/${basename(buildInfos[0])}`);
+  parseStandardInput(buildInfoBytes, `/standardInputDirectory/${basename(buildInfos[0])}`, addressManifest.schemaVersion.endsWith('.v2'));
   let commitment;
   try {
     commitment = sourceContentCommitment(buildInfo);
@@ -1739,8 +1739,8 @@ function validatePhaseThreeAddressDerivationDraft(launchInputs, addressManifest,
   assertExactKeys(addressManifest.compiler.standardJson.metadata, ['appendCBOR', 'bytecodeHash', 'useLiteralContent'], `${manifestPath}/compiler/standardJson/metadata`);
   if (
     addressManifest.compiler.standardJson.optimizer.enabled !== true
-    || addressManifest.compiler.standardJson.optimizer.runs !== 1000
-    || addressManifest.compiler.standardJson.viaIR !== false
+    || addressManifest.compiler.standardJson.optimizer.runs !== (native ? 200 : 1000)
+    || addressManifest.compiler.standardJson.viaIR !== native
     || addressManifest.compiler.standardJson.evmVersion !== 'cancun'
     || addressManifest.compiler.standardJson.metadata.appendCBOR !== false
     || addressManifest.compiler.standardJson.metadata.bytecodeHash !== 'none'
@@ -2009,7 +2009,7 @@ function validateRelationships(launchInputs, addressManifest) {
   }
 }
 
-function parseStandardInput(bytes, path) {
+function parseStandardInput(bytes, path, native = false) {
   let input;
   try {
     input = JSON.parse(bytes.toString('utf8'));
@@ -2021,8 +2021,8 @@ function parseStandardInput(bytes, path) {
   if (input.language !== 'Solidity') fail('LAUNCH_PROFILE_MISMATCH', `${path}/language`);
   assertObject(input.settings, `${path}/settings`);
   assertObject(input.settings.optimizer, `${path}/settings/optimizer`);
-  if (input.settings.optimizer.enabled !== true || input.settings.optimizer.runs !== 1000) fail('LAUNCH_PROFILE_MISMATCH', `${path}/settings/optimizer`);
-  if (input.settings.viaIR !== false) fail('LAUNCH_PROFILE_MISMATCH', `${path}/settings/viaIR`);
+  if (input.settings.optimizer.enabled !== true || input.settings.optimizer.runs !== (native ? 200 : 1000)) fail('LAUNCH_PROFILE_MISMATCH', `${path}/settings/optimizer`);
+  if (input.settings.viaIR !== native) fail('LAUNCH_PROFILE_MISMATCH', `${path}/settings/viaIR`);
   if (input.settings.evmVersion !== 'cancun') fail('LAUNCH_PROFILE_MISMATCH', `${path}/settings/evmVersion`);
   assertObject(input.settings.metadata, `${path}/settings/metadata`);
   if (
@@ -2093,7 +2093,7 @@ function buildArtifactTarget({ target, index, launchInputs, artifactDirectory, s
   const runtimeCodeHash = keccak256Hex(runtimeBytes);
 
   const standardInputBytes = readFileInside(standardInputDirectory, target.standardJsonInputPath, `${pointer}/standardJsonInputPath`);
-  parseStandardInput(standardInputBytes, `${pointer}/standardJsonInputPath`);
+  parseStandardInput(standardInputBytes, `${pointer}/standardJsonInputPath`, launchInputs.schemaVersion === 'hookemon.phase3.release-launch-inputs.v2');
   const immutableReferences = normalizeImmutableReferences(
     artifact.deployedBytecode?.immutableReferences ?? artifact.immutableReferences,
     `${pointer}/artifactPath/immutableReferences`,

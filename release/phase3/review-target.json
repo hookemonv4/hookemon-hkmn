@@ -792,7 +792,7 @@
       "bytes": 8550,
       "kind": "source-entry",
       "path": "packages/contracts/script/release/PhaseThreeReleasePlan.sol",
-      "sha256": "72500c0fdb6f628f9c0cec5db676a0a167a5124a86152c9d83384f2cd5b95b55"
+      "sha256": "17a429958bf19e640da9f444a16c0d8e66bec3a82b2e4f68bc064b5a966b0453"
     },
     {
       "bytes": 2740,
@@ -906,13 +906,13 @@
       "bytes": 11654,
       "kind": "dependency-lock",
       "path": "product/dependency-pins.json",
-      "sha256": "534b96bfaeaa6a3334d377b46ab6410f2c35ecafb13f57b200d0f47f32ff5451"
+      "sha256": "2f1e3cbdd932fd08cae4873236c849149139cb31a66651d62c14591c4eba5e9f"
     },
     {
-      "bytes": 2365,
+      "bytes": 2673,
       "kind": "package:EVIDENCE.md",
       "path": "release/phase3/EVIDENCE.md",
-      "sha256": "2e343d11cd5686958dfc011bbd8d8e3dc73ae72bf660daeea18c391afd014e3f"
+      "sha256": "8ed5208603d9a8444bf78f7d158cacc085f7c6171d48a0c5fa02f970dd398b9b"
     },
     {
       "bytes": 1780,
@@ -933,22 +933,22 @@
       "sha256": "439d1c0d61a58b34a0ed3e4c8fd0d9e7030f4d9ec7552985ae0901c865dbee5b"
     },
     {
-      "bytes": 42352,
+      "bytes": 42350,
       "kind": "capability-evidence:phase-three-launch-graph",
       "path": "release/phase3/address-manifest-draft.schema.json",
-      "sha256": "1b4d6620a88e8d874ba215b0e0d231e95757c146dbc948a9b5ee034d19ac138a"
+      "sha256": "1f815a172ae5d3c2c946a42e9f8eb2a009903cf471f06fde040340c6f0c02da1"
     },
     {
-      "bytes": 9913,
+      "bytes": 9911,
       "kind": "project-surface-evidence:canonical-pool-hook",
       "path": "release/phase3/address-manifest.json",
-      "sha256": "690be767e5a2814f2a636173537e3b65166bc5de49b89118753ffbcc597eb7d7"
+      "sha256": "cbfef74257ec3f697267accb69d613531990304a30a2048eb18d8555271ca8bf"
     },
     {
-      "bytes": 71953,
+      "bytes": 75807,
       "kind": "capability-evidence:phase-three-launch-graph",
       "path": "release/phase3/address-manifest.schema.json",
-      "sha256": "e36803d13d84ad0f3664e7047cc0b2c7dad8a9bb66c9fe8ba8a6f86a483860cd"
+      "sha256": "d5d845da9fd4f2dede7f865a8e7e670616ceef3dcdd5e88c8c1a355fb720ce16"
     },
     {
       "bytes": 4387,
@@ -975,28 +975,28 @@
       "sha256": "5c5b3dc39827bbe77af2099a0f86a2a3a45c8888dbfb7ace23228894817bd120"
     },
     {
-      "bytes": 305654,
+      "bytes": 299507,
       "kind": "capability-evidence:phase-three-launch-graph",
       "path": "release/phase3/artifacts/custody.json",
-      "sha256": "f7ae50ab539a48335f42024826a13e28c0543da534f924a99241ef3bd1386857"
+      "sha256": "d618a60be3470c29cef847a9db46bd2c7870a7b1b262c607c98e0ef30ef8811a"
     },
     {
-      "bytes": 1082000,
+      "bytes": 1034941,
       "kind": "capability-evidence:phase-three-launch-graph",
       "path": "release/phase3/artifacts/hook.json",
-      "sha256": "204a6a44991682b316ed86b0ae5d241d3760c4f1f90c8cdbb2a6d4d42ffc39c8"
+      "sha256": "3f1d8c2c6c0e12e4d2633c9003623c36abd419ebb5ba40c11f436a1295a23080"
     },
     {
-      "bytes": 175639,
+      "bytes": 170734,
       "kind": "capability-evidence:phase-three-launch-graph",
       "path": "release/phase3/artifacts/token.json",
-      "sha256": "d8674b134236f56b3aefa4152b4ab920aaf472d8685a596595084965aa0819af"
+      "sha256": "7b3b75b1ddf253a3bcab2f7c9fecf18fc1085d44cb1db0f4b753d58d16c7c100"
     },
     {
-      "bytes": 253682,
+      "bytes": 253680,
       "kind": "capability-evidence:phase-three-launch-graph",
       "path": "release/phase3/build-info/launch.json",
-      "sha256": "4dee83f3709307e4f12a95e0876b235242e2016c4b9dcf978b84a06885f6759c"
+      "sha256": "6a05177d18a63d265d8b68d2a373a01bc0775cdf48b8697c662f7e2149a08457"
     },
     {
       "bytes": 16196,
@@ -1029,10 +1029,10 @@
       "sha256": "e7b070413282d5f6716c5345eae330f30b4105bc7971e123aafa479e219ef3bf"
     },
     {
-      "bytes": 5617,
+      "bytes": 5615,
       "kind": "capability-evidence:phase-three-launch-graph",
       "path": "release/phase3/launch-inputs.example.json",
-      "sha256": "6f500b6b290c32fe827dfcfc56b08051e5c354ca66986910e4d83c768fbd4ff1"
+      "sha256": "68d1ec551980a4773b75e6c8f3f98147a9f584ba9803848ad35b3b64271798a1"
     },
     {
       "bytes": 6316,
@@ -1047,22 +1047,22 @@
       "sha256": "5a941b14ce16a7148f0cfd184916daec275a92981b9abc5a4cf1f57aa9c42788"
     },
     {
-      "bytes": 425379,
+      "bytes": 406859,
       "kind": "capability-evidence:phase-three-launch-graph",
       "path": "release/phase3/package/create-request.json",
-      "sha256": "cd2813906aabd63d9ba7d5540fb30f75c032e3679468ee2ebad8232d1beab26b"
+      "sha256": "b8874972e5729f0da20d4efa06ef2cf5a875105ca85b962b03b1698d12c387b0"
     },
     {
-      "bytes": 11728,
+      "bytes": 11726,
       "kind": "capability-evidence:phase-three-launch-graph",
       "path": "release/phase3/package/graph-draft.json",
-      "sha256": "779727c54271ffa04d1455e2b9e8ac548022cdb54cda9af7d30f30115a32ac07"
+      "sha256": "3b1e8d415ca046edf2ebd7df7d3b9a88178d475cff0930a3759974988303141d"
     },
     {
       "bytes": 3101,
       "kind": "capability-evidence:phase-three-launch-graph",
       "path": "release/phase3/package/package-manifest.json",
-      "sha256": "04bce4ad4ebf7b35e9e0ce2bd98a20fe20eaba8f26b77fe3089878fbca0634ee"
+      "sha256": "56377d1982e4dce99e1a49e09f8e64adc3af1d3f3ed92e7add5a8e6b6dfc99dc"
     },
     {
       "bytes": 77516,
@@ -1083,10 +1083,10 @@
       "sha256": "ad9dda427d009b525f081a4f33990d453b0b15e1a43e4746c61f4332acef066e"
     },
     {
-      "bytes": 119856,
+      "bytes": 127363,
       "kind": "specification",
       "path": "specs/requirements.json",
-      "sha256": "750a12abf47a771d1181dd6a1782c1b6fbcc4eebb4632e5d1927bf52f4193425"
+      "sha256": "c89397d3ece140e601f2bb494f8f13a86996faca5f5b43d013abc770abfadf5c"
     }
   ],
   "importResolutions": [
@@ -2388,7 +2388,7 @@
     }
   ],
   "javascriptImportResolutions": [],
-  "reviewTargetHash": "sha256:69677c1a6e50c81c96248efc3d62cade3b1679896901c1c6763219e6c6058ab7",
+  "reviewTargetHash": "sha256:9ebb55727ce46f933f0cb6930028f44a0e0f13f85626cf63dde26faf1300d094",
   "schemaVersion": 1,
   "standardVersion": "1.5.0",
   "submissionHash": "sha256:2050a999d23af7df709e8454621feed76eb76c74168d32b9330eea4485168c75"

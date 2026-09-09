@@ -22,23 +22,23 @@ contract PhaseThreeReleasePlan {
     address public constant PROGRAMMABLE_PLATFORM = 0x4957f49620AFf3Adbbe8195a4f633E49cc93376c;
 
     bytes32 public constant TOKEN_CREATION_CODE_HASH =
-        0x2b6254d3bce8fd659c39f778c6e32ced08511a882d1f2fa9476cca2535411c1b;
+        0x07c73a86681594f0605efd4caa948a53aaf05db1ca9abf2779364b3d2618c374;
     bytes32 public constant TOKEN_RUNTIME_TEMPLATE_CODE_HASH =
-        0x047ad78929472b4905bffdde04a000ee523e6eeb9987a48afdce7fe05c0efc7f;
+        0x7ff51070f093ca0416aaf3407fbdfb6b2f45f63e1f9395261ac7b6920f188e15;
     bytes32 public constant TOKEN_ARTIFACT_SHA256 =
-        0xd8674b134236f56b3aefa4152b4ab920aaf472d8685a596595084965aa0819af;
+        0x7b3b75b1ddf253a3bcab2f7c9fecf18fc1085d44cb1db0f4b753d58d16c7c100;
     bytes32 public constant HOOK_CREATION_CODE_HASH =
-        0xd45b609b4e27c780b9c52a65ad86ae4d210b10a1edaeb0c8cf3b59e4689e0b59;
+        0xefe377c78f3143219f2bbde8b98d48ade578ec858a318c97ed03bd247a542cd7;
     bytes32 public constant HOOK_RUNTIME_TEMPLATE_CODE_HASH =
-        0x6d9ebce6436e27121be1928c42e3765a28857d4804d6f9d2f3d89a80469b91dd;
+        0x48b586046a8849c27094560246a5e0feabe8a08c60b0a23c1008a0704482bfb0;
     bytes32 public constant HOOK_ARTIFACT_SHA256 =
-        0x204a6a44991682b316ed86b0ae5d241d3760c4f1f90c8cdbb2a6d4d42ffc39c8;
+        0x3f1d8c2c6c0e12e4d2633c9003623c36abd419ebb5ba40c11f436a1295a23080;
     bytes32 public constant CUSTODY_CREATION_CODE_HASH =
-        0x778625cf6f5b602c891c7d605941d5e3cfc4662624a9407d67e2873cd4d99dd5;
+        0x612740484e055828758b43eaccb7d5fdc6927423e6ab84b433221999a2ebce77;
     bytes32 public constant CUSTODY_RUNTIME_TEMPLATE_CODE_HASH =
-        0x06f47cecc7026b4d9c5d393c39f8883c7e87c3fdacd30cf6f496ee41c9d4ca0c;
+        0xf66dd925b98becf4c6f4410abf52e0c95e31b407eb99115f19d1357b6cbf5334;
     bytes32 public constant CUSTODY_ARTIFACT_SHA256 =
-        0xf7ae50ab539a48335f42024826a13e28c0543da534f924a99241ef3bd1386857;
+        0xd618a60be3470c29cef847a9db46bd2c7870a7b1b262c607c98e0ef30ef8811a;
 
     uint256 public constant TOTAL_SUPPLY = 1_000_000_000e18;
     uint256 public constant POOL_ALLOCATION = TOTAL_SUPPLY;

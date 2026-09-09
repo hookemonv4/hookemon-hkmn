@@ -64,6 +64,8 @@ node --test --test-timeout=120000 test/collector-crypt.test.mjs
 - If a response validator fails, update it only after a current authenticated provider example or documentation establishes the new field shape. Do not relax validation to accept an unknown economic value.
 - Documentation excerpts and their URLs are recorded in `packages/adapters/test/fixtures/collector-crypt/docs-evidence-2026-09-04.json`. The unresolved Solana insured-value unit remains an OPEN FACT and is reconciled at the epic gate rather than inferred by this client.
 
+The Core buyback production binding uses original-blockhash RPC validity and a provider-paid transaction. A missing binding or original-blockhash resolver refuses before the buyback API mutation. Provider signature validation precedes Operations signing; recovery reuses approved signed bytes without another signature.
+
 ## First-cycle single-pack generation
 
 A newly prepared one-pack purchase binds `generation: { endpoint: "generatePack", turbo: false }` in the durable stage request. The purchase stage calls the existing single-pack transport and records its returned memo in the ordinary batch journal. Binding admission still precedes provider generation; decoding, signature validation, original-blockhash checks and recovery use the same policy path. Unknown modes, a quantity other than one, or a missing bound transport refuse before generation.

@@ -109,18 +109,18 @@
   },
   "workflowIntegrity": {
     "path": ".github/workflows/v4-gates.yml",
-    "expectedSha256": "39aff509012d478a69f9e28268e289d422a4197d9225ba5137cb8ad01a9b0fa5",
-    "actualSha256": "39aff509012d478a69f9e28268e289d422a4197d9225ba5137cb8ad01a9b0fa5"
+    "expectedSha256": "9c0de0b13311fcfa2f657d622a4b1725cf874c98cd00bb2f05ac910e49d18c6c",
+    "actualSha256": "9c0de0b13311fcfa2f657d622a4b1725cf874c98cd00bb2f05ac910e49d18c6c"
   },
   "forkProof": {
     "path": ".github/workflows/fork-proof.yml",
-    "expectedSha256": "487e589ae7e7af7a82317b200ed109f135591a37bb428736f0500a0f01c41d79",
-    "actualSha256": "487e589ae7e7af7a82317b200ed109f135591a37bb428736f0500a0f01c41d79"
+    "expectedSha256": "4d422ca3bbb03a08c8d99b3d8b01d2919418009bd183e7655f95f9993d70d2b8",
+    "actualSha256": "4d422ca3bbb03a08c8d99b3d8b01d2919418009bd183e7655f95f9993d70d2b8"
   },
   "forkPinCanary": {
     "path": ".github/workflows/fork-pin-canary.yml",
-    "expectedSha256": "d96801f9885587e84ffc390acbee7f2b973aff1ad42e4b98b5d25d31aa5cca2a",
-    "actualSha256": "d96801f9885587e84ffc390acbee7f2b973aff1ad42e4b98b5d25d31aa5cca2a"
+    "expectedSha256": "e3447ec6f2f9e2ee3f516a6e6ff9694d6a2f318a0e6ba39de72a8a1cccd43f4c",
+    "actualSha256": "e3447ec6f2f9e2ee3f516a6e6ff9694d6a2f318a0e6ba39de72a8a1cccd43f4c"
   },
   "identityGate": {
     "path": ".github/workflows/identity-gate.yml",
@@ -150,18 +150,18 @@
   "controlScripts": {
     "commitIdentityAllowlist": {
       "path": "scripts/check-commit-identity.mjs",
-      "expectedSha256": "9b89ef928d69676f07bea9052d0c5bb2e4c1c151de5dc590d9c7685711316cba",
-      "actualSha256": "9b89ef928d69676f07bea9052d0c5bb2e4c1c151de5dc590d9c7685711316cba"
+      "expectedSha256": "6c2fe1989a16b7a0f1594a4c79b3ef7450c2d17b4d465ccf0b74fd738a1e703a",
+      "actualSha256": "6c2fe1989a16b7a0f1594a4c79b3ef7450c2d17b4d465ccf0b74fd738a1e703a"
     },
     "forkPinVerifier": {
       "path": "scripts/verify-fork-pin.mjs",
-      "expectedSha256": "09249c50f08b092305e497b6a9430d3acab0131c689ce58862f1f700668ef94a",
-      "actualSha256": "09249c50f08b092305e497b6a9430d3acab0131c689ce58862f1f700668ef94a",
+      "expectedSha256": "3fdd2565969a6f0e49af1fbae974409fa71a48e600cf555d9daee7d23b24db50",
+      "actualSha256": "3fdd2565969a6f0e49af1fbae974409fa71a48e600cf555d9daee7d23b24db50",
       "closure": [
         {
           "path": "scripts/verify-fork-pin.mjs",
-          "sha256": "09249c50f08b092305e497b6a9430d3acab0131c689ce58862f1f700668ef94a",
-          "actualSha256": "09249c50f08b092305e497b6a9430d3acab0131c689ce58862f1f700668ef94a"
+          "sha256": "3fdd2565969a6f0e49af1fbae974409fa71a48e600cf555d9daee7d23b24db50",
+          "actualSha256": "3fdd2565969a6f0e49af1fbae974409fa71a48e600cf555d9daee7d23b24db50"
         },
         {
           "path": "scripts/programmable/lib/keccak.mjs",
@@ -188,13 +188,13 @@
     },
     "controlDependencyVerifier": {
       "path": "scripts/verify-control-dependencies.mjs",
-      "expectedSha256": "97dd72c9fdc4d1bf40ee5f2adde97545c02fe4144a95d5d6c9151ab8e6daba55",
-      "actualSha256": "97dd72c9fdc4d1bf40ee5f2adde97545c02fe4144a95d5d6c9151ab8e6daba55",
+      "expectedSha256": "5ad4a559963959e94bc05353496c0bd761050fb4cad55f0b278e46d41242cd45",
+      "actualSha256": "5ad4a559963959e94bc05353496c0bd761050fb4cad55f0b278e46d41242cd45",
       "closure": [
         {
           "path": "scripts/verify-control-dependencies.mjs",
-          "sha256": "97dd72c9fdc4d1bf40ee5f2adde97545c02fe4144a95d5d6c9151ab8e6daba55",
-          "actualSha256": "97dd72c9fdc4d1bf40ee5f2adde97545c02fe4144a95d5d6c9151ab8e6daba55"
+          "sha256": "5ad4a559963959e94bc05353496c0bd761050fb4cad55f0b278e46d41242cd45",
+          "actualSha256": "5ad4a559963959e94bc05353496c0bd761050fb4cad55f0b278e46d41242cd45"
         },
         {
           "path": "scripts/lib/util.mjs",
@@ -212,8 +212,8 @@
   "controlInputs": {
     "archiveForkProofTest": {
       "path": "packages/contracts/test/integration/RobinhoodV4ArchiveFork.t.sol",
-      "expectedSha256": "993dfea53f3b486bbca7d7432b6e27e1a126ba7c3b0e4f157aec8ecb2da9a1c8",
-      "actualSha256": "993dfea53f3b486bbca7d7432b6e27e1a126ba7c3b0e4f157aec8ecb2da9a1c8"
+      "expectedSha256": "09e7b66de30b493636f5605fbdc7e7dc859f8baabd994f47893c73e22ce9eaf0",
+      "actualSha256": "09e7b66de30b493636f5605fbdc7e7dc859f8baabd994f47893c73e22ce9eaf0"
     }
   },
   "workflowPolicy": {
@@ -245,15 +245,15 @@
       "executableSha256": "88f91962aa2f93ac6ab281d553b9e125f5197bbbce38f9f2437f7299c32e5509",
       "config": {
         "path": ".gitleaks.toml",
-        "expectedSha256": "959396e7c7b35ee3c62b39e544fd758ceab5d9f5ea7f5f74f05df6fa5c1e24e2",
-        "actualSha256": "959396e7c7b35ee3c62b39e544fd758ceab5d9f5ea7f5f74f05df6fa5c1e24e2"
+        "expectedSha256": "abd04be4f57b752683ff7b52479fc359c7d63c9ce0a84c170c2bce0bff876488",
+        "actualSha256": "abd04be4f57b752683ff7b52479fc359c7d63c9ce0a84c170c2bce0bff876488"
       },
       "workflow": {
         "version": "8.30.1",
         "url": "https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz",
         "archiveSha256": "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb",
         "executableSha256": "88f91962aa2f93ac6ab281d553b9e125f5197bbbce38f9f2437f7299c32e5509",
-        "configSha256": "959396e7c7b35ee3c62b39e544fd758ceab5d9f5ea7f5f74f05df6fa5c1e24e2"
+        "configSha256": "abd04be4f57b752683ff7b52479fc359c7d63c9ce0a84c170c2bce0bff876488"
       }
     }
   },
@@ -272,22 +272,22 @@
   "controlGatePinBump": {
     "schema": "hookemon.control-gate-pin-bump.v2",
     "approvalToken": "OWNER APPROVED",
-    "basePinsSha256": "534b96bfaeaa6a3334d377b46ab6410f2c35ecafb13f57b200d0f47f32ff5451",
-    "candidatePinsSha256": "f0005e9d7dfc35a885c2d170fc45e3e1c094d841695b6ce54efb106f58cade66",
+    "basePinsSha256": "f0005e9d7dfc35a885c2d170fc45e3e1c094d841695b6ce54efb106f58cade66",
+    "candidatePinsSha256": "2f1e3cbdd932fd08cae4873236c849149139cb31a66651d62c14591c4eba5e9f",
     "baseChecker": {
       "path": "scripts/verify-control-dependencies.mjs",
-      "blobId": "814dd4fc8d7568610cb8d6755397f3d82a59b055"
+      "blobId": "2cb924e426c1af58856513daf56574618cb64698"
     },
     "controls": [
       {
         "path": ".github/workflows/v4-gates.yml",
-        "previousSha256": "5a530f2f4705673a2e101170c284ef6c39da95b6ef17089571fdf502c1c99e25",
-        "sha256": "df9fa88e6030ec74bf27fb6edf90970a91d45ac38d7b29ce7e364c2b6b2843ab"
+        "previousSha256": "df9fa88e6030ec74bf27fb6edf90970a91d45ac38d7b29ce7e364c2b6b2843ab",
+        "sha256": "9c0de0b13311fcfa2f657d622a4b1725cf874c98cd00bb2f05ac910e49d18c6c"
       },
       {
         "path": "scripts/verify-control-dependencies.mjs",
-        "previousSha256": "20577b51e3644f62f77c2d9bfde16245a752690e74c69a5d5ec67fa0f1ae3d0a",
-        "sha256": "f1e876a829ff94b9b919af78f3f5a1b6b9e988d451f6023ec30029a5439270db"
+        "previousSha256": "f1e876a829ff94b9b919af78f3f5a1b6b9e988d451f6023ec30029a5439270db",
+        "sha256": "5ad4a559963959e94bc05353496c0bd761050fb4cad55f0b278e46d41242cd45"
       }
     ]
   }

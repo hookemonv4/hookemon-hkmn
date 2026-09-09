@@ -131,9 +131,8 @@ async function buildLatestCycle(repositoryCycle, readAccounting) {
     // The real finalized-recipient count, when accounting evidence has it (see
     // accounting-projection.mjs's projectPayoutEvidence) — never a fabricated 0.
     payoutRecipientCount: roundAccounting?.paidHolderRewardsRecipientCount ?? null,
-    // No real configured reward-recipient-limit source exists in this integration head — null is
-    // honest; the old always-200 placeholder was not.
-    rewardRecipientLimit: null,
+    // Historic cycles retain all-holder semantics without a frozen selection.
+    rewardRecipientLimit: repositoryCycle.rewardSelection?.rewardRecipientLimit ?? null,
     roundAccounting,
     transactions: [],
   };

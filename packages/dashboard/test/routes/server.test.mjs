@@ -512,3 +512,77 @@ test('route sources contain no legacy state-file cycle fields', async () => {
     assert.doesNotMatch(source, /state\?\.activeCycleId|state\?\.terminalCycles|readOperatorState\(ctx\.statePath\)/);
   }
 });
+
+test('authenticated HTTP saves the durable pack plan across service recreation without shrinking the allowlist', async t => {
+  const { createServer } = await import('node:http');
+  const directory = await mkdtemp(join(tmpdir(), 'hookemon-dashboard-plan-http-'));
+  const statePath = join(directory, 'operator-state.json');
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  await mutateOperatorState(statePath, null, () => ({
+    ...createEmptyOperatorState(),
+    configuration: { ...createDefaultOperatorConfiguration(), allowedPackIds: ['active-pack'] },
+  }));
+  const authority = () => createOperatorControl({
+    statePath,
+    cycleRepository: {
+      async peekActiveCycle() { return null; },
+      async listKnownCycleIds() { return []; },
+      async describeCycle() { throw new Error('not used'); },
+    },
+    policyEngine: { async recordManualApproval() { throw new Error('not used'); } },
+    readCustody: async () => ({ realizedLossMicroUsd: '0', atRiskMicroUsd: '0', outstandingMicroUsd: '0', heldAssets: false,
+      heldPositions: { count: 0, valueMicroUsd: '0', positions: [] }, unattributed: false, unvaluedExposure: false }),
+  });
+  async function start() {
+    const fixture = await buildTestServer(t, { operatorControl: authority() });
+    const http = createServer(createRequestListener(fixture.ctx));
+    await new Promise(resolve => http.listen(0, '127.0.0.1', resolve));
+    t.after(() => new Promise(resolve => http.close(resolve)));
+    const base = `http://127.0.0.1:${http.address().port}`;
+    return async (path, body = undefined, authenticated = true) => {
+      const response = await fetch(base + path, { method: body === undefined ? 'GET' : 'POST',
+        headers: { 'content-type': 'application/json', ...(authenticated ? AUTH : {}) },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+      return { status: response.status, body: await response.json() };
+    };
+  }
+  const request = await start();
+  assert.equal((await request('/operator/api/bootstrap', undefined, false)).status, 401);
+  const before = await request('/operator/api/bootstrap');
+  assert.equal(before.status, 200);
+  const orders = [{ pack: 'pack-a', quantity: 3 }, { pack: 'pack-b', quantity: 1 }];
+  const saved = await request('/operator/api/decisions', { requestId: 'save-plan-http', expectedVersion: before.body.state.version,
+    command: { type: 'update-configuration', configuration: { allowedPackIds: ['active-pack', 'pack-a', 'pack-b'], packPlan: { orders } } } });
+  assert.equal(saved.status, 200, JSON.stringify(saved.body));
+  const restarted = await start();
+  const after = await restarted('/operator/api/bootstrap');
+  assert.equal(after.status, 200);
+  assert.deepEqual(after.body.state.packPlan, { schema: 'hookemon.pack-plan.v1', revision: 1, orders });
+  const cleared = await restarted('/operator/api/decisions', { requestId: 'clear-plan-http', expectedVersion: after.body.state.version,
+    command: { type: 'update-configuration', configuration: { packPlan: { orders: [] } } } });
+  assert.equal(cleared.status, 200, JSON.stringify(cleared.body));
+  const final = (await restarted('/operator/api/bootstrap')).body;
+  assert.deepEqual(final.state.packPlan.orders, []);
+  assert.equal(final.state.packPlan.revision, 2);
+  assert.deepEqual(final.state.allowedPackIds, ['active-pack', 'pack-a', 'pack-b']);
+  const invalid = await restarted('/operator/api/decisions', { requestId: 'client-plan-revision', expectedVersion: final.state.version,
+    command: { type: 'update-configuration', configuration: { packPlan: { orders: [], revision: 99 } } } });
+  assert.equal(invalid.status, 400);
+  assert.equal((await readOperatorState(statePath)).configuration.packPlan.revision, 2);
+});
+
+test('authenticated recipient decisions accept all options and reject malformed values before authority dispatch', async t => {
+  const server = await buildTestServer(t);
+  for (let limit = 100; limit <= 1000; limit += 100) {
+    const response = await server.post('/operator/api/decisions', { requestId: `recipient-${limit}`, expectedVersion: limit / 100 - 1, command: { type: 'update-configuration', configuration: { rewardRecipientLimit: limit } } }, AUTH);
+    assert.equal(response.status, 200, response.diagnostics);
+    const bootstrap = await server.get('/operator/api/bootstrap', AUTH);
+    assert.equal(bootstrap.body.state.rewardRecipientLimit, limit);
+  }
+  const count = server.calls.execute.length;
+  for (const value of ['200', null, 150, 0, 1100]) {
+    const response = await server.post('/operator/api/decisions', { requestId: `invalid-${String(value)}`, expectedVersion: 10, command: { type: 'update-configuration', configuration: { rewardRecipientLimit: value } } }, AUTH);
+    assert.equal(response.status, 400);
+  }
+  assert.equal(server.calls.execute.length, count);
+});

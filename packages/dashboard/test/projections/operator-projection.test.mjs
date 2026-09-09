@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { assertDashboardResponse } from '../../src/contracts/operator-contracts.mjs';
-import { buildDashboardReadModel } from '../../src/projections/operator-projection.mjs';
+import { assertBootstrap, assertDashboardResponse } from '../../src/contracts/operator-contracts.mjs';
+import { buildBootstrap, buildDashboardReadModel } from '../../src/projections/operator-projection.mjs';
 
 test('a terminal cycle state overrides an incomplete lifecycle stage and unavailable payout', () => {
   const dashboard = buildDashboardReadModel({
@@ -93,4 +93,32 @@ test('dashboard contract continues to accept the prior cap-only response shape',
   delete legacy.cap.outstandingCustody;
 
   assert.equal(assertDashboardResponse(legacy).schemaVersion, 5);
+});
+
+
+test('bootstrap exposes the exact stored plan and deliberately accepts legacy payloads without one', () => {
+  const packPlan = { schema: 'hookemon.pack-plan.v1', revision: 4, orders: [{ pack: 'base-pack', quantity: 3 }] };
+  const bootstrap = buildBootstrap({ authorityStatus: { revision: 9, configuration: null }, identity: { subject: 'operator', email: null, role: 'operator' } });
+  bootstrap.state.packPlan = packPlan;
+  assert.equal(assertBootstrap(bootstrap).state.packPlan, packPlan);
+  assert.throws(() => assertBootstrap({ ...bootstrap, state: { ...bootstrap.state, packPlan: { ...packPlan, revision: -1 } } }));
+  const legacy = { ...bootstrap, state: { ...bootstrap.state } };
+  delete legacy.state.packPlan;
+  assert.equal(assertBootstrap(legacy), legacy);
+});
+
+test('saved recipient setting never replaces an active cycle frozen or historic selection', async () => {
+  const { createDefaultOperatorConfiguration } = await import('../../../runner/src/config/state-schema.mjs');
+  const configuration = { ...createDefaultOperatorConfiguration(), rewardRecipientLimit: 900, configurationRevision: 20 };
+  const authorityStatus = { configuration, revision: 25, activeCycleId: 'frozen', cycles: [{ cycleId: 'frozen', rewardSelection: { rewardRecipientLimit: 300, configurationRevision: 4 }, stages: [] }] };
+  const bootstrap = buildBootstrap({ authorityStatus, identity: { subject: 'operator', email: null, role: 'operator' } });
+  assert.equal(bootstrap.state.rewardRecipientLimit, 900);
+  assert.deepEqual(bootstrap.rewardRecipientLimits, [100,200,300,400,500,600,700,800,900,1000]);
+  const selected = buildDashboardReadModel({ authorityStatus, now: () => 0 });
+  assert.equal(selected.activeCycle.rewardRecipientLimit, 300);
+  assert.equal(selected.activeCycle.configurationRevision, '4');
+  delete authorityStatus.cycles[0].rewardSelection;
+  const historic = buildDashboardReadModel({ authorityStatus, now: () => 0 });
+  assert.equal(historic.activeCycle.rewardRecipientLimit, null);
+  assert.equal(historic.activeCycle.configurationRevision, null);
 });

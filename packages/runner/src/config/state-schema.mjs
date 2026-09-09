@@ -3,14 +3,19 @@
 // automation scheduler reads out of the operator state file (packages/runner/src/operator/state-file.mjs).
 // This module holds no secret material and performs no signing; it only validates the shape of a
 // plain JSON document and rejects anything that carries a secret-material field.
+import { DEFAULT_REWARD_RECIPIENT_LIMIT, assertRewardRecipientLimit } from './reward-recipient-selection.mjs';
 import { canonicalJson } from '../cycle/journal.mjs';
+import { assertPackPlan, createEmptyPackPlan, replacePackPlan } from './pack-plan.mjs';
 
-export const OPERATOR_CONFIGURATION_SCHEMA = 'hookemon.operator-configuration.v4';
+export const OPERATOR_CONFIGURATION_SCHEMA = 'hookemon.operator-configuration.v6';
+const legacyConfigurationSchema = 'hookemon.operator-configuration.v4';
 
 const configurationFields = [
   'schema',
   'intervalMinutes',
   'allowedPackIds',
+  'packPlan',
+  'rewardRecipientLimit',
   'requestedOrders',
   'maxBoostersPerCycle',
   'maxUnitPriceMicroUsd',
@@ -222,6 +227,7 @@ export function assertOperatorConfiguration(value) {
     max: maximumIntervalMinutes,
   });
   const allowedPackIds = assertAllowedPackIds(value.allowedPackIds);
+  const packPlan = assertPackPlan(value.packPlan);
   const maxBoostersPerCycle = assertIntegerInRange(value.maxBoostersPerCycle, 'operator configuration maxBoostersPerCycle', {
     min: 1,
     max: maximumBoostersPerCycle,
@@ -281,6 +287,8 @@ export function assertOperatorConfiguration(value) {
     schema: OPERATOR_CONFIGURATION_SCHEMA,
     intervalMinutes,
     allowedPackIds: Object.freeze(allowedPackIds),
+    packPlan,
+    rewardRecipientLimit: assertRewardRecipientLimit(value.rewardRecipientLimit),
     requestedOrders,
     maxBoostersPerCycle,
     maxUnitPriceMicroUsd: value.maxUnitPriceMicroUsd,
@@ -316,6 +324,8 @@ export function createDefaultOperatorConfiguration() {
     schema: OPERATOR_CONFIGURATION_SCHEMA,
     intervalMinutes: DEFAULT_INTERVAL_MINUTES,
     allowedPackIds: [],
+    packPlan: createEmptyPackPlan(),
+    rewardRecipientLimit: DEFAULT_REWARD_RECIPIENT_LIMIT,
     requestedOrders: 0,
     maxBoostersPerCycle: 1,
     maxUnitPriceMicroUsd: '0',
@@ -341,9 +351,19 @@ export function createDefaultOperatorConfiguration() {
   });
 }
 
-// Persisted historical money schemas never migrate into executable native state.
+// Native v4 gains an empty plan; native v5 retains its plan. Both gain the future-cycle
+// recipient default without changing prior configuration revisions or cycle snapshots.
+// Older money schemas never migrate into executable native state.
 export function migrateOperatorConfiguration(value) {
   if (value === null) return Object.freeze({ configuration: null, migrated: false });
+  if ([legacyConfigurationSchema, 'hookemon.operator-configuration.v5'].includes(value?.schema)) {
+    assertNoSecretMaterial(value, 'legacy operator configuration');
+    const v4 = value.schema === legacyConfigurationSchema;
+    assertExactPlainObject(value, configurationFields.filter(field => field !== 'rewardRecipientLimit' && (!v4 || field !== 'packPlan')), 'legacy operator configuration');
+    const configuration = assertOperatorConfiguration({ ...value, schema: OPERATOR_CONFIGURATION_SCHEMA,
+      packPlan: v4 ? createEmptyPackPlan() : value.packPlan, rewardRecipientLimit: DEFAULT_REWARD_RECIPIENT_LIMIT });
+    return Object.freeze({ configuration, migrated: true });
+  }
   return Object.freeze({ configuration: assertOperatorConfiguration(value), migrated: false });
 }
 
@@ -371,6 +391,10 @@ export function applyOperatorConfiguration(current, patch) {
     if (Object.hasOwn(patch, field)) throw new Error(`operator configuration patch must not set ${field} directly`);
   }
   const next = { ...base, ...patch };
+  if (Object.hasOwn(patch, 'packPlan')) {
+    assertExactPlainObject(patch.packPlan, ['orders'], 'operator configuration pack plan patch');
+    next.packPlan = replacePackPlan(base.packPlan, patch.packPlan.orders);
+  }
   if (Object.hasOwn(patch, 'maxCycleBudgetMicroUsd') && !Object.hasOwn(patch, 'perCycleCapMicroUsd')) {
     next.perCycleCapMicroUsd = patch.maxCycleBudgetMicroUsd;
   }

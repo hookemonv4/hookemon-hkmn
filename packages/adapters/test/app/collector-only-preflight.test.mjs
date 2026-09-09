@@ -216,6 +216,6 @@ test('collector-only preflight refuses a keychain identity that does not match O
 test('collector-only preflight refuses JSON valuation without querying providers', async () => {
   const fixture = dependencies(), configured = config();
   configured.collectorCrypt.packFundingUsd = structuredClone(packFundingUsd);
-  await assert.rejects(runCollectorOnlyPreflight({ config: configured, policyConfiguration: policy(), ...fixture }), /fresh authenticated exact USDC/);
+  await assert.rejects(runCollectorOnlyPreflight({ config: configured, policyConfiguration: policy(), ...fixture }), /fresh authenticated exact settlement token/);
   assert.deepEqual(fixture.calls, []);
 });

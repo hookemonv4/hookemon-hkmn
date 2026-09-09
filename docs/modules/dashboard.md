@@ -91,6 +91,29 @@ inspection through the same authority boundary.
 
 ## Operational commands
 
+The owner page lists the authenticated `/operator/api/packs` catalog with checkboxes, select-all,
+clear and save controls. Selection comes from the stored `packPlan.orders`, independently of the
+safety allowlist. Existing quantities remain visible and preserved; newly selected packs receive
+quantity one. The revision-checked `update-configuration` command accepts exactly
+`packPlan: { orders: [{ pack, quantity }] }`; clients cannot assign a plan schema or revision.
+The runner owns plan revisions. Bootstrap exposes the complete validated versioned plan.
+
+Saving unions selected codes into the existing `allowedPackIds`, so deselecting a pack or clearing
+the plan does not remove permission needed by an already admitted cycle. Empty selection stores
+an empty plan. Saving does not start a cycle or buy a pack. Previously selected codes absent from
+the catalog remain visible until deselected. An unavailable catalog disables saving without hiding
+the dashboard. Provider names render as text. Confirmation compares authoritative plan readback,
+including quantities; uncertain requests retain their identity for reconciliation.
+
+Legacy bootstrap payloads without a plan remain readable, but the page disables plan saving and
+never infers selection from their safety allowlist. Operator configuration v6 retains native public
+accounting schema v7. No monetary contract is relaxed for compatibility.
+
+The page persists the plan through the injected operator authority. Cycle execution must consume
+the plan through the runner's admission and snapshot integration. A standalone dashboard without
+that composition has no production authority or catalog, and a read-only local service remains
+read-only. Adding permitted packs retains the authority's safety-telemetry checks.
+
 Start the composed service with `node packages/adapters/bin/hookemon-runner.mjs run`, then open
 `http://127.0.0.1:8787` unless `HOOKEMON_DASHBOARD_PORT` selects another port. The browser
 credential is `HOOKEMON_DASHBOARD_PROXY_CREDENTIAL`. Run the dashboard tests with Node 24, then run
@@ -147,3 +170,22 @@ not establish payment. Native cycle history retains the status-and-timestamp-onl
 Focused verification: `node --experimental-strip-types --test apps/web/tests/native-accounting.test.mjs`
 exercises projection, both public parser boundaries, the served comic dashboard, exact wei averages
 and parser parity. Historical contract and dashboard presentation tests exercise the old readers.
+
+Pack selection groups use native expandable sections, with Pokémon first, followed by One Piece, Sports, and other packs. Pokémon opens initially; each group orders packs by catalog price and code. Collapsing a section preserves selection.
+
+## Reward recipient controls
+
+Bootstrap publishes the runner's canonical recipient options and the saved future-cycle limit.
+The authenticated configuration command accepts only numeric integers 100–1000 in steps of 100.
+The owner page separates the editable choice, confirmed saved value and active-cycle frozen value.
+A successful command requires an authoritative matching bootstrap readback before the page reports
+success. Stale, uncertain, failed or unreadable outcomes remain visibly unconfirmed; reload restores
+the authority's value. Pack-plan editing remains independent.
+
+Private active-cycle and public latest-cycle limits come only from the persisted `rewardSelection`
+snapshot. A missing historic snapshot yields null and an all-holder label; the current configuration
+never supplies an active or historical cycle limit. The website's active-cycle decoder accepts this
+null representation. `operator/control.mjs` validates the snapshot digest and cycle identity before
+projecting repository data.
+
+The disconnected local selection wrapper uses `assertLocalSelectionCommand` to accept only pack-plan and reward-recipient updates while paused, execution-paused and non-live. Reward-only edits do not depend on catalog availability. Pack edits retain catalog membership and the existing allowlist protections. The wrapper grants no execution operation.

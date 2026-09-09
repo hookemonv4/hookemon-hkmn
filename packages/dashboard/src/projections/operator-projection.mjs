@@ -1,3 +1,4 @@
+import { assertPackPlan } from '../../../runner/src/config/pack-plan.mjs';
 import { nativeUnknownFields } from '../contracts/native-accounting.mjs';
 // Maps the runner-owned operator-control status into the dashboard's compatibility read models.
 // The dashboard receives a snapshot from `operatorControl.status()` and does not inspect a state
@@ -5,10 +6,8 @@ import { nativeUnknownFields } from '../contracts/native-accounting.mjs';
 import { createDefaultOperatorConfiguration, DEFAULT_INTERVAL_MINUTES } from '../../../runner/src/config/state-schema.mjs';
 import { OPERATOR_HARD_CAPS } from '../../../runner/src/operator/state-file.mjs';
 
-export const PLACEHOLDER_REWARD_RECIPIENT_LIMIT = 200;
-export const REWARD_RECIPIENT_LIMITS = Object.freeze(
-  Array.from({ length: 10 }, (_, index) => (index + 1) * 100),
-);
+import { REWARD_RECIPIENT_LIMITS } from '../../../runner/src/config/reward-recipient-selection.mjs';
+export { REWARD_RECIPIENT_LIMITS };
 
 export const HARD_CAPS = Object.freeze({
   maxBoostersPerCycle: OPERATOR_HARD_CAPS.maxBoostersPerCycle,
@@ -31,13 +30,14 @@ function mapOperatorState(configuration, revision) {
     version: revision,
     desiredStatus: effective.killSwitch ? 'killed' : (isPaused(effective) ? 'paused' : 'active'),
     allowedPackIds: effective.allowedPackIds,
+    ...(effective.packPlan === undefined ? {} : { packPlan: assertPackPlan(effective.packPlan) }),
     requestedOrders: effective.requestedOrders,
     intervalMinutes: effective.intervalMinutes,
     manualPackOrders: effective.allowedPackIds.length === 1
       ? [{ productId: effective.allowedPackIds[0], quantity: effective.requestedOrders }]
       : [],
     maxBoostersPerCycle: effective.maxBoostersPerCycle,
-    rewardRecipientLimit: PLACEHOLDER_REWARD_RECIPIENT_LIMIT,
+    rewardRecipientLimit: effective.rewardRecipientLimit ?? null,
     cycleIntervalMinutes: effective.intervalMinutes,
     skipNextCycleSequence: 0,
     runNowSequence: 0,
@@ -145,7 +145,7 @@ export function buildDashboardReadModel({ authorityStatus, now = Date.now, lastT
         cycleId: current.cycleId,
         status: visibleStage(current),
         updatedAt: null,
-        configurationRevision: configuration ? String(configuration.configurationRevision) : null,
+        configurationRevision: current.rewardSelection ? String(current.rewardSelection.configurationRevision) : null,
         allowedPackIds: configuration ? configuration.allowedPackIds : [],
         requestedOrders: configuration?.requestedOrders ?? 0,
         maxBoostersPerCycle: configuration ? configuration.maxBoostersPerCycle : null,
@@ -153,7 +153,7 @@ export function buildDashboardReadModel({ authorityStatus, now = Date.now, lastT
         maxCycleBudgetMicroUsd: configuration ? configuration.maxCycleBudgetMicroUsd : null,
         max24HourBudgetMicroUsd: configuration ? configuration.max24HourBudgetMicroUsd : null,
         revealedCards: 0,
-        rewardRecipientLimit: PLACEHOLDER_REWARD_RECIPIENT_LIMIT,
+        rewardRecipientLimit: current.rewardSelection?.rewardRecipientLimit ?? null,
       }
       : null,
     latestCycle: null,

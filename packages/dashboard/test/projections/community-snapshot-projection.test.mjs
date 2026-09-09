@@ -157,3 +157,9 @@ test('a single terminal cycle is unambiguous even without a terminalAtMs', async
   assert.equal(snapshot.latestCycle.cycleId, 'cycle-1');
   assert.equal(snapshot.historyComplete, true);
 });
+
+test('latest cycle reports only its frozen recipient limit without inventing a paid count', async () => {
+  const snapshot = await buildPublicCommunitySnapshot({ profileId: 'testnet', generatedAt: '2026-09-09T00:00:00.000Z', repositoryCycles: [{ cycleId: 'selected', terminalState: 'COMPLETED', rewardSelection: { rewardRecipientLimit: 700 } }] });
+  assert.equal(snapshot.latestCycle.rewardRecipientLimit, 700);
+  assert.equal(snapshot.latestCycle.payoutRecipientCount, null);
+});

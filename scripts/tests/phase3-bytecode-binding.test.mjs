@@ -161,7 +161,8 @@ test('Phase 3 keeps one portable Standard JSON evidence record', () => {
   assert.deepEqual(Object.keys(buildInfo).sort(), ['language', 'settings', 'sources']);
   assert.equal(Object.hasOwn(buildInfo, 'version'), false);
   assert.equal(buildInfo.language, 'Solidity');
-  assert.equal(buildInfo.settings.optimizer.runs, 1000);
+  assert.equal(buildInfo.settings.optimizer.runs, 200);
+  assert.equal(buildInfo.settings.viaIR, true);
   assert.equal(manifest.compiler.solcLongVersion, PHASE_THREE_SOLC_LONG_VERSION);
   assert.deepEqual(sourceContentCommitment(buildInfo), {
     sourceCount: manifest.compiler.buildInfo.sourceCount,
@@ -254,5 +255,16 @@ writeFileSync(artifactPath, JSON.stringify(artifact) + '\\n');
     assert.match(`${result.stdout}\n${result.stderr}`, /compilationTarget.*deployment target|compiled artifact identity/i);
   } finally {
     rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+
+test('native launch runtime templates fit the EIP-170 deployment limit', () => {
+  for (const target of targets) {
+    const artifact = JSON.parse(readFileSync(resolve(root, 'release/phase3/artifacts', `${target.targetId}.json`), 'utf8'));
+    const runtimeHex = artifact.deployedBytecode.object.replace(/^0x/, '');
+    assert.match(runtimeHex, /^(?:[0-9a-f]{2})+$/i, `${target.targetId}: unresolved or malformed runtime bytecode`);
+    const bytes = runtimeHex.length / 2;
+    assert.ok(bytes > 0 && bytes <= 24576, `${target.targetId}: ${bytes} runtime bytes exceeds 24576`);
   }
 });

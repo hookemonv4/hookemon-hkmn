@@ -1,0 +1,11 @@
+{
+  "authority": "OWNER",
+  "approvalToken": "OWNER APPROVED",
+  "receiptId": "r-00656",
+  "relatedReceiptId": "r-00655",
+  "evidenceSource": "OWNER_ATTESTATION",
+  "confirmedFact": "The owner confirms Programmable acceptance of the existing 10bps share following direct discussion.",
+  "instruction": "Proceed with the inclusive300bps split:250process,40treasury,10Programmable. Do not reopen the fee acceptance question.",
+  "executionScope": "Prepare the first run capped at ten transactions; manual replenishment remains the owner responsibility. Actual source/runtime and transaction checks remain required.",
+  "recordingBoundary": "Owner-confirmed provider agreement is distinct from an API response or transaction receipt."
+}

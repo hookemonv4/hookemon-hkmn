@@ -12,9 +12,11 @@ import {
 
 function validConfiguration(overrides = {}) {
   return {
-    schema: 'hookemon.operator-configuration.v4',
+    schema: 'hookemon.operator-configuration.v6',
+    rewardRecipientLimit: 200,
     intervalMinutes: 20,
     allowedPackIds: ['base', 'turbo-pack'],
+    packPlan: { schema: 'hookemon.pack-plan.v1', revision: 0, orders: [] },
     requestedOrders: 1,
     maxBoostersPerCycle: 1,
     maxUnitPriceMicroUsd: '25000000',
@@ -148,7 +150,7 @@ test('rejects a negative or non-integer configurationRevision', () => {
 
 test('the default configuration is conservative: no packs, zero budget, dry-run, unpaused', () => {
   const config = createDefaultOperatorConfiguration();
-  assert.equal(config.schema, 'hookemon.operator-configuration.v4');
+  assert.equal(config.schema, 'hookemon.operator-configuration.v6');
   assert.equal(config.intervalMinutes, DEFAULT_INTERVAL_MINUTES);
   assert.equal(config.liveMode, DEFAULT_LIVE_MODE);
   assert.deepEqual(config.allowedPackIds, []);
@@ -205,6 +207,7 @@ test('applyOperatorConfiguration bumps the revision by exactly one and starts fr
     approvalsByCycleDigest: _approvalsByCycleDigest,
     spendLedger: _spendLedger,
     cycleLedger: _cycleLedger,
+    packPlan: _packPlan,
     ...firstWithoutRevision
   } = first;
   const second = applyOperatorConfiguration(first, { ...firstWithoutRevision, paused: true });

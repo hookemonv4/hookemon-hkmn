@@ -1,3 +1,4 @@
+import { assertPackPlan } from '../../../runner/src/config/pack-plan.mjs';
 import { createTestProfileMutationAuthority } from '../../../runner/src/cycle/preflight.mjs';
 import { requireNativePaymentBinding, isTestNativePaymentBinding } from '../native-payment-proof.mjs';
 // The production composition root: wires the real scheduler (packages/runner/src/scheduler), the
@@ -114,14 +115,14 @@ function collectorOnlyPackPrice(config) {
   return amountAtomic;
 }
 
-export function collectorOnlyPackUsdCost(config) {
+export function collectorOnlyPackCostMicroUsd(config) {
   const amountAtomic = collectorOnlyPackPrice(config);
   const price = config.collectorCrypt.packPrice, valuation = config.collectorCrypt.packFundingUsd;
   const amount = { chainId: '792703809', assetId: price.assetId, decimals: price.decimals, amountAtomic };
   const timestamp = (config.now ?? Date.now)();
   if (!isProcessQuoteUsdValuation(valuation, { amount, rounding: 'up', sourcePath: 'details.currencyIn.amountUsd' })
     || timestamp < valuation.observedAtMs || timestamp >= valuation.validUntilMs) {
-    throw new Error('collector-only policy requires fresh authenticated exact USDC purchase USD valuation');
+    throw new Error('collector-only policy requires fresh authenticated exact settlement token purchase USD valuation');
   }
   return valuation.amountMicroUsd;
 }
@@ -674,10 +675,59 @@ function admittedRelayIdentity(quote) {
  * Returns `null` when the configuration cannot admit a cycle at all, which the service reports as
  * WAITING_FOR_ADMISSION. Anything malformed throws instead of degrading into a cheaper cycle.
  */
+async function planSelectedPacks({ config, adapters, configuration, processLiabilityReader, cycleId, packPlan: value }) {
+  const packPlan = assertPackPlan(value);
+  if (!configuration?.liveMode || !packPlan.orders.length) return null;
+  const quantity = packPlan.orders.reduce((sum, order) => sum + order.quantity, 0);
+  if (quantity > configuration.maxBoostersPerCycle) throw new Error('admission plan exceeds the configured booster ceiling');
+  if (!packPlan.orders.every(order => configuration.allowedPackIds.includes(order.pack))) return null;
+  if (typeof adapters?.collectorCrypt?.getMachines !== 'function' || typeof adapters?.relay?.quoteOutboundBridge !== 'function') {
+    throw new Error('admission planner requires Collector catalog and Relay clients');
+  }
+  const settlementAsset = config.moneyConfiguration.assets.solanaStablecoin;
+  const fundingAsset = config.moneyConfiguration.assets.eth;
+  const liability = assertProcessLiabilityEvidence(await processLiabilityReader?.read?.({ cycleId, packId: packPlan.orders[0].pack }),
+    fundingAsset, { hook: config.contracts?.hook ?? null, cycleId, operations: config.accounts.evm.toLowerCase() });
+  if (liability === null) return null;
+  const catalog = await adapters.collectorCrypt.getMachines();
+  const route = { user: config.accounts.evm, recipient: config.accounts.solana,
+    destinationCurrency: settlementAsset.assetId, tradeType: 'EXACT_OUTPUT' };
+  const orders = [];
+  let aggregateAtomic = 0n;
+  // Validate the whole selection before asking for its first quote.
+  const units = packPlan.orders.map(order => admittedCatalogUnit({ catalog, packId: order.pack, settlementAsset }));
+  for (const [orderIndex, order] of packPlan.orders.entries()) {
+    const unitAtomic = units[orderIndex];
+    const quote = await adapters.relay.quoteOutboundBridge({ ...route, amount: unitAtomic.toString() });
+    const unitFundingQuote = typedAdmissionAmount(fundingAsset, BigInt(quote.origin.amount));
+    orders.push(Object.freeze({ orderIndex, packId: order.pack, quantity: order.quantity,
+      unitPurchase: typedAdmissionAmount(settlementAsset, unitAtomic), unitFundingQuote,
+      unitFundingUsd: createQuoteUsdValuation({ quote, side: 'origin', amount: unitFundingQuote,
+        rounding: 'up', nowMs: (config.now ?? Date.now)() }),
+      unitRelay: admittedRelayIdentity(quote), unitRelayQuote: quote }));
+    aggregateAtomic += unitAtomic * BigInt(order.quantity);
+  }
+  const quote = await adapters.relay.quoteOutboundBridge({ ...route, amount: aggregateAtomic.toString() });
+  if (quantity > 1 && orders.some(order => order.unitRelay.requestId === quote.requestId)) {
+    throw new Error('admission planner received one Relay quote for unit and aggregate targets');
+  }
+  const aggregateFundingQuote = typedAdmissionAmount(fundingAsset, BigInt(quote.origin.amount));
+  if (BigInt(aggregateFundingQuote.amountAtomic) > BigInt(liability.ceilingAtomic)) {
+    throw new Error('admission planner refuses an aggregate quote above the attributable process liability');
+  }
+  return Object.freeze({ schema: 'hookemon.policy-admission.v4', cycleId, packPlan, quantity,
+    orders: Object.freeze(orders), quoteDigest: quote.quoteDigest,
+    aggregatePurchase: typedAdmissionAmount(settlementAsset, aggregateAtomic), aggregateFundingQuote,
+    aggregateFundingUsd: createQuoteUsdValuation({ quote, side: 'origin', amount: aggregateFundingQuote,
+      rounding: 'up', nowMs: (config.now ?? Date.now)() }),
+    relay: admittedRelayIdentity(quote), relayQuote: quote, processLiabilityEvidence: liability });
+}
+
 export function buildAdmissionPlanner({ config, adapters, readConfiguration, processLiabilityReader = null }) {
   return {
-    async plan({ cycleId, packId }) {
+    async plan({ cycleId, packId, packPlan }) {
       const configuration = await readConfiguration();
+      if (packPlan !== undefined) return planSelectedPacks({ config, adapters, configuration, processLiabilityReader, cycleId, packPlan });
       if (configuration === null || !configuration.liveMode) return null;
       const quantity = configuration.requestedOrders;
       if (!Number.isInteger(quantity) || quantity < 1) return null;
@@ -786,6 +836,22 @@ export function buildQuoteRefreshPlanner({ config, adapters }) {
       };
       // Sequential for the same reason as the original admission planner: one deterministic
       // ordering of two separate priced facts, never issued together.
+      if (admission.schema === 'hookemon.policy-admission.v4') {
+        const orders = [];
+        for (const order of admission.orders) {
+          const quote = await adapters.relay.quoteOutboundBridge({ ...route, amount: order.unitPurchase.amountAtomic });
+          const unitFundingQuote = typedAdmissionAmount(fundingAsset, BigInt(quote.origin.amount));
+          orders.push(Object.freeze({ ...order, unitFundingQuote,
+            unitFundingUsd: createQuoteUsdValuation({ quote, side: 'origin', amount: unitFundingQuote, rounding: 'up', nowMs: (config.now ?? Date.now)() }),
+            unitRelay: admittedRelayIdentity(quote), unitRelayQuote: quote }));
+        }
+        const quote = await adapters.relay.quoteOutboundBridge({ ...route, amount: admission.aggregatePurchase.amountAtomic });
+        if (admission.quantity > 1 && orders.some(order => order.unitRelay.requestId === quote.requestId)) throw new Error('quote refresh reused a unit quote for the aggregate');
+        const aggregateFundingQuote = typedAdmissionAmount(fundingAsset, BigInt(quote.origin.amount));
+        return Object.freeze({ ...admission, orders: Object.freeze(orders), quoteDigest: quote.quoteDigest, aggregateFundingQuote,
+          aggregateFundingUsd: createQuoteUsdValuation({ quote, side: 'origin', amount: aggregateFundingQuote, rounding: 'up', nowMs: (config.now ?? Date.now)() }),
+          relay: admittedRelayIdentity(quote), relayQuote: quote });
+      }
       const unitQuote = await adapters.relay.quoteOutboundBridge({ ...route, amount: admission.unitPurchase.amountAtomic });
       const aggregateQuote = await adapters.relay.quoteOutboundBridge({ ...route, amount: admission.aggregatePurchase.amountAtomic });
       if (admission.quantity > 1 && unitQuote.requestId === aggregateQuote.requestId) {
@@ -1018,7 +1084,7 @@ function buildBudgetReader({ config, cycleRepository, readConfiguration, liveMod
       const active = await cycleRepository.readActiveCycle();
       const configuration = await readConfiguration();
       const disabled = liveMode && (configuration === null || (configuration.liveMode && (
-        configuration.requestedOrders === 0
+        (configuration.packPlan?.orders.length ? configuration.packPlan.orders.reduce((sum, order) => sum + order.quantity, 0) : configuration.requestedOrders) === 0
         || configuration.allowedPackIds.length === 0
         || configuration.maxUnitPriceMicroUsd === '0'
         || configuration.perCycleCapMicroUsd === '0'
@@ -1425,7 +1491,7 @@ export async function compose(config) {
     assertCollectorOnlyRehearsalPolicy(configuration, {
       packCode: resolved.pack.code,
       packPriceAtomic: collectorOnlyPackPrice(resolved),
-      packCostMicroUsd: collectorOnlyPackUsdCost(resolved),
+      packCostMicroUsd: collectorOnlyPackCostMicroUsd(resolved),
     });
     return configuration;
   }
@@ -1496,7 +1562,7 @@ export async function compose(config) {
     }
     assertLease();
     const current = await cycleRepository.describeCycle(cycleId);
-    if (current?.admission?.schema !== 'hookemon.policy-admission.v3') throw new Error('native canary requires native cycle admission');
+    if (!['hookemon.policy-admission.v3', 'hookemon.policy-admission.v4'].includes(current?.admission?.schema)) throw new Error('native canary requires native cycle admission');
     const result = await observability.runNativePrincipalCanary({ nativePrincipal: current.admission.aggregateFundingQuote, destinations: [] });
     if (!result || !Array.isArray(result.drift) || typeof result.ok !== 'boolean') {
       throw new Error('native principal canary returned an invalid result');
@@ -1579,7 +1645,7 @@ export async function compose(config) {
         assertCollectorOnlyRehearsalPolicy(configuration, {
           packCode: resolved.pack.code,
           packPriceAtomic: collectorOnlyPackPrice(resolved),
-      packCostMicroUsd: collectorOnlyPackUsdCost(resolved),
+      packCostMicroUsd: collectorOnlyPackCostMicroUsd(resolved),
         });
       }
     }
@@ -1657,11 +1723,15 @@ export async function compose(config) {
       // quote-bound: those are what a quote is denominated in and routed to, so a composition
       // without them has nothing to price. Rehearsal, dry-run and such partial compositions keep the
       // previous unadmitted path, where decideCycleBudget still uses its configured static sum and
-      // outbound still refuses for want of a repository-owned admission.
+      // outbound still refuses for want of a repository-owned admission. The saved pack plan is read
+      // only alongside that planner: it selects what the planner prices, and a composition without a
+      // planner (the live Collector-only rehearsal has no executable plan) must not wait forever on
+      // an empty selection instead of reaching its own configured-pack admission refusal.
       ...(liveMode && mode === 'production'
         && resolved.moneyConfiguration?.assets?.solanaStablecoin && resolved.moneyConfiguration?.assets?.eth
         && typeof resolved.accounts?.evm === 'string' && typeof resolved.accounts?.solana === 'string'
         ? {
+          readCycleConfiguration: readConfiguration,
           admissionPlanner: buildAdmissionPlanner({
             config: resolved,
             adapters,

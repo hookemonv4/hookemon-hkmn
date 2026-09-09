@@ -7,6 +7,12 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { DEFAULT_DIGEST_RULES, scanDigestMarkers, scanTree } from '../check-cleanroom.mjs';
+import {
+  GITLEAKS_SAFE_BOUNDARY_PEEK_BYTES,
+  SAFE_BOUNDARY_GAP_BYTES,
+  maxBlankLineGapBytes,
+  stringifyWithSafeBoundaries,
+} from '../lib/safe-boundary-json.mjs';
 
 const repoRoot = resolve(fileURLToPath(new URL('../..', import.meta.url)));
 const scanner = join(repoRoot, 'scripts', 'check-cleanroom.mjs');
@@ -576,7 +582,7 @@ test('GitHub gate installs content-addressed Gitleaks without a remote action', 
   assert.match(workflow, /gitleaks_version='8\.30\.1'/);
   assert.match(workflow, /551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb/);
   assert.match(workflow, /88f91962aa2f93ac6ab281d553b9e125f5197bbbce38f9f2437f7299c32e5509/);
-  assert.match(workflow, /gitleaks_config_sha256='99572a32133e4a123b803028a7ae095d4040a44fe9a151dbeabc5d07f88f5a89'/);
+  assert.match(workflow, /gitleaks_config_sha256='abd04be4f57b752683ff7b52479fc359c7d63c9ce0a84c170c2bce0bff876488'/);
   assert.doesNotMatch(workflow, /GITLEAKS_ENABLE_COMMENTS|GITLEAKS_ENABLE_UPLOAD_ARTIFACT|GITHUB_TOKEN/);
 });
 
@@ -625,7 +631,7 @@ test('native recognition binds exact reviewed file bytes, path, rule and token',
   const selected = [
     'architecture/interfaces.json',
     'docs/evidence/native-provider-20260908/verified-Multicall3.sol.txt',
-    'packages/adapters/src/app/compose.mjs',
+    'packages/adapters/test/native/admission-fixture.mjs',
   ];
   for (const file of selected) {
     const text = readFileSync(join(repoRoot, file), 'utf8');
@@ -653,4 +659,38 @@ test('native recognition manifest tampering fails before scanning', () => {
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test('safe-boundary JSON keeps a blank line inside every Gitleaks fragment peek window', () => {
+  const digest = 'ab'.repeat(32);
+  const value = {
+    schema: 'fixture',
+    files: Object.fromEntries(Array.from({ length: 1500 }, (_, index) => [
+      `fixtures/file-${index}.json`,
+      { sha256: digest, matches: [{ offset: index, length: 4, sha256: digest, tokenStart: index, tokenLength: 4, tokenSha256: digest }] },
+    ])),
+  };
+  const plain = `${JSON.stringify(value, null, 2)}\n`;
+  assert.ok(Buffer.byteLength(plain) > 100_000 + GITLEAKS_SAFE_BOUNDARY_PEEK_BYTES, 'fixture spans more than one fragment');
+  assert.equal(maxBlankLineGapBytes(plain), Buffer.byteLength(plain), 'pretty-printed JSON has no blank line');
+
+  const text = stringifyWithSafeBoundaries(value);
+  assert.ok(SAFE_BOUNDARY_GAP_BYTES < GITLEAKS_SAFE_BOUNDARY_PEEK_BYTES);
+  assert.ok(maxBlankLineGapBytes(text) <= SAFE_BOUNDARY_GAP_BYTES);
+  assert.deepEqual(JSON.parse(text), value);
+  assert.equal(stringifyWithSafeBoundaries(JSON.parse(text)), text, 'serialization is canonical');
+  assert.equal(text.replaceAll('\n\n', '\n'), plain, 'only empty lines are inserted');
+  assert.doesNotMatch(text, /\n\n\n/);
+  assert.ok(maxBlankLineGapBytes(stringifyWithSafeBoundaries(value, { maxGapBytes: 2_048 })) <= 2_048);
+  assert.throws(() => stringifyWithSafeBoundaries(value, { maxGapBytes: GITLEAKS_SAFE_BOUNDARY_PEEK_BYTES + 1 }), RangeError);
+  assert.throws(() => stringifyWithSafeBoundaries({ long: 'x'.repeat(4_096) }, { maxGapBytes: 2_048 }), RangeError);
+});
+
+test('native recognition manifest is the canonical safe-boundary serialization', () => {
+  const text = readFileSync(join(repoRoot, 'scripts/native-cleanroom-recognition.json'), 'utf8');
+  assert.ok(
+    maxBlankLineGapBytes(text) <= SAFE_BOUNDARY_GAP_BYTES,
+    'a Gitleaks 8.30.1 fragment boundary could split a digest line; regenerate with stringifyWithSafeBoundaries',
+  );
+  assert.equal(stringifyWithSafeBoundaries(JSON.parse(text)), text, 'manifest must be regenerated with stringifyWithSafeBoundaries');
 });

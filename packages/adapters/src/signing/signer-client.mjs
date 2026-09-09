@@ -656,7 +656,7 @@ async function signWithBoundedSignOnlyRecovery({
   return attemptNextEligible();
 }
 
-export function wrapTransactionPolicySignerClient({ client, policy, rules, decodeOptions, broadcast, recovery }) {
+export function wrapTransactionPolicySignerClient({ client, policy, rules, decodeOptions, broadcast, recovery, solanaOperatorAddress }) {
   if (!client || typeof client !== 'object' || Array.isArray(client)) {
     fail('transaction policy signer requires a signer client');
   }
@@ -680,6 +680,12 @@ export function wrapTransactionPolicySignerClient({ client, policy, rules, decod
   const policyBinding = bindTransactionPolicy(policy, rules);
   const canonicalPolicy = policyBinding.policy;
   const policyRules = policyBinding.rules;
+  function operatorIndex(decoded) {
+    if (solanaOperatorAddress === undefined) return 0;
+    const index = decoded.requiredSigners.indexOf(solanaOperatorAddress);
+    if (family !== 'solana' || index < 0) fail('Operations signer is absent from the approved transaction');
+    return index;
+  }
   const approvals = new Map();
   const policyDigest = policyRules.some(rule => rule.deadline?.type === 'rpc-blockhash-validity')
     ? canonicalDigest({ policy: canonicalPolicy, rules: policyRules })
@@ -701,7 +707,7 @@ export function wrapTransactionPolicySignerClient({ client, policy, rules, decod
     return Object.freeze({
       approved: redecoded,
       input,
-      coSignerSignatures: family === 'solana' ? captureSolanaCoSignerSignatures(input.transaction) : undefined,
+      coSignerSignatures: family === 'solana' ? captureSolanaCoSignerSignatures(input.transaction, operatorIndex(redecoded)) : undefined,
       recoveryContext: actual,
     });
   }
@@ -712,7 +718,7 @@ export function wrapTransactionPolicySignerClient({ client, policy, rules, decod
       const approved = await decodeProviderTransaction(input);
       evaluateTransactionPolicy(canonicalPolicy, approved, { rules: policyRules });
       const coSignerSignatures = family === 'solana'
-        ? captureSolanaCoSignerSignatures(input.transaction)
+        ? captureSolanaCoSignerSignatures(input.transaction, operatorIndex(approved))
         : undefined;
       // `signApproved`, when the backend exposes it, requires the proof below — minted only here,
       // only after the policy evaluation immediately above succeeded. A backend cannot receive this
@@ -761,7 +767,7 @@ export function wrapTransactionPolicySignerClient({ client, policy, rules, decod
       if (!approval) fail('transaction policy signer refuses to broadcast an unsigned or unapproved message');
       const redecoded = await revalidateSignedMessage(envelope, approval.approved, {
         ...approval.input,
-        ...(family === 'solana' ? { expectedCoSignerSignatures: approval.coSignerSignatures } : {}),
+        ...(family === 'solana' ? { expectedCoSignerSignatures: approval.coSignerSignatures, operatorSignerIndex: operatorIndex(approval.approved) } : {}),
       });
       evaluateTransactionPolicy(canonicalPolicy, redecoded, { rules: policyRules });
       // All three ways this method can reach a real chain RPC — a directly-supplied `broadcast`

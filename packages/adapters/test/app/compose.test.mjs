@@ -161,7 +161,7 @@ function collectorOnlyMoneyConfiguration() {
   };
 }
 
-// Exact fetched 25-USDC quote valued at USD 21; the fixture deliberately assumes no parity.
+// Exact fetched 25-settlement token quote valued at USD 21; the fixture deliberately assumes no parity.
 async function collectorPackFundingUsd(operator) {
   const zero = `0x${'0'.repeat(40)}`;
   const client = createRelayClient({ now: () => 1_000, quoteValidityMs: 60_000,
@@ -813,6 +813,102 @@ test('a live collector-only rehearsal purchase remains unsupported under the dur
   assert.equal(calls.generatePack, 0);
   assert.equal(calls.sign, 0);
   assert.equal(calls.submitTransaction, 0);
+});
+
+// The collector-only rehearsal initializer never writes an executable pack plan: its policy names
+// exactly one configured pack (`requestedOrders: 1`) and the saved `packPlan` stays empty. The saved
+// plan belongs to the production admission planner, which this composition does not bind, so a fresh
+// tick must open its cycle from the configured pack and reach the same durable-admission refusal as
+// above -- never idle forever reporting WAITING_FOR_ADMISSION on the empty selection.
+test('a live collector-only rehearsal tick opens a cycle from the configured pack instead of waiting on the empty saved pack plan', async t => {
+  const operator = 'BrvhPB9EeAukw8g3jibQDFBYY5abu3Vchdm9ri3PHZNE';
+  const asset = { chainId: 'solana-mainnet', assetId: CIRCLE_USD_MINT, decimals: CIRCLE_USD_DECIMALS };
+  const stateDir = await tempStateDir(t);
+  const statePath = join(stateDir, 'operator-state.json');
+  await writeOperatorState(statePath, collectorOnlyLivePolicyPatch());
+  assert.deepEqual((await readOperatorState(statePath)).configuration.packPlan.orders, []);
+
+  const calls = { generatePack: 0, generateYoloPacks: 0, sign: 0, submitTransaction: 0 };
+  const composition = await compose({
+    stateDir,
+    statePath,
+    workerOwner: 'test-worker',
+    leaseTtlMs: 30_000,
+    robinhood: { rpcUrl: 'https://example.invalid' },
+    solana: { rpcUrl: 'https://example.invalid', chainId: 'solana-mainnet' },
+    relay: { baseUrl: 'https://example.invalid' },
+    collectorCrypt: {
+      baseUrl: 'https://example.invalid',
+      settlementAsset: asset,
+      packPrice: { ...asset, amountAtomic: '25000000' },
+      packFundingUsd: await collectorPackFundingUsd(operator),
+    },
+    contracts: { vault: null, hook: null },
+    accounts: { evm: null, solana: operator },
+    pack: { code: 'collector-25' },
+    budget: {
+      availableProcessWei: '25000000',
+      packPriceWei: '25000000',
+      outboundCapWei: '0',
+      returnCapWei: '0',
+      operatingMarginWei: '0',
+    },
+    signer: {
+      backend: 'keychain',
+      liveMode: true,
+      roles: ['operator-solana'],
+      keychain: { solanaAccount: 'operator-solana' },
+    },
+    moneyConfiguration: collectorOnlyMoneyConfiguration(),
+    rehearsal: {
+      mode: 'collector-only',
+      proceedsAccount: deriveAssociatedTokenAddress(operator, CIRCLE_USD_MINT).toBase58(),
+      payoutRecipients: ['GfFAJnHnSgP7C2FQZLz6ogpdTV6Y7259f83qFFm9wxKm'],
+      split: 'equal',
+    },
+    execution: { profile: 'rehearsal', networkProfile: 'mainnet', providerMode: 'live', enforceProfile: true },
+    preflightAuthority: createTestProfileMutationAuthority(),
+    adapters: {
+      collectorCrypt: {
+        async getMachines() { return { machines: [{ code: 'collector-25', price: '0.025', contains: 1 }] }; },
+        async getStatus() { return { machineStatus: 'ok', gachas: [] }; },
+        async generatePack() { calls.generatePack += 1; throw new Error('generatePack must never be reached without a durable admission'); },
+        async generateYoloPacks() { calls.generateYoloPacks += 1; throw new Error('generateYoloPacks must never be reached without a durable admission'); },
+        submitTransaction: () => { calls.submitTransaction += 1; throw new Error('submitTransaction must never be reached without a durable admission'); },
+      },
+      relay: {
+        quoteOutboundBridge: () => { throw new Error('unused: the collector-only rehearsal skips the Robinhood-chain leg'); },
+        quoteReturnBridge: () => { throw new Error('unused'); },
+        simulateExecution: () => { throw new Error('unused'); },
+        prepareExecution: () => { throw new Error('unused'); },
+      },
+      robinhood: { client: { async readContract() { return { requirementsRevision: 0n, chainId: 4663n }; } } },
+      solana: { client: collectorOnlyPurchaseSolanaClient({ operator, latestBlockhash: 'SysvarC1ock11111111111111111111111111111111' }) },
+    },
+    signerClient: {
+      solana: {
+        probe: async () => ({ ready: true }),
+        async sign() { calls.sign += 1; throw new Error('signer must never be reached without a durable admission'); },
+      },
+    },
+    now: () => 1_000,
+  });
+  t.after(() => composition.shutdown());
+
+  const outcome = await composition.service.runOnce({ liveMode: true, mode: 'rehearsal' }).then(
+    value => ({ value, error: null }),
+    error => ({ value: null, error }),
+  );
+  assert.notEqual(outcome.value?.status, 'WAITING_FOR_ADMISSION', 'the empty saved pack plan must not idle the collector-only rehearsal');
+  assert.match(outcome.error?.message ?? JSON.stringify(outcome.value), /policy releaseCostMicroUsd must be positive for a money boundary/);
+
+  // The tick got past admission on the configured pack: the cycle exists, its out-of-scope
+  // eligibility snapshot completed, and the money boundary refused before any provider or signer call.
+  const active = await composition.cycleRepository.readActiveCycle();
+  assert.equal(active?.mode, 'rehearsal');
+  assert.equal((await composition.cycleRepository.readStage(active.cycleId, 'eligibility-snapshot')).status, 'COMPLETE');
+  assert.notEqual((await composition.cycleRepository.readStage(active.cycleId, 'claim-process'))?.status, 'COMPLETE');
+  assert.deepEqual(calls, { generatePack: 0, generateYoloPacks: 0, sign: 0, submitTransaction: 0 });
 });
 
 // The recorded production Operations identity and canonical policy-engine routes
@@ -3088,7 +3184,7 @@ function fullRelayClient({ now = () => 1_000 } = {}) {
 test('liveMode true fails closed before claim signing when canonical nonce reads are unavailable', async t => {
   const stateDir = await tempStateDir(t);
   const statePath = join(stateDir, 'operator-state.json');
-  await writeOperatorState(statePath, livePolicyPatch('collector-nova'));
+  await writeOperatorState(statePath, { ...livePolicyPatch('collector-nova'), packPlan: { orders: [{ pack: 'collector-nova', quantity: 1 }] } });
   const distributionDir = await mkdtemp(join(tmpdir(), 'hookemon-compose-distribution-'));
   t.after(() => rm(distributionDir, { recursive: true, force: true }));
 

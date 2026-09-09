@@ -121,6 +121,11 @@ function validateCompiledTargetIdentities(records, deploymentManifest) {
   for (const target of targets) {
     const record = records.get(target.targetId);
     if (!record) throw new Error(`compiled artifact is missing for ${target.targetId}`);
+    const runtimeHex = record.artifact.deployedBytecode?.object;
+    const runtimeSize = typeof runtimeHex === 'string' ? runtimeHex.replace(/^0x/, '').length / 2 : NaN;
+    if (!Number.isInteger(runtimeSize) || runtimeSize <= 0 || runtimeSize > 24576) {
+      throw new Error(`EIP_170_RUNTIME_CODE_SIZE_EXCEEDED: ${target.targetId} has ${runtimeSize} runtime bytes; maximum is 24576`);
+    }
     const identity = artifactCompilationTarget(target, record.artifact);
     const matches = deploymentManifest.deployed.filter((entry) => entry?.name === target.contractName);
     if (matches.length !== 1 || typeof matches[0].sourcePath !== 'string') {
@@ -262,6 +267,10 @@ function updateAddressManifest(manifest, records, buildInfo, launchInputs) {
   }
 
   manifest.deployer.factory = PHASE_THREE_FACTORY;
+  if (launchInputs.schemaVersion.endsWith('.v2')) {
+    manifest.compiler.standardJson.optimizer = { enabled: true, runs: 200 };
+    manifest.compiler.standardJson.viaIR = true;
+  }
   manifest.compiler.solc = PHASE_THREE_SOLC_VERSION;
   manifest.compiler.solcLongVersion = PHASE_THREE_SOLC_LONG_VERSION;
   manifest.compiler.buildInfo = {

@@ -1,12 +1,13 @@
+import { REWARD_RECIPIENT_LIMITS, assertRewardRecipientLimit } from '../../../runner/src/config/reward-recipient-selection.mjs';
+import { assertPackPlan, PACK_PLAN_SCHEMA } from '../../../runner/src/config/pack-plan.mjs';
 import { nativeValidationSkeleton, requireNativeRound } from './native-accounting.mjs';
 // Clean-room re-implementation of the private /operator/api/* contracts (readSet:
 // apps/web/app/operator/OperatorControlPanel.tsx, operator-types.ts and the coordinator's own
 // "CONTRACT FACTS extracted from the website source" note on this package's work order). These
 // validators reproduce the exact key sets the website's `decodeBootstrap`/`decodeDashboard`/audit and
 // card-history readers require, adapted for this service's actual configuration model
-// (packages/runner/src/config/state-schema.mjs) rather than the legacy site's richer
-// mode/communityPackIds/rewardRecipientLimit model, which nothing in this integration head
-// implements — see docs/modules/dashboard.md's "Known contract gaps" section.
+// (packages/runner/src/config/state-schema.mjs). Recipient options come from the runner's
+// shared policy; active-cycle limits come from persisted cycle snapshots.
 import {
   boundedArray,
   boundedText,
@@ -42,7 +43,7 @@ const UPDATE_CONFIGURATION_KEYS = new Set([
   'intervalMinutes', 'allowedPackIds', 'requestedOrders', 'maxBoostersPerCycle',
   'maxUnitPriceMicroUsd', 'maxCycleBudgetMicroUsd', 'max24HourBudgetMicroUsd', 'liveMode',
   'maxCyclesPerDay', 'perCycleCapMicroUsd', 'lossCapMicroUsd', 'maxOutstandingCustodyMicroUsd',
-  'manualApprovalCycles',
+  'manualApprovalCycles', 'packPlan', 'rewardRecipientLimit',
 ]);
 const runnerCycleIdPattern = /^[A-Za-z0-9][A-Za-z0-9:._-]{0,127}$/;
 const packCodePattern = /^[a-z0-9][a-z0-9_-]{1,63}$/;
@@ -113,6 +114,9 @@ function readConfigurationPatch(value) {
     if (!UPDATE_CONFIGURATION_KEYS.has(key)) invalid();
   }
   const patch = {};
+  if (Object.hasOwn(source, 'rewardRecipientLimit')) {
+    try { patch.rewardRecipientLimit = assertRewardRecipientLimit(source.rewardRecipientLimit); } catch { invalid(); }
+  }
   if (Object.hasOwn(source, 'intervalMinutes')) {
     if (!Number.isInteger(source.intervalMinutes) || source.intervalMinutes < 5 || source.intervalMinutes > 1440) invalid();
     patch.intervalMinutes = source.intervalMinutes;
@@ -126,6 +130,14 @@ function readConfigurationPatch(value) {
       previous = id;
     }
     patch.allowedPackIds = [...ids];
+  }
+  if (Object.hasOwn(source, 'packPlan')) {
+    const plan = requiredRecord(source.packPlan, invalid);
+    exactKeys(plan, new Set(['orders']), invalid);
+    requiredKeys(plan, ['orders'], invalid);
+    try {
+      patch.packPlan = { orders: assertPackPlan({ schema: PACK_PLAN_SCHEMA, revision: 0, orders: plan.orders }).orders };
+    } catch { invalid(); }
   }
   if (Object.hasOwn(source, 'requestedOrders')) {
     if (!Number.isInteger(source.requestedOrders) || source.requestedOrders < 0) invalid();
@@ -186,7 +198,11 @@ export function assertBootstrap(value) {
   requiredKeys(identity, IDENTITY_KEYS, invalid);
   if (identity.role !== 'viewer' && identity.role !== 'operator') invalid();
   const state = requiredRecord(source.state, invalid);
-  exactKeys(state, OPERATOR_STATE_KEYS, invalid);
+  // Older bootstrap payloads omit packPlan; when present its versioned contract is strict.
+  exactKeys(state, Object.hasOwn(state, 'packPlan') ? new Set([...OPERATOR_STATE_KEYS, 'packPlan']) : OPERATOR_STATE_KEYS, invalid);
+  if (Object.hasOwn(state, 'packPlan')) {
+    try { assertPackPlan(state.packPlan); } catch { invalid(); }
+  }
   requiredKeys(state, OPERATOR_STATE_KEYS, invalid);
   if (typeof state.liveMode !== 'boolean') invalid();
   const hardCaps = requiredRecord(source.hardCaps, invalid);
@@ -199,9 +215,8 @@ export function assertBootstrap(value) {
   if (typeof readiness.ready !== 'boolean') invalid();
   boundedArray(readiness.reasons, 128, invalid).forEach(reason => boundedText(reason, invalid));
   if (typeof source.executionConnected !== 'boolean') invalid();
-  boundedArray(source.rewardRecipientLimits, 16, invalid).forEach(limit => {
-    if (!Number.isSafeInteger(limit) || limit < 100 || limit > 1000) invalid();
-  });
+  if (JSON.stringify(source.rewardRecipientLimits) !== JSON.stringify(REWARD_RECIPIENT_LIMITS)) invalid();
+  if (state.rewardRecipientLimit !== null) { try { assertRewardRecipientLimit(state.rewardRecipientLimit); } catch { invalid(); } }
   if (source.catalog !== null) {
     const catalog = requiredRecord(source.catalog, invalid);
     exactKeys(catalog, new Set(['status', 'fetchedAtMs', 'packs']), invalid);

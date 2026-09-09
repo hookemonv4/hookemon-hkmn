@@ -212,12 +212,13 @@ function normalizeEntries(entries, supply) {
 
 function normalizeEligibilityManifest(value, cycleId) {
   const suppliedManifest = assertPlainObject(value, 'eligibility manifest');
-  if (suppliedManifest.schema !== 'hookemon.eligibility-payout-manifest.v1') {
+  if (!['hookemon.eligibility-payout-manifest.v1', 'hookemon.eligibility-payout-manifest.v2'].includes(suppliedManifest.schema)) {
     throw new Error('eligibility manifest schema is invalid');
   }
   const manifestInput = { ...suppliedManifest };
   delete manifestInput.schema;
   const manifest = createEligibilityPayoutManifest(manifestInput);
+  if (manifest.schema !== suppliedManifest.schema) throw new Error('eligibility manifest schema does not match selection evidence');
   if (manifest.cycleId !== cycleId) throw new Error('eligibility manifest cycleId does not match payout cycleId');
   const supply = copyHkmnAmount(manifest.supply, 'eligibility manifest supply');
   const entries = normalizeEntries(manifest.entries, supply);
@@ -268,6 +269,7 @@ function normalizeEligibilityManifest(value, cycleId) {
     throw new Error('eligibility manifest native-balance feasibility envelope is inconsistent');
   }
   return Object.freeze({
+    ...(manifest.selection ? { selection: manifest.selection } : {}),
     snapshotBlock: manifest.snapshotBlock,
     snapshotHash: manifest.snapshotHash.toLowerCase(),
     finality: Object.freeze({ ...manifest.finality }),
@@ -473,9 +475,10 @@ export function compileDirectPayoutPlan({
     amountAtomic: dustAtomic.toString(),
   });
   const unsigned = {
-    schema: 'hookemon.direct-payout-plan.v2',
+    schema: eligibility.selection ? 'hookemon.direct-payout-plan.v3' : 'hookemon.direct-payout-plan.v2',
     cycleId,
     eligibility: {
+      ...(eligibility.selection ? { selection: eligibility.selection } : {}),
       snapshotBlock: eligibility.snapshotBlock,
       snapshotHash: eligibility.snapshotHash,
       finality: eligibility.finality,
@@ -540,7 +543,7 @@ export function compileSupplementaryDirectPayoutPlan({
     returnBinding,
   });
   const unsigned = {
-    schema: 'hookemon.supplementary-direct-payout-plan.v2',
+    schema: payoutPlan.schema === 'hookemon.direct-payout-plan.v3' ? 'hookemon.supplementary-direct-payout-plan.v3' : 'hookemon.supplementary-direct-payout-plan.v2',
     cycleId,
     manifestId: `${cycleId}:supplementary:${index}`,
     supplementaryIndex: index,

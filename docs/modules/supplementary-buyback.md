@@ -50,8 +50,8 @@ that module's territory.
   cycle's own buyback chain-attempt identity or its sold-pack identity.
 - The production binding path additionally requires: the held position's memo/mint to match an
   entry in the original cycle's own finalized `open` stage evidence (never trusted from the position
-  record alone); that entry's asset kind to be `mpl-core` (the only kind this path can independently
-  verify on-chain ownership for); the operator to be the real, finalized on-chain MPL Core owner,
+  record alone); that entry's asset kind to be `mpl-core` or `spl`; the operator to be the finalized
+  MPL Core owner or hold a positive SPL balance in its independently derived card account,
   checked once before the provider is ever asked to generate a transaction and rechecked after that
   provider call returns and again immediately before signing; and the independently configured
   settlement mint/decimals to match the approved binding's own pinned proceeds asset. Any of these

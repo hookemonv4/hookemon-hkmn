@@ -1,0 +1,54 @@
+{
+  "provenance": {
+    "cliVersion": "4.1.0",
+    "sourceModuleSha256": "17059a88e1e08c16ba60b18de30dba0023036bcdf424ec2bd0f8f6a4fd6ba624",
+    "viemVersion": "2.56.3",
+    "scope": "Official source bundle function, synthetic UTF-8 and binary file vector; no runtime or provider admission."
+  },
+  "manifest": {
+    "schemaVersion": "2.0.0",
+    "entries": [
+      {
+        "path": "a.txt",
+        "kind": "file",
+        "mode": "100644",
+        "byteLength": "20",
+        "contentSha256": "sha256:0caddbfced1b69310f014557705a5f6e890f8b97e90ff9b8774c7e36990fdcaa",
+        "symlinkTarget": null
+      },
+      {
+        "path": "nested/b.bin",
+        "kind": "file",
+        "mode": "100644",
+        "byteLength": "5",
+        "contentSha256": "sha256:0150a92bb1212cd00516b65fde0704614760000963874fcbb11eaa734ee87809",
+        "symlinkTarget": null
+      }
+    ]
+  },
+  "sourceBundleDigest": "0x17fa1384f7a1123b90bef7e037018f1f66e44a4a66a3e92771476372a819287d",
+  "bundleContentSha256": "sha256:d1627762c4f229a079041e7c19eebf00754b2bfee2cc2c285e4d4c8681688e3c",
+  "bundleContent": {
+    "schemaVersion": "programmable.source-bundle-content.v1",
+    "entries": [
+      {
+        "path": "a.txt",
+        "kind": "file",
+        "mode": "100644",
+        "byteLength": "20",
+        "contentSha256": "sha256:0caddbfced1b69310f014557705a5f6e890f8b97e90ff9b8774c7e36990fdcaa",
+        "symlinkTarget": null,
+        "contentBase64": "SGVsbG8gbmF0aXZlIGJ1bmRsZQo="
+      },
+      {
+        "path": "nested/b.bin",
+        "kind": "file",
+        "mode": "100644",
+        "byteLength": "5",
+        "contentSha256": "sha256:0150a92bb1212cd00516b65fde0704614760000963874fcbb11eaa734ee87809",
+        "symlinkTarget": null,
+        "contentBase64": "AAF/gP8="
+      }
+    ]
+  }
+}

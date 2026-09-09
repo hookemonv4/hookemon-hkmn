@@ -1,43 +1,46 @@
 {
   "schema": "hookemon.cleanroom-recognition.v1",
-  "requirementsRevision": 71,
+  "requirementsRevision": 74,
   "sourceRevision": "19d9d8bfae0a55c7fd8091ffb42d7c9845ca6074",
   "auditPath": "docs/evidence/native-cleanroom-audit-20260908/findings.json",
   "auditSha256": "187ec57183501df3c733129603255c8b87bb63f274679acd4413cc7416dabd8c",
   "scope": "Exact reviewed bytes only; native economic terms, incidental full identifiers and unchanged official evidence. No runtime authority or privacy-rule exemption.",
   "files": {
     "architecture/interfaces.json": {
-      "sha256": "65db2344cd7307897a2d8910d5d33f75b9e256573159a41864ebbdd0416099bc",
+      "sha256": "aefbe5d48c27dff2e6b2f931bea52be837b04d923ee1fed44eaef60f57d2379d",
       "matches": [
         {
           "rule": "historical-architecture",
-          "offset": 41301,
+          "offset": 42564,
           "length": 4,
           "sha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
-          "tokenStart": 41301,
+          "tokenStart": 42564,
           "tokenLength": 11,
           "tokenSha256": "67c3da52dac923f8e13d12d8ec89604cc901c8888ce886a014e73d546625dc16",
-          "basis": "reviewed-native-71-or-retained-provider-source"
+          "basis": "reviewed-native-71-or-retained-provider-source",
+          "file": "architecture/interfaces.json"
         },
         {
           "rule": "historical-architecture",
-          "offset": 41387,
+          "offset": 42650,
           "length": 4,
           "sha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
-          "tokenStart": 41387,
+          "tokenStart": 42650,
           "tokenLength": 4,
           "tokenSha256": "8591ee9090c0c02ca1f103cb637131d8f358870aba145245ff083e138fdd705b",
-          "basis": "reviewed-native-71-or-retained-provider-source"
+          "basis": "reviewed-native-71-or-retained-provider-source",
+          "file": "architecture/interfaces.json"
         },
         {
           "rule": "historical-architecture",
-          "offset": 46036,
+          "offset": 47299,
           "length": 4,
           "sha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
-          "tokenStart": 46036,
+          "tokenStart": 47299,
           "tokenLength": 4,
           "tokenSha256": "8591ee9090c0c02ca1f103cb637131d8f358870aba145245ff083e138fdd705b",
-          "basis": "reviewed-native-71-or-retained-provider-source"
+          "basis": "reviewed-native-71-or-retained-provider-source",
+          "file": "architecture/interfaces.json"
         }
       ]
     },
@@ -385,6 +388,7 @@
           "basis": "reviewed-native-71-or-retained-provider-source"
         },
         {
+
           "rule": "historical-architecture",
           "offset": 5487,
           "length": 4,
@@ -776,6 +780,7 @@
           "sha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
           "tokenStart": 2534,
           "tokenLength": 4,
+
           "tokenSha256": "8591ee9090c0c02ca1f103cb637131d8f358870aba145245ff083e138fdd705b",
           "basis": "reviewed-native-71-or-retained-provider-source"
         },
@@ -1171,6 +1176,7 @@
           "sha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
           "tokenStart": 3974,
           "tokenLength": 4,
+
           "tokenSha256": "8591ee9090c0c02ca1f103cb637131d8f358870aba145245ff083e138fdd705b",
           "basis": "reviewed-native-71-or-retained-provider-source"
         }
@@ -1563,6 +1569,7 @@
           "rule": "historical-architecture",
           "offset": 41717,
           "length": 8,
+
           "sha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
           "tokenStart": 41717,
           "tokenLength": 27,
@@ -1951,6 +1958,7 @@
           "sha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
           "tokenStart": 65009,
           "tokenLength": 8,
+
           "tokenSha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
           "basis": "reviewed-native-71-or-retained-provider-source"
         },
@@ -2335,6 +2343,7 @@
           "basis": "reviewed-native-71-or-retained-provider-source"
         },
         {
+
           "rule": "historical-architecture",
           "offset": 472179,
           "length": 8,
@@ -2718,6 +2727,7 @@
           "rule": "historical-architecture",
           "offset": 963678,
           "length": 8,
+
           "sha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
           "tokenStart": 963678,
           "tokenLength": 8,
@@ -3099,6 +3109,7 @@
           "offset": 1414446,
           "length": 8,
           "sha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
+
           "tokenStart": 1414446,
           "tokenLength": 27,
           "tokenSha256": "07e2f36ec0dae44bc4e8d11b0f2e46a58979ff4b23b0272aab077727a3c615a2",
@@ -3481,6 +3492,7 @@
           "sha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
           "tokenStart": 1747971,
           "tokenLength": 8,
+
           "tokenSha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
           "basis": "reviewed-native-71-or-retained-provider-source"
         },
@@ -3861,6 +3873,7 @@
           "sha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
           "tokenStart": 2079448,
           "tokenLength": 24,
+
           "tokenSha256": "5ac0d597343941b72f13dc0777ad8133e93f9820958d4c1f35c19813f2a623b2",
           "basis": "reviewed-native-71-or-retained-provider-source"
         },
@@ -4241,6 +4254,7 @@
           "sha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
           "tokenStart": 2438308,
           "tokenLength": 24,
+
           "tokenSha256": "5ac0d597343941b72f13dc0777ad8133e93f9820958d4c1f35c19813f2a623b2",
           "basis": "reviewed-native-71-or-retained-provider-source"
         },
@@ -4621,6 +4635,7 @@
           "sha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
           "tokenStart": 2992532,
           "tokenLength": 27,
+
           "tokenSha256": "07e2f36ec0dae44bc4e8d11b0f2e46a58979ff4b23b0272aab077727a3c615a2",
           "basis": "reviewed-native-71-or-retained-provider-source"
         },
@@ -5001,6 +5016,7 @@
           "sha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
           "tokenStart": 3370098,
           "tokenLength": 17,
+
           "tokenSha256": "1de80fb766bd978946291da751d7295105d0288ca94b9ba83341a44105fe9fc1",
           "basis": "reviewed-native-71-or-retained-provider-source"
         },
@@ -5381,6 +5397,7 @@
           "sha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
           "tokenStart": 3755998,
           "tokenLength": 27,
+
           "tokenSha256": "07e2f36ec0dae44bc4e8d11b0f2e46a58979ff4b23b0272aab077727a3c615a2",
           "basis": "reviewed-native-71-or-retained-provider-source"
         },
@@ -5763,6 +5780,7 @@
           "rule": "historical-architecture",
           "offset": 2884,
           "length": 8,
+
           "sha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
           "tokenStart": 2884,
           "tokenLength": 8,
@@ -6156,6 +6174,7 @@
         }
       ]
     },
+
     "packages/runner/src/operator/state-file.mjs": {
       "sha256": "91d7f9678e054e37db4622a607522830a11fb9fef40538316107c27db1154053",
       "matches": [
@@ -6282,92 +6301,66 @@
       ]
     },
     "scripts/programmable/lib/package.mjs": {
-      "sha256": "0cb9b75035e5d2bbad7ab2a60717fbc03a6fb02e902be27f4be139c960d021fc",
-      "matches": [
-        {
-          "rule": "historical-architecture",
-          "offset": 21589,
-          "length": 8,
-          "sha256": "fece2f9ba2b4a27ced51850c0517ec962c53b5ed76a82f35b12ace4e0a4b545c",
-          "tokenStart": 21589,
-          "tokenLength": 8,
-          "tokenSha256": "235415fe2a292d514523fbdb55652815b81fe91b9172cfd93db560efd21bb3ca",
-          "basis": "reviewed-native-71-or-retained-provider-source"
-        },
-        {
-          "rule": "historical-architecture",
-          "offset": 22042,
-          "length": 8,
-          "sha256": "fece2f9ba2b4a27ced51850c0517ec962c53b5ed76a82f35b12ace4e0a4b545c",
-          "tokenStart": 22042,
-          "tokenLength": 8,
-          "tokenSha256": "235415fe2a292d514523fbdb55652815b81fe91b9172cfd93db560efd21bb3ca",
-          "basis": "reviewed-native-71-or-retained-provider-source"
-        },
-        {
-          "rule": "historical-architecture",
-          "offset": 22659,
-          "length": 8,
-          "sha256": "fece2f9ba2b4a27ced51850c0517ec962c53b5ed76a82f35b12ace4e0a4b545c",
-          "tokenStart": 22659,
-          "tokenLength": 8,
-          "tokenSha256": "235415fe2a292d514523fbdb55652815b81fe91b9172cfd93db560efd21bb3ca",
-          "basis": "reviewed-native-71-or-retained-provider-source"
-        }
-      ]
+      "sha256": "d7e117916249ab4b865f1752821c7cc9b61fbfac56cb7ba37b9b7d8c617d43dd",
+      "matches": []
     },
     "specs/requirements.json": {
-      "sha256": "750a12abf47a771d1181dd6a1782c1b6fbcc4eebb4632e5d1927bf52f4193425",
+      "sha256": "c89397d3ece140e601f2bb494f8f13a86996faca5f5b43d013abc770abfadf5c",
       "matches": [
         {
           "rule": "historical-architecture",
-          "offset": 5619,
+          "offset": 7025,
           "length": 8,
           "sha256": "fece2f9ba2b4a27ced51850c0517ec962c53b5ed76a82f35b12ace4e0a4b545c",
-          "tokenStart": 5619,
+          "tokenStart": 7025,
           "tokenLength": 8,
           "tokenSha256": "235415fe2a292d514523fbdb55652815b81fe91b9172cfd93db560efd21bb3ca",
-          "basis": "reviewed-native-71-or-retained-provider-source"
+          "basis": "reviewed-native-71-or-retained-provider-source",
+          "file": "specs/requirements.json"
         },
         {
           "rule": "historical-architecture",
-          "offset": 6849,
+          "offset": 8255,
           "length": 8,
           "sha256": "fece2f9ba2b4a27ced51850c0517ec962c53b5ed76a82f35b12ace4e0a4b545c",
-          "tokenStart": 6849,
+          "tokenStart": 8255,
           "tokenLength": 8,
           "tokenSha256": "235415fe2a292d514523fbdb55652815b81fe91b9172cfd93db560efd21bb3ca",
-          "basis": "reviewed-native-71-or-retained-provider-source"
+          "basis": "reviewed-native-71-or-retained-provider-source",
+          "file": "specs/requirements.json"
         },
         {
           "rule": "historical-architecture",
-          "offset": 49044,
+          "offset": 50450,
           "length": 8,
           "sha256": "fece2f9ba2b4a27ced51850c0517ec962c53b5ed76a82f35b12ace4e0a4b545c",
-          "tokenStart": 49044,
+          "tokenStart": 50450,
           "tokenLength": 8,
           "tokenSha256": "235415fe2a292d514523fbdb55652815b81fe91b9172cfd93db560efd21bb3ca",
-          "basis": "reviewed-native-71-or-retained-provider-source"
+          "basis": "reviewed-native-71-or-retained-provider-source",
+          "file": "specs/requirements.json"
         },
         {
           "rule": "historical-architecture",
-          "offset": 106482,
+          "offset": 113616,
           "length": 4,
           "sha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
-          "tokenStart": 106482,
+          "tokenStart": 113616,
           "tokenLength": 4,
           "tokenSha256": "8591ee9090c0c02ca1f103cb637131d8f358870aba145245ff083e138fdd705b",
-          "basis": "reviewed-native-71-or-retained-provider-source"
+          "basis": "reviewed-native-71-or-retained-provider-source",
+          "file": "specs/requirements.json"
         },
         {
           "rule": "historical-architecture",
-          "offset": 110055,
+          "offset": 117562,
           "length": 8,
           "sha256": "fece2f9ba2b4a27ced51850c0517ec962c53b5ed76a82f35b12ace4e0a4b545c",
-          "tokenStart": 110055,
+          "tokenStart": 117562,
           "tokenLength": 8,
           "tokenSha256": "235415fe2a292d514523fbdb55652815b81fe91b9172cfd93db560efd21bb3ca",
-          "basis": "reviewed-native-71-or-retained-provider-source"
+          "basis": "reviewed-native-71-or-retained-provider-source",
+          "file": "specs/requirements.json"
         }
       ]
     },
@@ -6576,6 +6569,7 @@
           "sha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
           "tokenStart": 10678,
           "tokenLength": 4,
+
           "tokenSha256": "8591ee9090c0c02ca1f103cb637131d8f358870aba145245ff083e138fdd705b",
           "basis": "reviewed-native-71-or-retained-provider-source"
         }
@@ -6966,6 +6960,7 @@
           "sha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
           "tokenStart": 3613,
           "tokenLength": 4,
+
           "tokenSha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
           "basis": "reviewed-native-71-or-retained-provider-source"
         },
@@ -7229,7 +7224,7 @@
       ]
     },
     "packages/adapters/test/app/stages-collector-lifecycle.test.mjs": {
-      "sha256": "1e02c93bc3789e12df04fccefb76bddb943edeb3ccacb9c4ce50461d73fe685d",
+      "sha256": "abde8653ccf30f5003fd21dca78321e2b7e0ee4f30033abb3587ffd2ad1381c7",
       "matches": [
         {
           "file": "packages/adapters/test/app/stages-collector-lifecycle.test.mjs",
@@ -7351,6 +7346,7 @@
           "rule": "historical-repository",
           "offset": 115,
           "length": 13,
+
           "sha256": "dd62776781a3875728c94bdb377050c33cdcb697679612c34c2632d4b9b9c2f1",
           "tokenStart": 85,
           "tokenLength": 68,
@@ -7360,27 +7356,29 @@
       ]
     },
     "packages/adapters/test/app/launch-production-graph.test.mjs": {
-      "sha256": "52ac1f8c2febb874cd7c60b55f79fff807219b420df218084759877cec141359",
+      "sha256": "614d0be33f5412b39ebbf126fda3ed2986ff96858cb4a815289a1d7c4ac6765d",
       "matches": [
         {
           "rule": "historical-architecture",
-          "offset": 124796,
+          "offset": 124886,
           "length": 4,
           "sha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
-          "tokenStart": 124796,
+          "tokenStart": 124886,
           "tokenLength": 4,
           "tokenSha256": "8591ee9090c0c02ca1f103cb637131d8f358870aba145245ff083e138fdd705b",
-          "basis": "reviewed-native-settlement-fixture-or-exact-ci-evidence"
+          "basis": "reviewed-native-settlement-fixture-or-exact-ci-evidence",
+          "file": "packages/adapters/test/app/launch-production-graph.test.mjs"
         },
         {
           "rule": "historical-architecture",
-          "offset": 247537,
+          "offset": 248345,
           "length": 4,
           "sha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
-          "tokenStart": 247537,
+          "tokenStart": 248345,
           "tokenLength": 4,
           "tokenSha256": "8591ee9090c0c02ca1f103cb637131d8f358870aba145245ff083e138fdd705b",
-          "basis": "reviewed-native-settlement-fixture-or-exact-ci-evidence"
+          "basis": "reviewed-native-settlement-fixture-or-exact-ci-evidence",
+          "file": "packages/adapters/test/app/launch-production-graph.test.mjs"
         }
       ]
     },
@@ -7729,6 +7727,7 @@
           "sha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
           "tokenStart": 3726,
           "tokenLength": 4,
+
           "tokenSha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
           "basis": "reviewed-native-budget-provider-evidence-or-usd-arithmetic"
         },
@@ -7814,6 +7813,376 @@
         }
       ]
     },
+    "scripts/programmable/lib/native-build-closure.mjs": {
+      "sha256": "ca98e639e9b01d13847e91b5076fd971e7fcb5326e5ddc40d6f3201a1e2fdd7d",
+      "matches": [
+        {
+          "rule": "historical-architecture",
+          "offset": 6171,
+          "length": 8,
+          "sha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
+          "tokenStart": 6152,
+          "tokenLength": 90,
+          "tokenSha256": "fc994d470487c63d9eb7e7d52711eff66ce29c5bdc61f14ebe0b00052d1e82ab",
+          "basis": "exact-official-solidity-0.8.26-source-reviewed-by-independent-Devin"
+        }
+      ]
+    },
+    "scripts/tests/native-runtime-observer.test.mjs": {
+      "sha256": "70869dadc25e0ecdfea5434f8b5eef94852a889b677ee4a93b160375da813a80",
+      "matches": [
+        {
+          "rule": "historical-architecture",
+          "offset": 114309,
+          "length": 4,
+          "sha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
+          "tokenStart": 653,
+          "tokenLength": 182640,
+          "tokenSha256": "d2d7d716c6bd1ec66d660cc9b4d86a924f71d441121bb77f91db850d0f14fd91",
+          "basis": "incidental-token-in-checksummed-compressed-public-runtime-and-ABI-test-fixture"
+        }
+      ]
+    },
+    "docs/modules/transaction-policy.md": {
+      "sha256": "b8d6903074385f59ebc503cfacd6ca16fce85721bfcddd1c56b4785f5166dfdb",
+      "matches": [
+        {
+          "file": "docs/modules/transaction-policy.md",
+          "rule": "historical-architecture",
+          "offset": 9697,
+          "length": 4,
+          "sha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
+          "tokenStart": 9697,
+          "tokenLength": 4,
+          "tokenSha256": "8591ee9090c0c02ca1f103cb637131d8f358870aba145245ff083e138fdd705b",
+          "basis": "approved-revision-73-collector-settlement-and-retained-native-interface"
+        }
+      ]
+    },
+    "packages/adapters/src/signing/collector-buyback-policy.mjs": {
+      "sha256": "a75455cb96d4c0b79ddcc3425ad63cb3fc38b8be43f152d00fe001b0b9c91d69",
+      "matches": [
+        {
+          "file": "packages/adapters/src/signing/collector-buyback-policy.mjs",
+          "rule": "historical-architecture",
+          "offset": 22093,
+          "length": 4,
+          "sha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
+          "tokenStart": 22093,
+          "tokenLength": 4,
+          "tokenSha256": "8591ee9090c0c02ca1f103cb637131d8f358870aba145245ff083e138fdd705b",
+          "basis": "approved-revision-73-collector-settlement-and-retained-native-interface"
+        },
+        {
+          "file": "packages/adapters/src/signing/collector-buyback-policy.mjs",
+          "rule": "historical-architecture",
+          "offset": 23877,
+          "length": 4,
+          "sha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
+          "tokenStart": 23877,
+          "tokenLength": 4,
+          "tokenSha256": "8591ee9090c0c02ca1f103cb637131d8f358870aba145245ff083e138fdd705b",
+          "basis": "approved-revision-73-collector-settlement-and-retained-native-interface"
+        },
+        {
+          "file": "packages/adapters/src/signing/collector-buyback-policy.mjs",
+          "rule": "historical-architecture",
+          "offset": 23959,
+          "length": 4,
+          "sha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
+          "tokenStart": 23959,
+          "tokenLength": 4,
+          "tokenSha256": "8591ee9090c0c02ca1f103cb637131d8f358870aba145245ff083e138fdd705b",
+          "basis": "approved-revision-73-collector-settlement-and-retained-native-interface"
+        },
+        {
+          "file": "packages/adapters/src/signing/collector-buyback-policy.mjs",
+          "rule": "historical-architecture",
+          "offset": 25936,
+          "length": 4,
+          "sha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
+          "tokenStart": 25936,
+          "tokenLength": 4,
+          "tokenSha256": "8591ee9090c0c02ca1f103cb637131d8f358870aba145245ff083e138fdd705b",
+          "basis": "approved-revision-73-collector-settlement-and-retained-native-interface"
+        }
+      ]
+    },
+    "packages/adapters/test/signing/collector-buyback-policy.test.mjs": {
+      "sha256": "ae5973540fd943796427b426254d27173b1017ea12cd80533ac88b47e5acf9a5",
+      "matches": [
+        {
+          "file": "packages/adapters/test/signing/collector-buyback-policy.test.mjs",
+          "rule": "historical-architecture",
+          "offset": 16352,
+          "length": 4,
+          "sha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
+          "tokenStart": 16352,
+          "tokenLength": 4,
+          "tokenSha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
+          "basis": "approved-revision-73-collector-settlement-and-retained-native-interface"
+        },
+        {
+          "file": "packages/adapters/test/signing/collector-buyback-policy.test.mjs",
+          "rule": "historical-architecture",
+          "offset": 16965,
+          "length": 4,
+          "sha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
+          "tokenStart": 16965,
+          "tokenLength": 4,
+          "tokenSha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
+          "basis": "approved-revision-73-collector-settlement-and-retained-native-interface"
+        },
+        {
+          "file": "packages/adapters/test/signing/collector-buyback-policy.test.mjs",
+          "rule": "historical-architecture",
+          "offset": 22608,
+          "length": 4,
+          "sha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
+          "tokenStart": 22608,
+          "tokenLength": 4,
+          "tokenSha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
+          "basis": "approved-revision-73-collector-settlement-and-retained-native-interface"
+        }
+      ]
+    },
+    "feasibility/native-universal-router-reproduction/compiler-input.json": {
+      "sha256": "402c71cee3e1205b59ed168fed5f0e76b95146e6a8c6a708d36f729baea4480a",
+      "matches": [
+        {
+          "file": "feasibility/native-universal-router-reproduction/compiler-input.json",
+          "rule": "historical-architecture",
+          "offset": 283519,
+          "length": 8,
+          "sha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
+          "tokenStart": 283519,
+          "tokenLength": 8,
+          "tokenSha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
+          "basis": "official-router-closed-source-standards-references-and-signature-domain"
+        },
+        {
+          "file": "feasibility/native-universal-router-reproduction/compiler-input.json",
+          "rule": "historical-architecture",
+          "offset": 284485,
+          "length": 8,
+          "sha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
+          "tokenStart": 284485,
+          "tokenLength": 8,
+          "tokenSha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
+          "basis": "official-router-closed-source-standards-references-and-signature-domain"
+        },
+        {
+          "file": "feasibility/native-universal-router-reproduction/compiler-input.json",
+          "rule": "historical-architecture",
+          "offset": 287117,
+          "length": 8,
+          "sha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
+          "tokenStart": 287117,
+          "tokenLength": 8,
+          "tokenSha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
+          "basis": "official-router-closed-source-standards-references-and-signature-domain"
+        },
+        {
+          "file": "feasibility/native-universal-router-reproduction/compiler-input.json",
+          "rule": "historical-architecture",
+          "offset": 299630,
+          "length": 8,
+          "sha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
+          "tokenStart": 299630,
+          "tokenLength": 8,
+          "tokenSha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
+          "basis": "official-router-closed-source-standards-references-and-signature-domain"
+        },
+        {
+          "file": "feasibility/native-universal-router-reproduction/compiler-input.json",
+          "rule": "historical-architecture",
+          "offset": 300794,
+          "length": 8,
+          "sha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
+          "tokenStart": 300794,
+          "tokenLength": 8,
+          "tokenSha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
+          "basis": "official-router-closed-source-standards-references-and-signature-domain"
+        },
+        {
+          "file": "feasibility/native-universal-router-reproduction/compiler-input.json",
+          "rule": "historical-architecture",
+          "offset": 302205,
+          "length": 8,
+          "sha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
+          "tokenStart": 302205,
+          "tokenLength": 8,
+          "tokenSha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
+          "basis": "official-router-closed-source-standards-references-and-signature-domain"
+        },
+        {
+          "file": "feasibility/native-universal-router-reproduction/compiler-input.json",
+          "rule": "historical-architecture",
+          "offset": 324024,
+          "length": 8,
+          "sha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
+          "tokenStart": 324024,
+          "tokenLength": 8,
+          "tokenSha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
+          "basis": "official-router-closed-source-standards-references-and-signature-domain"
+        },
+        {
+          "file": "feasibility/native-universal-router-reproduction/compiler-input.json",
+          "rule": "historical-architecture",
+          "offset": 325402,
+          "length": 8,
+          "sha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
+          "tokenStart": 325402,
+          "tokenLength": 8,
+          "tokenSha256": "a13bebeb57e1ea699bd4d2d9ac7e58399644e884b8a8783d96f6d146083f2430",
+          "basis": "official-router-closed-source-standards-references-and-signature-domain"
+        },
+        {
+          "file": "feasibility/native-universal-router-reproduction/compiler-input.json",
+          "rule": "historical-architecture",
+          "offset": 325433,
+          "length": 8,
+          "sha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
+          "tokenStart": 325433,
+          "tokenLength": 8,
+          "tokenSha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
+          "basis": "official-router-closed-source-standards-references-and-signature-domain"
+        },
+        {
+          "file": "feasibility/native-universal-router-reproduction/compiler-input.json",
+          "rule": "historical-architecture",
+          "offset": 328173,
+          "length": 8,
+          "sha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
+          "tokenStart": 328173,
+          "tokenLength": 8,
+          "tokenSha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
+          "basis": "official-router-closed-source-standards-references-and-signature-domain"
+        },
+        {
+          "file": "feasibility/native-universal-router-reproduction/compiler-input.json",
+          "rule": "historical-architecture",
+          "offset": 330804,
+          "length": 8,
+          "sha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
+          "tokenStart": 330804,
+          "tokenLength": 8,
+          "tokenSha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
+          "basis": "official-router-closed-source-standards-references-and-signature-domain"
+        },
+        {
+          "file": "feasibility/native-universal-router-reproduction/compiler-input.json",
+          "rule": "historical-architecture",
+          "offset": 332262,
+          "length": 8,
+          "sha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
+          "tokenStart": 332262,
+          "tokenLength": 8,
+          "tokenSha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
+          "basis": "official-router-closed-source-standards-references-and-signature-domain"
+        },
+        {
+
+          "file": "feasibility/native-universal-router-reproduction/compiler-input.json",
+          "rule": "historical-architecture",
+          "offset": 335119,
+          "length": 8,
+          "sha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
+          "tokenStart": 335119,
+          "tokenLength": 8,
+          "tokenSha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
+          "basis": "official-router-closed-source-standards-references-and-signature-domain"
+        },
+        {
+          "file": "feasibility/native-universal-router-reproduction/compiler-input.json",
+          "rule": "historical-architecture",
+          "offset": 335171,
+          "length": 8,
+          "sha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
+          "tokenStart": 335171,
+          "tokenLength": 8,
+          "tokenSha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
+          "basis": "official-router-closed-source-standards-references-and-signature-domain"
+        },
+        {
+          "file": "feasibility/native-universal-router-reproduction/compiler-input.json",
+          "rule": "historical-architecture",
+          "offset": 335491,
+          "length": 8,
+          "sha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
+          "tokenStart": 335491,
+          "tokenLength": 8,
+          "tokenSha256": "a13bebeb57e1ea699bd4d2d9ac7e58399644e884b8a8783d96f6d146083f2430",
+          "basis": "official-router-closed-source-standards-references-and-signature-domain"
+        },
+        {
+          "file": "feasibility/native-universal-router-reproduction/compiler-input.json",
+          "rule": "historical-architecture",
+          "offset": 336143,
+          "length": 8,
+          "sha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
+          "tokenStart": 336143,
+          "tokenLength": 8,
+          "tokenSha256": "a13bebeb57e1ea699bd4d2d9ac7e58399644e884b8a8783d96f6d146083f2430",
+          "basis": "official-router-closed-source-standards-references-and-signature-domain"
+        },
+        {
+          "file": "feasibility/native-universal-router-reproduction/compiler-input.json",
+          "rule": "historical-architecture",
+          "offset": 336657,
+          "length": 8,
+          "sha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
+          "tokenStart": 336657,
+          "tokenLength": 8,
+          "tokenSha256": "a13bebeb57e1ea699bd4d2d9ac7e58399644e884b8a8783d96f6d146083f2430",
+          "basis": "official-router-closed-source-standards-references-and-signature-domain"
+        },
+        {
+          "file": "feasibility/native-universal-router-reproduction/compiler-input.json",
+          "rule": "historical-architecture",
+          "offset": 337052,
+          "length": 8,
+          "sha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
+          "tokenStart": 337052,
+          "tokenLength": 8,
+          "tokenSha256": "a13bebeb57e1ea699bd4d2d9ac7e58399644e884b8a8783d96f6d146083f2430",
+          "basis": "official-router-closed-source-standards-references-and-signature-domain"
+        },
+        {
+          "file": "feasibility/native-universal-router-reproduction/compiler-input.json",
+          "rule": "historical-architecture",
+          "offset": 338015,
+          "length": 8,
+          "sha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
+          "tokenStart": 338015,
+          "tokenLength": 8,
+          "tokenSha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
+          "basis": "official-router-closed-source-standards-references-and-signature-domain"
+        },
+        {
+          "file": "feasibility/native-universal-router-reproduction/compiler-input.json",
+          "rule": "historical-architecture",
+          "offset": 338880,
+          "length": 8,
+          "sha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
+          "tokenStart": 338880,
+          "tokenLength": 8,
+          "tokenSha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
+          "basis": "official-router-closed-source-standards-references-and-signature-domain"
+        },
+        {
+          "file": "feasibility/native-universal-router-reproduction/compiler-input.json",
+          "rule": "historical-architecture",
+          "offset": 339261,
+          "length": 8,
+          "sha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
+          "tokenStart": 339261,
+          "tokenLength": 8,
+          "tokenSha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
+          "basis": "official-router-closed-source-standards-references-and-signature-domain"
+        }
+      ]
+    },
     "scripts/check-commit-identity.mjs": {
       "sha256": "6c2fe1989a16b7a0f1594a4c79b3ef7450c2d17b4d465ccf0b74fd738a1e703a",
       "matches": [
@@ -7845,7 +8214,7 @@
       ]
     },
     "docs/modules/control-supply-chain.md": {
-      "sha256": "1d5cac0ebaefa637fe80eb67612a99915b2196d11693b41ebba8fd2d2087a4ac",
+      "sha256": "5304c7927e495a42533c1eb935e63ebdbd799743b47a498f550bef3b37a49e5c",
       "matches": [
         {
           "rule": "private-email",
@@ -7861,13 +8230,13 @@
     }
   },
   "refresh": {
-    "previousManifestSha256": "02d6b1e446d29c5b0613b265cb3d8af5dae1deea481ef4b278573fb8f85d2e79",
-    "reviewedRevision": "19d9d8bfae0a55c7fd8091ffb42d7c9845ca6074",
-    "relocatedFiles": [],
-    "addedFiles": [
-      "docs/modules/relay-bridge-client.md",
-      "feasibility/native-preflight-candidate-20260908/proposed-create-request.json"
+    "previousManifestSha256": "592cb21d193e331a43ff57252ab319af3f33251e5d29c38a35b7f00bc7bd406a",
+    "reviewedRevision": "4e305a9ebf331be811a9722f84f839a843ea1002",
+    "relocatedFiles": [
+      "specs/requirements.json",
+      "architecture/interfaces.json"
     ],
-    "justification": "One native return settlement-asset reference and eight unchanged official chain-deployment field/schema contexts. Targeted all 48 changed files since 15f6c0aa; no private-path or email recognition added."
+    "addedFiles": [],
+    "justification": "Apply the exact owner-approved recipient selection delta to native revision73. Existing native economic tokens are unchanged; only their reviewed files and offsets move. No new recognized token, privacy exception or runtime authority."
   }
 }

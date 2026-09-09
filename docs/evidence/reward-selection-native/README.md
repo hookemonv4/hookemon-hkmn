@@ -1,0 +1,13 @@
+# Selected native payout acceptance
+
+Run `node --test packages/adapters/test/native/reward-selection-anvil.mjs` with Node 24.19.0 and Anvil 1.7.1 available. Set `REWARD_SELECTION_ANVIL` to the local Anvil binary path when needed. `REWARD_SELECTION_TEST_COUNTS` can restrict a diagnostic run; full acceptance requires all six default counts, 100 through 600.
+
+The harness starts its own unforked Anvil process on a dynamically allocated loopback port with chain ID 4663 and no prefunded accounts. It funds one public deterministic test account locally. Anvil retains the most recent 128 historical states to bound local memory use; block headers, transactions and receipt assertions remain unchanged. It accepts no RPC URL or wallet key. No external chain transaction or production authorization is involved.
+
+Each case reconstructs a fixture HKMN holder snapshot with N+17 eligible equal-weight holders and an excluded Operations balance, freezes N through the production selection helper, builds the v2 eligibility manifest and v3 native payout plan, then drives the production `advanceDirectPayout` state machine through signing, broadcast and finalization. The HKMN replay and return attribution are fixtures; native transactions, block inclusion, receipt finality, gas and balances come from the local EVM. This is payout-state-machine acceptance, not a complete production cycle or custody-admission proof.
+
+The explicit test authority wraps a local signer. A small atomic JSON store implements the payout store interface. The first broadcast is actually mined, then the transport throws before BROADCAST state persistence. The store is reopened from disk with SIGNED state and the production handler reconciles the receipt. This simulates an interruption at that boundary; it does not claim that a separate operating-system process was restarted. After all transfers, the store is reopened again and every finalized recipient is advanced again to verify no extra broadcast.
+
+Assertions require exactly N positive finalized payments with distinct transaction hashes and nonces, recipient balances equal to allocations, zero balances for all 17 unselected holders, exact paid-principal plus dust conservation, receipt-authenticated gas amounts, and an Operations balance decrease equal to principal plus gas. The selected count, full eligible count and excluded amount are checked independently.
+
+The acceptance entrypoint deliberately lacks the `.test.mjs` suffix so ordinary unit-test discovery does not launch this explicit local-EVM suite. Missing Anvil or unsuccessful cases fail; the suite has no successful skip fallback. The command emits one observed-result record for each completed size.

@@ -15,8 +15,8 @@
     h3 { margin: 0 0 6px; font-size: 16px; }
     p { margin: 0 0 12px; color: var(--muted); }
     section { margin-top: 16px; padding: 18px; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; }
-    button, input { width: 100%; min-height: 44px; font: inherit; border-radius: 6px; }
-    input { padding: 10px 12px; color: var(--fg); background: transparent; border: 1px solid var(--border); }
+    button, input, select { width: 100%; min-height: 44px; font: inherit; border-radius: 6px; }
+    input, select { padding: 10px 12px; color: var(--fg); background: transparent; border: 1px solid var(--border); }
     button { padding: 10px 14px; color: var(--fg); background: transparent; border: 1px solid var(--border); cursor: pointer; }
     button:hover { border-color: var(--accent); }
     button.danger { color: #fff; background: var(--danger); border-color: var(--danger); }
@@ -34,6 +34,12 @@
     .warning { color: var(--warning); }
     .message { min-height: 24px; margin-top: 12px; color: var(--muted); }
     .meta { display: grid; gap: 4px; margin-top: 8px; }
+    button:disabled { opacity: .5; cursor: default; }
+    .pack-group { margin: 12px 0; border: 1px solid var(--border); border-radius: 8px; padding: 12px; }
+    .pack-group summary { cursor: pointer; font-weight: 600; padding: 8px 0; }
+    .pack-group .grid { margin-top: 12px; }
+    .pack-option { display: flex; align-items: center; gap: 12px; padding: 12px; border: 1px solid var(--border); border-radius: 6px; overflow-wrap: anywhere; }
+    .pack-option input { width: 22px; min-height: 22px; flex-shrink: 0; }
     .control-note { margin-top: 10px; font-size: 14px; }
     @media (min-width: 735px) { main { padding: 40px; } .two { grid-template-columns: repeat(2, minmax(0, 1fr)); } .controls { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
     @media (min-width: 1069px) { main { padding-inline: 56px; } .three { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
@@ -63,12 +69,21 @@
         <p class="control-note">Each button records one request and sends it to the operator authority.</p>
       </section>
 
+      <section aria-labelledby="packsHeading">
+        <h2 id="packsHeading">Pack selection</h2>
+        <p>Select the packs for your repeating plan. The plan stays selected until you change it. Saving does not buy a pack or start a cycle.</p>
+        <div id="packList"></div>
+        <p id="packSummary" class="control-note" role="status"></p>
+        <div class="controls"><button id="selectAllPacksBtn" type="button" disabled>Select all</button><button id="clearPacksBtn" type="button" disabled>Clear selection</button><button id="savePacksBtn" class="approve" type="button" disabled>Save pack selection</button></div>
+        <p id="packMessage" class="message" role="status"></p>
+      </section>
       <section><h2>Cycles</h2><div id="cycleList" class="cards"></div></section>
       <section><h2>Claim capacity</h2><div id="claimCapacity" class="cards"></div></section>
       <section><h2>Custody by cycle</h2><div id="custodyBuckets" class="cards"></div></section>
       <section><h2>Manual approval</h2><p>Approve only a cycle digest supplied by the authority.</p><div id="approvalQueue" class="cards"></div><div class="grid two"><label>Cycle ID<input id="approvalCycleId" autocomplete="off" /></label><label>Cycle digest<input id="approvalCycleDigest" autocomplete="off" placeholder="sha256:..." /></label></div><button id="manualApprovalBtn" class="approve" type="button">Approve this cycle</button></section>
       <section><h2>Held Epic cards</h2><p>Record a durable owner choice only from the held evidence supplied by the authority. Recording <code>sell</code> does not sell a card; it only records the choice for an authorized recovery operation.</p><div id="epicHeld" class="cards"></div><div class="grid two"><label>Cycle ID<input id="heldDecisionCycleId" autocomplete="off" /></label><label>Held evidence digest<input id="heldDecisionEvidenceDigest" autocomplete="off" placeholder="sha256:..." /></label><label>Cycle revision<input id="heldDecisionRevision" inputmode="numeric" autocomplete="off" /></label></div><div class="controls"><button id="recordSellDecisionBtn" class="approve" type="button">Record sell choice</button><button id="recordKeepHoldingDecisionBtn" type="button">Record keep-holding choice</button></div></section>
       <section><h2>Alerts</h2><div id="alertFeed" class="cards"></div></section>
+      <section><h2>Reward recipients</h2><p>Rank eligible holders by finalized HKMN balance. Changes apply to the next cycle; an active cycle keeps its frozen selection.</p><label>Next-cycle recipient limit<select id="rewardRecipientLimit" disabled></select></label><p id="savedRewardLimit">Saved: not loaded</p><p id="activeRewardLimit">Active cycle: not loaded</p><button id="saveRewardBtn" type="button" disabled>Save recipient limit</button><p id="rewardMessage" role="status"></p></section>
       <section><h2>Payouts</h2><div id="payoutStatus" class="cards"></div></section>
       <section><h2>Wallets</h2><p>Public identities only. Balances appear when the authority provides them.</p><div id="walletIdentities" class="cards"></div></section>
     </div>
@@ -77,6 +92,16 @@
   <script>
   (function () {
     var revision = null;
+    var savedRewardLimit = null, rewardRevision = null, rewardOptions = [], savingReward = false;
+    var packInputs = [];
+    var savedPackOrders = [];
+    var allowedPackIds = [];
+    var planAvailable = false;
+    var savedPackIds = [];
+    var packCatalogReady = false;
+    var savingPacks = false;
+    var loadingDashboard = false;
+    var packRevision = null;
     var $ = function (id) { return document.getElementById(id); };
     var credential = function () { return $('credential').value.trim(); };
     var message = function (text) { $('message').textContent = text; };
@@ -89,14 +114,14 @@
       } catch (_) { return {}; }
     };
     var savePendingRequests = function (requests) { sessionStorage.setItem(pendingRequestStorageKey, JSON.stringify(requests)); };
-    var requestFor = function (command) {
+    var requestFor = function (command, expectedVersion) {
       var key = JSON.stringify(command);
       var requests = pendingRequests();
       var existing = requests[key];
       if (existing && typeof existing.requestId === 'string' && (existing.expectedVersion === null || Number.isSafeInteger(existing.expectedVersion))) {
         return { key: key, request: { requestId: existing.requestId, expectedVersion: existing.expectedVersion, command: command } };
       }
-      var request = { requestId: requestId(), expectedVersion: revision, command: command };
+      var request = { requestId: requestId(), expectedVersion: expectedVersion === undefined ? revision : expectedVersion, command: command };
       requests[key] = { requestId: request.requestId, expectedVersion: request.expectedVersion };
       savePendingRequests(requests);
       return { key: key, request: request };
@@ -167,13 +192,143 @@
     function renderPayouts(cycles) { var target = $('payoutStatus'); target.replaceChildren(); if (!cycles.length) return empty(target, 'No payout status is available.'); cycles.forEach(function (cycle) { add(target, cycle.cycleId, { Status: cycle.payout && cycle.payout.status, 'Transaction or signature IDs': cycle.payout && (cycle.payout.transactionIds || []).join(', ') }); }); }
     function renderWallets(identities) { var target = $('walletIdentities'); target.replaceChildren(); if (!identities || typeof identities !== 'object') return empty(target, 'No public wallet identities are available.'); Object.keys(identities).forEach(function (name) { add(target, name, { Value: typeof identities[name] === 'object' ? JSON.stringify(identities[name]) : identities[name] }); }); }
 
+    function selectedPackIds() { return packInputs.filter(function (input) { return input.checked; }).map(function (input) { return input.value; }).sort(); }
+    function updatePackSelection() {
+      var selected = selectedPackIds();
+      var changed = JSON.stringify(selected) !== JSON.stringify(savedPackIds);
+      $('packSummary').textContent = selected.length + ' selected' + (selected.length ? '' : ' · The plan is empty.');
+      $('savePacksBtn').disabled = savingPacks || savingReward || loadingDashboard || !packCatalogReady || !planAvailable || !changed;
+      $('selectAllPacksBtn').disabled = savingPacks || savingReward || loadingDashboard || !packCatalogReady;
+      $('clearPacksBtn').disabled = savingPacks || savingReward || loadingDashboard || !packCatalogReady;
+      packInputs.forEach(function (input) { input.disabled = savingPacks || savingReward || loadingDashboard || !packCatalogReady; });
+    }
+    function renderPacks(catalog, state, snapshotRevision) {
+      var target = $('packList'); target.replaceChildren(); packInputs = [];
+      planAvailable = Boolean(state.packPlan && Array.isArray(state.packPlan.orders));
+      savedPackOrders = planAvailable ? state.packPlan.orders.map(function (order) { return { pack: order.pack, quantity: order.quantity }; }) : [];
+      savedPackIds = savedPackOrders.map(function (order) { return order.pack; }).sort();
+      allowedPackIds = (state.allowedPackIds || []).slice().sort(); packRevision = snapshotRevision;
+      packCatalogReady = catalog && catalog.configured === true && Array.isArray(catalog.machines);
+      var machines = new Map();
+      (packCatalogReady ? catalog.machines : []).forEach(function (pack) {
+        if (pack && typeof pack.code === 'string' && /^[a-z0-9][a-z0-9_-]{1,63}$/.test(pack.code)) machines.set(pack.code, pack);
+      });
+      savedPackIds.forEach(function (code) { if (!machines.has(code)) machines.set(code, { code: code, missing: true }); });
+      function category(pack) {
+        var name = (pack.name || '') + ' ' + pack.code;
+        if (/pok[eé]mon|poke|charizard|snorlax/i.test(name)) return 'Pokémon';
+        if (/one.?piece|^onepiece_/i.test(name)) return 'One Piece';
+        if (/sports|basketball|baseball|football|soccer/i.test(name)) return 'Sports';
+        return 'Other packs';
+      }
+      var groups = new Map();
+      ['Pokémon', 'One Piece', 'Sports', 'Other packs'].forEach(function (name) {
+        var packs = Array.from(machines.values()).filter(function (pack) { return category(pack) === name; });
+        if (!packs.length) return;
+        var details = document.createElement('details'); details.className = 'pack-group'; details.open = name === 'Pokémon';
+        var summary = document.createElement('summary'); summary.textContent = name + ' (' + packs.length + ')';
+        var list = document.createElement('div'); list.className = 'grid two';
+        details.append(summary, list); target.appendChild(details); groups.set(name, list);
+      });
+      Array.from(machines.values()).sort(function (a, b) { return Number(a.price || 0) - Number(b.price || 0) || a.code.localeCompare(b.code); }).forEach(function (pack) {
+        var label = document.createElement('label'); label.className = 'pack-option';
+        var input = document.createElement('input'); input.type = 'checkbox'; input.value = pack.code; input.checked = savedPackIds.includes(pack.code);
+        input.addEventListener('change', updatePackSelection); packInputs.push(input);
+        var text = document.createElement('span'); text.textContent = (pack.name || pack.shortName || pack.code) + ' · ' + pack.code + (savedPackOrders.find(function (order) { return order.pack === pack.code && order.quantity > 1; }) ? ' · Quantity ' + savedPackOrders.find(function (order) { return order.pack === pack.code; }).quantity : '') + (pack.missing ? ' · Not in current catalog' : '');
+        label.append(input, text); groups.get(category(pack)).appendChild(label);
+      });
+      if (!machines.size) empty(target, packCatalogReady ? 'No packs were returned by the catalog.' : 'Pack catalog is not connected.');
+      $('packMessage').textContent = !planAvailable ? 'This service does not expose a saved pack plan. Upgrade the service to edit it.' : (packCatalogReady ? '' : 'Selection cannot be saved until the catalog is available.');
+      updatePackSelection();
+    }
+    function syncEditorRevisions(bootstrap) {
+      var state = bootstrap.state;
+      revision = state.version;
+      // Advance another draft only when its saved baseline still matches authoritative state.
+      // An unrelated operator edit must retain the stale CAS protection.
+      if (state.rewardRecipientLimit === savedRewardLimit) rewardRevision = revision;
+      if (state.packPlan && JSON.stringify(state.packPlan.orders) === JSON.stringify(savedPackOrders)
+          && Array.isArray(state.allowedPackIds) && JSON.stringify(state.allowedPackIds.slice().sort()) === JSON.stringify(allowedPackIds)) packRevision = revision;
+    }
+    async function savePacks() {
+      if (savingPacks || savingReward || $('savePacksBtn').disabled) return;
+      savingPacks = true; updatePackSelection(); updateRewardSelection();
+      try {
+        var orders = selectedPackIds().map(function (code) {
+          var stored = savedPackOrders.find(function (order) { return order.pack === code; });
+          return { pack: code, quantity: stored ? stored.quantity : 1 };
+        });
+        var command = { type: 'update-configuration', configuration: {
+          packPlan: { orders: orders },
+          allowedPackIds: Array.from(new Set(allowedPackIds.concat(selectedPackIds()))).sort()
+        } };
+        var pending = requestFor(command, packRevision);
+        var response = await api('/operator/api/decisions', { method: 'POST', headers: { 'content-type': 'application/json', 'x-hookemon-proxy-credential': credential() }, body: JSON.stringify(pending.request) });
+        if (isReconciledCommandState(response.commandState)) clearRequest(pending.key);
+        if (response.commandState !== 'APPLIED') throw new Error(response.code || 'Selection has not been confirmed. Retry to reconcile the same request.');
+        var bootstrap = await api('/operator/api/bootstrap');
+        if (!Number.isSafeInteger(bootstrap.state.version) || !bootstrap.state.packPlan || JSON.stringify(bootstrap.state.packPlan.orders) !== JSON.stringify(orders)) throw new Error('Saved selection differs. Reload to see the current configuration.');
+        savedPackOrders = bootstrap.state.packPlan.orders;
+        savedPackIds = savedPackOrders.map(function (order) { return order.pack; });
+        allowedPackIds = bootstrap.state.allowedPackIds.slice().sort();
+        syncEditorRevisions(bootstrap);
+        $('packMessage').textContent = 'Pack plan saved.';
+      } catch (error) {
+        if (typeof pending !== 'undefined' && isReconciledCommandState(error.responseBody && error.responseBody.commandState)) clearRequest(pending.key);
+        $('packMessage').textContent = error.message;
+      } finally { savingPacks = false; updatePackSelection(); updateRewardSelection(); }
+    }
+
+    function updateRewardSelection() {
+      var selected = Number($('rewardRecipientLimit').value);
+      $('rewardRecipientLimit').disabled = savingReward || loadingDashboard || !rewardOptions.length;
+      $('saveRewardBtn').disabled = savingReward || loadingDashboard || savingPacks || !rewardOptions.includes(selected) || selected === savedRewardLimit;
+    }
+    function renderReward(bootstrap) {
+      rewardOptions = Array.isArray(bootstrap.rewardRecipientLimits) ? bootstrap.rewardRecipientLimits.slice() : [];
+      savedRewardLimit = bootstrap.state.rewardRecipientLimit;
+      rewardRevision = bootstrap.state.version;
+      var select = $('rewardRecipientLimit'); select.replaceChildren();
+      rewardOptions.forEach(function (limit) { var option = document.createElement('option'); option.value = String(limit); option.textContent = String(limit); select.appendChild(option); });
+      select.value = String(savedRewardLimit);
+      $('savedRewardLimit').textContent = 'Saved: ' + (rewardOptions.includes(savedRewardLimit) ? savedRewardLimit : 'Not available');
+      if (!rewardOptions.includes(savedRewardLimit)) rewardOptions = [];
+      updateRewardSelection();
+    }
+    async function saveReward() {
+      if (savingReward || $('saveRewardBtn').disabled) return;
+      var selected = Number($('rewardRecipientLimit').value);
+      savingReward = true; updateRewardSelection(); updatePackSelection();
+      $('rewardMessage').textContent = 'Saving and verifying…';
+      try {
+        var pending = requestFor({ type: 'update-configuration', configuration: { rewardRecipientLimit: selected } }, rewardRevision);
+        var response = await api('/operator/api/decisions', { method: 'POST', headers: { 'content-type': 'application/json', 'x-hookemon-proxy-credential': credential() }, body: JSON.stringify(pending.request) });
+        if (isReconciledCommandState(response.commandState)) clearRequest(pending.key);
+        if (response.commandState !== 'APPLIED') throw new Error(response.code || 'Recipient limit has not been confirmed. Retry to reconcile the same request.');
+        var bootstrap = await api('/operator/api/bootstrap');
+        if (!bootstrap.state || bootstrap.state.rewardRecipientLimit !== selected || !Number.isSafeInteger(bootstrap.state.version) || !Array.isArray(bootstrap.rewardRecipientLimits) || !bootstrap.rewardRecipientLimits.includes(selected)) throw new Error('Recipient readback differs or is unavailable. Reload before saving again.');
+        renderReward(bootstrap); syncEditorRevisions(bootstrap);
+        $('rewardMessage').textContent = 'Recipient limit saved and verified. Applies to the next cycle.';
+      } catch (error) {
+        if (typeof pending !== 'undefined' && isReconciledCommandState(error.responseBody && error.responseBody.commandState)) clearRequest(pending.key);
+        $('rewardMessage').textContent = 'Not confirmed: ' + error.message;
+      } finally { savingReward = false; updateRewardSelection(); updatePackSelection(); }
+    }
+
     async function load() {
+      if (savingPacks || savingReward || loadingDashboard) return;
+      loadingDashboard = true; updatePackSelection(); updateRewardSelection();
       try {
         var bootstrap = await api('/operator/api/bootstrap'); var dashboard = await api('/operator/api/dashboard'); var identities = await api('/operator/api/identities'); var network = await api('/operator/api/network');
+        renderReward(bootstrap);
+        $('activeRewardLimit').textContent = 'Active cycle: ' + (!dashboard.activeCycle ? 'None' : (dashboard.activeCycle.rewardRecipientLimit === null ? 'All eligible holders (historic cycle)' : dashboard.activeCycle.rewardRecipientLimit));
         revision = bootstrap.state.version; $('networkBadge').textContent = network.profile === 'mainnet' ? 'Mainnet' : 'Testnet';
         renderCycles(dashboard.cycles || []); renderCapacity(dashboard.cap || {}); renderCustody((dashboard.custody && dashboard.custody.buckets) || []); renderApproval(dashboard.cycles || []); renderHeld(dashboard.cycles || []); renderAlerts(dashboard.alerts || []); renderPayouts(dashboard.cycles || []); renderWallets(identities.identities);
         $('dashboard').hidden = false; message('Dashboard loaded.');
+        try { renderPacks(await api('/operator/api/packs'), bootstrap.state, bootstrap.state.version); }
+        catch (error) { renderPacks(null, bootstrap.state, bootstrap.state.version); $('packMessage').textContent = error.message + '. Reload to try again.'; }
       } catch (error) { message(error.message); }
+      finally { loadingDashboard = false; updatePackSelection(); updateRewardSelection(); }
     }
     async function dispatch(command) {
       var pending = requestFor(command);
@@ -187,7 +342,12 @@
         message(error.message);
       }
     }
+    $('rewardRecipientLimit').addEventListener('change', updateRewardSelection);
+    $('saveRewardBtn').addEventListener('click', saveReward);
     $('loadBtn').addEventListener('click', load);
+    $('savePacksBtn').addEventListener('click', savePacks);
+    $('selectAllPacksBtn').addEventListener('click', function () { if (!packCatalogReady || savingPacks || loadingDashboard) return; packInputs.forEach(function (input) { input.checked = true; }); updatePackSelection(); });
+    $('clearPacksBtn').addEventListener('click', function () { if (!packCatalogReady || savingPacks || loadingDashboard) return; packInputs.forEach(function (input) { input.checked = false; }); updatePackSelection(); });
     $('pauseBtn').addEventListener('click', function () { dispatch({ type: 'pause' }); });
     $('resumeBtn').addEventListener('click', function () { dispatch({ type: 'resume' }); });
     $('killBtn').addEventListener('click', function () { dispatch({ type: 'kill' }); });
