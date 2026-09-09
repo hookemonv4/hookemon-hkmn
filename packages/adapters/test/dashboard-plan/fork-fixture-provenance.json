@@ -1,0 +1,8 @@
+{
+  "scope": "LOCAL_FORK_ONLY_WITH_SIMULATED_COLLECTOR_RELAY_SOLANA",
+  "sourceSha256": {
+    "packages/adapters/test/fork/local-fork-runtime.mjs": "70d4d29dc8e830441d2c395406452199b217f27d98f81ff6cca57d41ee8eefdb",
+    "packages/adapters/test/fork/connected-cycle.test.mjs": "56ed1d931e58b0521f8babc814d14262bda5a91f867fae3e93f69d090916a2ba",
+    "packages/contracts/test/integration/ForkCycleHarness.sol": "786b00d68e374ee406daf3b6bda5328b660ab7f9c737eda419a1650f9c5b69a2"
+  }
+}
