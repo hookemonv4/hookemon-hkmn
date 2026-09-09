@@ -118,15 +118,8 @@
     "website": "https://hookemon.com",
     "x": "https://x.com/hookemon4",
     "icon": {
-      "expectedFile": "hkmn-logo.png",
-      "sourcePath": "release/phase3/metadata/hkmn-logo.png",
-      "status": "VALIDATED_LOCAL",
-      "uri": "https://raw.githubusercontent.com/hookemonv4/hookemon-hkmn/de1c7ebc1e947b9116ee17942308d32f717cf8a4/release/phase3/metadata/hkmn-logo.png",
-      "contentSha256": "sha256:e9099031a608b1f73590cc3b1938088b9f566b60919f89e35177bae2d527026d",
-      "mediaType": "image/png",
-      "byteLength": 1337571,
-      "width": 1254,
-      "height": 1254
+      "expectedFile": "hookemon-mark.png",
+      "status": "OPEN_FACT"
     },
     "banner": {
       "expectedFile": "hookemon-banner.jpeg",
@@ -136,7 +129,7 @@
   "openFacts": [
     "Missing: provider-supplied encoded preimage for the accepted three-call initialization sequence token.allocate(hook), custody.configureBindingHook(hook), and hook.initializeGraphLaunch(custody,sqrtPriceX96). Resolve: obtain the route namespace, route nonce, topology hash, target-id hashes, and serialized provider graph call data. Verified alternative: retain no encoded call data, target addresses, or signing payload.",
     "Missing: owner-reviewed seed deadline, wallet nonce and gas parameters. Resolve: bind them to the exact unsigned native transaction after preflight. Verified alternative: retain the 900-second deadline ceiling without a transaction payload.",
-    "Selected icon bytes pass the official CLI 4.1 decoder and are bound by SHA-256. Verify the immutable public URI before submission. No banner was supplied; it is not a required project-metadata field.",
+    "Missing: icon and banner bytes, content hashes and immutable publication locations. Resolve: add the supplied assets to the package and bind their SHA-256 values. Verified alternative: publish no public metadata artifact and retain the owner text only.",
     "Missing: the explicit native seed maximum, initial price and wei claim ceilings. Resolve: select reviewed per-action funding and gas reserves; calculate complete test affordability after functional testing under the owner decision. Verified alternative: funding values remain null and no seed can materialize until those explicit limits are selected.",
     "Missing: current provider admission of the unchanged inclusive 10/40/250 basis-point fee model with separate native seed. Resolve: submit the exact native graph to authenticated preflight and retain its admission result. Verified alternative: local native compilation and tests proceed without deployment authority."
   ]
