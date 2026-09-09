@@ -695,7 +695,7 @@ async function composedCollectorOnlyPurchaseAttempt(t, { latestBlockhash, transa
     ],
   });
 
-  const calls = { generateYoloPacks: 0, sign: 0, submitTransaction: 0 };
+  const calls = { generatePack: 0, sign: 0, submitTransaction: 0 };
   const composition = await compose({
     stateDir,
     statePath,
@@ -732,14 +732,12 @@ async function composedCollectorOnlyPurchaseAttempt(t, { latestBlockhash, transa
       collectorCrypt: {
         async getMachines() { return { machines: [{ code: 'collector-25', price: '0.025', contains: 1 }] }; },
         async getStatus() { return { machineStatus: 'ok', gachas: [] }; },
-        async generateYoloPacks({ playerAddress }) {
-          calls.generateYoloPacks += 1;
+        async generatePack({ playerAddress }) {
+          calls.generatePack += 1;
           assert.equal(playerAddress, operator);
           return {
-            packs: [{
-              memo: 'memo-composed-purchase',
-              transaction: realUnsignedPurchaseTransaction({ operator, recentBlockhash: transactionBlockhash }),
-            }],
+            memo: 'memo-composed-purchase',
+            transaction: realUnsignedPurchaseTransaction({ operator, recentBlockhash: transactionBlockhash }),
           };
         },
         submitTransaction: () => {
@@ -812,7 +810,7 @@ test('a live collector-only rehearsal purchase remains unsupported under the dur
   });
 
   assert.match(error?.message ?? '', /policy releaseCostMicroUsd must be positive for a money boundary/);
-  assert.equal(calls.generateYoloPacks, 0);
+  assert.equal(calls.generatePack, 0);
   assert.equal(calls.sign, 0);
   assert.equal(calls.submitTransaction, 0);
 });
@@ -1012,7 +1010,7 @@ async function composedProductionPurchaseAttempt(t, { latestBlockhash, transacti
     admission: cycleId => pinnedProductionPurchaseAdmission({ cycleId, packId: 'base-pack', amountAtomic }),
   });
 
-  const calls = { generateYoloPacks: 0, sign: 0, submitTransaction: 0 };
+  const calls = { generatePack: 0, sign: 0, submitTransaction: 0 };
   const composition = await compose({
     stateDir,
     statePath,
@@ -1047,14 +1045,12 @@ async function composedProductionPurchaseAttempt(t, { latestBlockhash, transacti
       collectorCrypt: {
         async getMachines() { return { machines: [{ code: 'base-pack', price: '0.00001', contains: 1 }] }; },
         async getStatus() { return { machineStatus: 'ok', gachas: [] }; },
-        async generateYoloPacks({ playerAddress }) {
-          calls.generateYoloPacks += 1;
+        async generatePack({ playerAddress }) {
+          calls.generatePack += 1;
           assert.equal(playerAddress, operator);
           return {
-            packs: [{
-              memo: 'memo-production-purchase',
-              transaction: realUnsignedPurchaseTransaction({ operator, recentBlockhash: transactionBlockhash }),
-            }],
+            memo: 'memo-production-purchase',
+            transaction: realUnsignedPurchaseTransaction({ operator, recentBlockhash: transactionBlockhash }),
           };
         },
         submitTransaction: () => {
@@ -1123,7 +1119,7 @@ test('a composed production purchase refuses at the trusted resolver before any 
     error?.message ?? '',
     /Solana blockhashContextResolver failed: original blockhash is not valid/,
   );
-  assert.equal(calls.generateYoloPacks, 1, 'decode must reach the resolver only after the batch call and candidate transaction exist');
+  assert.equal(calls.generatePack, 1, 'decode must reach the resolver only after the single-pack call and candidate transaction exist');
   assert.equal(calls.sign, 0);
   assert.equal(calls.submitTransaction, 0);
 });
@@ -1143,7 +1139,7 @@ test('a composed production purchase refuses at the trusted resolver before any 
     error?.message ?? '',
     /Solana blockhashContextResolver failed: original blockhash is not valid/,
   );
-  assert.equal(calls.generateYoloPacks, 1, 'decode must reach the resolver only after the batch call and candidate transaction exist');
+  assert.equal(calls.generatePack, 1, 'decode must reach the resolver only after the single-pack call and candidate transaction exist');
   assert.equal(calls.sign, 0);
   assert.equal(calls.submitTransaction, 0);
 });
@@ -1155,9 +1151,9 @@ test('a composed production purchase advances past the trusted resolver on a val
     transactionBlockhash: blockhash,
   });
 
-  assert.equal(calls.generateYoloPacks, 1, 'the resolver match must let the batch call and decode actually happen');
+  assert.equal(calls.generatePack, 1, 'the resolver match must let the single-pack call and decode actually happen');
   // The pinned fixture policy (`pinnedPurchaseTransactionPolicy`) is configured and accepted by
-  // `requirePolicy` before generateYoloPacks -- the batch call above already proves that -- so the
+  // `requirePolicy` before generatePack -- the single-pack call above already proves that -- so the
   // refusal below is the real next boundary the decoded candidate transaction meets: the policy's
   // independently authored `expectedRecipient` does not name this fixture's actual self-transfer
   // settlement destination.
@@ -2210,7 +2206,7 @@ test('liveMode true: native purchase refuses a missing pinned transaction policy
     purchasePolicy: null,
   });
   assert.match(error?.message ?? '', /Collector purchase requires a pinned transaction policy/);
-  assert.deepEqual(calls, { generateYoloPacks: 0, sign: 0, submitTransaction: 0 });
+  assert.deepEqual(calls, { generatePack: 0, sign: 0, submitTransaction: 0 });
 });
 
 test('liveMode true: the remaining pending operational integration refuses through the composed service loop', async t => {

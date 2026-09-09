@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { assertDashboardResponse } from '../../src/contracts/operator-contracts.mjs';
-import { buildDashboardReadModel } from '../../src/projections/operator-projection.mjs';
+import { assertBootstrap, assertDashboardResponse } from '../../src/contracts/operator-contracts.mjs';
+import { buildBootstrap, buildDashboardReadModel } from '../../src/projections/operator-projection.mjs';
 
 test('a terminal cycle state overrides an incomplete lifecycle stage and unavailable payout', () => {
   const dashboard = buildDashboardReadModel({
@@ -93,4 +93,16 @@ test('dashboard contract continues to accept the prior cap-only response shape',
   delete legacy.cap.outstandingCustody;
 
   assert.equal(assertDashboardResponse(legacy).schemaVersion, 5);
+});
+
+
+test('bootstrap exposes the exact stored plan and deliberately accepts legacy payloads without one', () => {
+  const packPlan = { schema: 'hookemon.pack-plan.v1', revision: 4, orders: [{ pack: 'base-pack', quantity: 3 }] };
+  const bootstrap = buildBootstrap({ authorityStatus: { revision: 9, configuration: null }, identity: { subject: 'operator', email: null, role: 'operator' } });
+  bootstrap.state.packPlan = packPlan;
+  assert.equal(assertBootstrap(bootstrap).state.packPlan, packPlan);
+  assert.throws(() => assertBootstrap({ ...bootstrap, state: { ...bootstrap.state, packPlan: { ...packPlan, revision: -1 } } }));
+  const legacy = { ...bootstrap, state: { ...bootstrap.state } };
+  delete legacy.state.packPlan;
+  assert.equal(assertBootstrap(legacy), legacy);
 });

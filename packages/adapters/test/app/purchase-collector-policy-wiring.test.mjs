@@ -689,3 +689,58 @@ test('purchase preserves an older provider message with fresh original-hash obse
   assert.ok(observations >= 3, 'each validation must obtain a fresh observation');
   assert.deepEqual(Transaction.from(Buffer.from(submitted, 'base64')).serializeMessage(), Transaction.from(Buffer.from(candidate, 'base64')).serializeMessage());
 });
+
+test('bound single-pack request uses generatePack after intent and reuses the durable memo on restart', async () => {
+  const repo = repository();
+  const signSpy = { calls: 0 };
+  let generated = 0, submitted = 0;
+  const collectorCrypt = {
+    async generatePack(request) {
+      generated++;
+      assert.deepEqual(request, { playerAddress: OPERATOR_ADDRESS, turbo: false });
+      assert.equal(repo.intentState.purchase.intent.quantity, 1);
+      return { memo: PACK_MEMO_0, transaction: buildCandidateTransaction({ memoValue: PACK_MEMO_0 }) };
+    },
+    async generateYoloPacks() { assert.fail('single-pack request must not use the batch endpoint'); },
+    async submitTransaction({ signedTransaction }) {
+      submitted++;
+      return { signature: signedSolanaTransactionSignature(signedTransaction) };
+    },
+  };
+  const args = baseArgs({ collectorCrypt, signSpy, repo });
+  args.request.generation = { endpoint: 'generatePack', turbo: false };
+  await mutatePurchase(args);
+  await mutatePurchase(args);
+  assert.equal(generated, 1);
+  assert.equal(signSpy.calls, 1);
+  assert.equal(submitted, 1);
+  assert.equal(repo.batchState.purchase.packs[0].memo, PACK_MEMO_0);
+});
+
+for (const generation of [
+  { endpoint: 'generatePack', turbo: true },
+  { endpoint: 'generateYoloPacks', turbo: false },
+  { endpoint: 'generatePack', turbo: false, altFundsRecipient: OPERATOR_ADDRESS },
+]) test(`invalid bound generation refuses before intent: ${JSON.stringify(generation)}`, async () => {
+  const repo = repository(), signSpy = { calls: 0 };
+  const collectorCrypt = {
+    async generatePack() { assert.fail('invalid request must not contact provider'); },
+    async generateYoloPacks() { assert.fail('invalid request must not contact provider'); },
+  };
+  const args = baseArgs({ collectorCrypt, signSpy, repo });
+  args.request.generation = generation;
+  await assert.rejects(mutatePurchase(args), /generation must bind one non-turbo/);
+  assert.ok(noIntentOrBatchRecorded(repo));
+  assert.equal(signSpy.calls, 0);
+});
+
+test('single-pack endpoint refuses a batch quantity or missing transport before intent', async () => {
+  for (const quantity of [1, 2]) {
+    const repo = repository(), signSpy = { calls: 0 };
+    const args = baseArgs({ collectorCrypt: {}, signSpy, repo, quantity });
+    args.request.generation = { endpoint: 'generatePack', turbo: false };
+    await assert.rejects(mutatePurchase(args), quantity === 1 ? /bound generatePack transport/ : /generation must bind one non-turbo/);
+    assert.ok(noIntentOrBatchRecorded(repo));
+    assert.equal(signSpy.calls, 0);
+  }
+});

@@ -272,42 +272,17 @@
   "controlGatePinBump": {
     "schema": "hookemon.control-gate-pin-bump.v2",
     "approvalToken": "OWNER APPROVED",
-    "basePinsSha256": "f7227e11ff2474e5726bfdd47c1bd0b97eb5505e7411c00f92266f533bbae802",
-    "candidatePinsSha256": "a125fe9564b49f50d71f4e1dd2a76de38115be3db644201d1e660b4ad913456e",
+    "basePinsSha256": "a125fe9564b49f50d71f4e1dd2a76de38115be3db644201d1e660b4ad913456e",
+    "candidatePinsSha256": "534b96bfaeaa6a3334d377b46ab6410f2c35ecafb13f57b200d0f47f32ff5451",
     "baseChecker": {
       "path": "scripts/verify-control-dependencies.mjs",
-      "blobId": "42a4112a8a5df464308bda4794d59aac83233fdb"
+      "blobId": "9faac6f636cc872c8dc5e46f17ed799f0407b1a7"
     },
     "controls": [
       {
-        "path": ".github/workflows/fork-pin-canary.yml",
-        "previousSha256": "d96801f9885587e84ffc390acbee7f2b973aff1ad42e4b98b5d25d31aa5cca2a",
-        "sha256": "e3447ec6f2f9e2ee3f516a6e6ff9694d6a2f318a0e6ba39de72a8a1cccd43f4c"
-      },
-      {
-        "path": ".github/workflows/fork-proof.yml",
-        "previousSha256": "487e589ae7e7af7a82317b200ed109f135591a37bb428736f0500a0f01c41d79",
-        "sha256": "4d422ca3bbb03a08c8d99b3d8b01d2919418009bd183e7655f95f9993d70d2b8"
-      },
-      {
-        "path": ".github/workflows/v4-gates.yml",
-        "previousSha256": "39aff509012d478a69f9e28268e289d422a4197d9225ba5137cb8ad01a9b0fa5",
-        "sha256": "5a530f2f4705673a2e101170c284ef6c39da95b6ef17089571fdf502c1c99e25"
-      },
-      {
-        "path": "packages/contracts/test/integration/RobinhoodV4ArchiveFork.t.sol",
-        "previousSha256": "993dfea53f3b486bbca7d7432b6e27e1a126ba7c3b0e4f157aec8ecb2da9a1c8",
-        "sha256": "09e7b66de30b493636f5605fbdc7e7dc859f8baabd994f47893c73e22ce9eaf0"
-      },
-      {
         "path": "scripts/verify-control-dependencies.mjs",
-        "previousSha256": "97dd72c9fdc4d1bf40ee5f2adde97545c02fe4144a95d5d6c9151ab8e6daba55",
-        "sha256": "c9a155d541258b5aa4ce886b2df8ed1adfb73f5f915542cc97e08638be413a8a"
-      },
-      {
-        "path": "scripts/verify-fork-pin.mjs",
-        "previousSha256": "09249c50f08b092305e497b6a9430d3acab0131c689ce58862f1f700668ef94a",
-        "sha256": "3fdd2565969a6f0e49af1fbae974409fa71a48e600cf555d9daee7d23b24db50"
+        "previousSha256": "c9a155d541258b5aa4ce886b2df8ed1adfb73f5f915542cc97e08638be413a8a",
+        "sha256": "20577b51e3644f62f77c2d9bfde16245a752690e74c69a5d5ec67fa0f1ae3d0a"
       }
     ]
   }

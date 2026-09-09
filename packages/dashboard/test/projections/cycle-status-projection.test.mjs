@@ -117,7 +117,6 @@ test('when projectCycleStatus was given a readAccounting seam, the real per-cycl
   assert.equal(status.cycle.rewardStatus, 'not-started');
 });
 
-
 test('v5 operator configuration retains the native public schema without an active cycle', async () => {
   const configuration = createDefaultOperatorConfiguration();
   assert.equal(configuration.schema, 'hookemon.operator-configuration.v5');

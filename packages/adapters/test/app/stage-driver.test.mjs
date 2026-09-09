@@ -1090,6 +1090,7 @@ test('purchase request omits packType when no pack code is configured', async ()
     operation: 'purchase',
     playerAddress: 'PLAYER11111111111111111111111111111111111',
     quantity: 1,
+    generation: { endpoint: 'generatePack', turbo: false },
   });
 });
 

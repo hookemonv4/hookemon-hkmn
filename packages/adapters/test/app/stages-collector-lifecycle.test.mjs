@@ -583,7 +583,7 @@ test('preparePurchaseRequest defaults to a single pack and reads the expected pe
   const collectorCrypt = { async getMachines() { return { machines: [{ code: 'pokemon_50', contains: '01' }] }; } };
   assert.deepEqual(
     await preparePurchaseRequest({ adapters: { collectorCrypt }, config: baseConfig({ pack: { code: 'pokemon_50' } }) }),
-    { provider: 'collector-crypt', operation: 'purchase', playerAddress: OPERATOR, quantity: 1, packType: 'pokemon_50', expectedCardCountPerPack: 1 },
+    { provider: 'collector-crypt', operation: 'purchase', playerAddress: OPERATOR, quantity: 1, generation: { endpoint: 'generatePack', turbo: false }, packType: 'pokemon_50', expectedCardCountPerPack: 1 },
   );
 });
 
@@ -849,7 +849,7 @@ test('reconcileLivePurchase holds the whole cycle when a pack status conflicts w
   assert.equal(cycleRepository.held[0].terminalState, 'HELD_DATA_UNVERIFIED');
 });
 
-test('reconcileLivePurchase resolves a pack with no provider evidence as not_purchased once its deadline passes', async () => {
+test('reconcileLivePurchase holds ambiguous missing provider evidence after the deadline', async () => {
   const cycleRepository = repository({
     batches: { purchase: { requestedAtMs: 0, packs: [{ packIndex: 0, memo: MEMO, expectedCardCount: 1, packType: null }] } },
     intents: { purchase: { recordedAtMs: 0, intent: { quantity: 1, packType: null, expectedCardCountPerPack: 1, playerAddress: OPERATOR } } },
@@ -868,8 +868,9 @@ test('reconcileLivePurchase resolves a pack with no provider evidence as not_pur
     cycleRepository,
     context: { cycleId: CYCLE_ID, nowMs: 31 * 60 * 1000 },
   });
-  assert.deepEqual(afterDeadline, { quantity: 1, packs: [{ packIndex: 0, memo: MEMO, status: 'not_purchased' }], purchasedCount: 0 });
-  assert.equal(cycleRepository.held.length, 0);
+  assert.equal(afterDeadline, null);
+  assert.equal(cycleRepository.held[0].terminalState, 'HELD_DATA_UNVERIFIED');
+  assert.equal(cycleRepository.held.length, 1);
 });
 
 test('reconcileLivePurchase holds the whole cycle when the batch call itself remained sent-unknown past the deadline', async () => {
@@ -2050,4 +2051,12 @@ test('carves an overdue SENT_UNKNOWN buyback into a held position without anothe
   });
   assert.equal(cycleRepository.held.length, 1);
   assert.equal(cycleRepository.heldPositions[0].costMicroUsd, '35000000');
+});
+
+test('purchase provider errors become a bounded hold after the reconcile deadline', async()=>{
+ const cycleRepository=repository({batches:{purchase:{requestedAtMs:0,packs:[{packIndex:0,memo:MEMO,expectedCardCount:1,packType:null}]}},intents:{purchase:{recordedAtMs:0,intent:{quantity:1,packType:null,expectedCardCountPerPack:1,playerAddress:OPERATOR}}}});
+ const args={adapters:{collectorCrypt:{async getPackStatus(){throw new Error('provider unavailable');}},solana:{client:rpcClient()}},config:baseConfig(),cycleRepository,context:{cycleId:CYCLE_ID,nowMs:1000}};
+ assert.equal(await reconcileLivePurchase(args),null);
+ const result=await reconcileLivePurchase({...args,context:{cycleId:CYCLE_ID,nowMs:31*60*1000}});
+ assert.equal(result,null);assert.equal(cycleRepository.held[0].terminalState,'HELD_DATA_UNVERIFIED');assert.equal(cycleRepository.held.length,1);
 });
