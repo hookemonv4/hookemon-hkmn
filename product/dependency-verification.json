@@ -188,13 +188,13 @@
     },
     "controlDependencyVerifier": {
       "path": "scripts/verify-control-dependencies.mjs",
-      "expectedSha256": "0f1bccabd9bd0ea3296f146b60ae2d527aa39abb1ace68227e6e689060f75d66",
-      "actualSha256": "0f1bccabd9bd0ea3296f146b60ae2d527aa39abb1ace68227e6e689060f75d66",
+      "expectedSha256": "5ad4a559963959e94bc05353496c0bd761050fb4cad55f0b278e46d41242cd45",
+      "actualSha256": "5ad4a559963959e94bc05353496c0bd761050fb4cad55f0b278e46d41242cd45",
       "closure": [
         {
           "path": "scripts/verify-control-dependencies.mjs",
-          "sha256": "0f1bccabd9bd0ea3296f146b60ae2d527aa39abb1ace68227e6e689060f75d66",
-          "actualSha256": "0f1bccabd9bd0ea3296f146b60ae2d527aa39abb1ace68227e6e689060f75d66"
+          "sha256": "5ad4a559963959e94bc05353496c0bd761050fb4cad55f0b278e46d41242cd45",
+          "actualSha256": "5ad4a559963959e94bc05353496c0bd761050fb4cad55f0b278e46d41242cd45"
         },
         {
           "path": "scripts/lib/util.mjs",
@@ -273,7 +273,7 @@
     "schema": "hookemon.control-gate-pin-bump.v2",
     "approvalToken": "OWNER APPROVED",
     "basePinsSha256": "f0005e9d7dfc35a885c2d170fc45e3e1c094d841695b6ce54efb106f58cade66",
-    "candidatePinsSha256": "764df4ef435fe209870d6f4bc0317ffd65ef0c436d8b690daf90597c2aa1b8a5",
+    "candidatePinsSha256": "2f1e3cbdd932fd08cae4873236c849149139cb31a66651d62c14591c4eba5e9f",
     "baseChecker": {
       "path": "scripts/verify-control-dependencies.mjs",
       "blobId": "2cb924e426c1af58856513daf56574618cb64698"
@@ -287,7 +287,7 @@
       {
         "path": "scripts/verify-control-dependencies.mjs",
         "previousSha256": "f1e876a829ff94b9b919af78f3f5a1b6b9e988d451f6023ec30029a5439270db",
-        "sha256": "0f1bccabd9bd0ea3296f146b60ae2d527aa39abb1ace68227e6e689060f75d66"
+        "sha256": "5ad4a559963959e94bc05353496c0bd761050fb4cad55f0b278e46d41242cd45"
       }
     ]
   }

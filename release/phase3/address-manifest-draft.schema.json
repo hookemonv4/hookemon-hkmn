@@ -1111,12 +1111,12 @@
                   "const": true
                 },
                 "runs": {
-                  "const": 1000
+                  "const": 200
                 }
               }
             },
             "viaIR": {
-              "const": false
+              "const": true
             },
             "evmVersion": {
               "const": "cancun"

@@ -18,9 +18,9 @@
     "decisions/owner-approvals/revision-73-collector-core-approved.json": "ccbe59f99addffc8e7e64e8dc243fdd722352ee2c8d58c357c430b2b16ff169d",
     "feasibility/interface-freeze.json": "e5b6fade85bd5ef9c0ae0cefaeffbf23ae7926460f21ccea52debd8484f1818d",
     "feasibility/phase3-offchain-interface-amendment.json": "3e91a11ca644f1664f670979a772628690caf4f3eeda53e0ecb2722f91daa6b0",
-    "packages/contracts/foundry.toml": "2b1d724039460a2ca32166acddc989ef190a79d0f63b4a061c6ffb5ec2f8e258",
+    "packages/contracts/foundry.toml": "08b1caa2387cf1800162893b5612c32f6bc2fc1cd4e80e59fd796639ff18f597",
     "packages/contracts/remappings.txt": "1c4a68fb5b2e49b88df6bfbd52d85b24bc899aaf3cbb4367a680e2d455d02341",
-    "product/dependency-pins.json": "764df4ef435fe209870d6f4bc0317ffd65ef0c436d8b690daf90597c2aa1b8a5",
+    "product/dependency-pins.json": "2f1e3cbdd932fd08cae4873236c849149139cb31a66651d62c14591c4eba5e9f",
     "specs/requirements.json": "c89397d3ece140e601f2bb494f8f13a86996faca5f5b43d013abc770abfadf5c"
   }
 }

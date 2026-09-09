@@ -49,9 +49,12 @@ Role control defines the bounded Treasury and Operations authorities for the Pha
 ```sh
 forge test --root packages/contracts --match-path test/access/MoneyRoles.t.sol -vv
 forge test --root packages/contracts --match-path test/access/ProcessClaims.t.sol -vv
+FOUNDRY_PROFILE=launch forge test --root packages/contracts --match-path test/access/ProcessClaims.t.sol -vv
 ```
 
 The suites cover the full caller matrix, the 21,600-second equality boundary, bounded active entries, immediate decreases, delayed increases, strict delayed rotation, automatic pauses, stale-rotation rejection, frozen historical claims, permanent cycle replay protection, and preservation of usage across every role transition.
+
+The delayed-limit regression snapshots time with `vm.getBlockTimestamp()` and checks the exact pre-activation and activation timestamps under the launch compiler profile. Foundry time travel must not depend on the compiler treating `block.timestamp` as constant within a test transaction.
 
 ## Recovery pointers
 

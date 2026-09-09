@@ -114,7 +114,6 @@ test('init I6 binds the exact current control surface without mutable projection
     'scripts/verify-phase1-release.mjs',
     'scripts/verify-phase1-reproducibility.mjs',
     'scripts/release/build-local-candidate.mjs',
-    'scripts/programmable/lib/native-universal-router-reproduction.mjs',
   ]);
   function filesUnder(relativeDirectory, extension) {
     return readdirSync(join(templateRoot, relativeDirectory), { withFileTypes: true })

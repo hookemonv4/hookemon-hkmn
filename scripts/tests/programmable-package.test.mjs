@@ -1161,8 +1161,8 @@ test('the contracts launch profile pins the Phase 3 compiler settings', () => {
   for (const setting of [
     'solc_version = "0.8.26"',
     'optimizer = true',
-    'optimizer_runs = 1000',
-    'via_ir = false',
+    'optimizer_runs = 200',
+    'via_ir = true',
     'evm_version = "cancun"',
     'bytecode_hash = "none"',
     'cbor_metadata = false',

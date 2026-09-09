@@ -90,3 +90,30 @@ test('native review disclosures remove obsolete seed instructions and remain ide
   assert.equal(bound.postDeployAssertions.some(value => value.startsWith('The Permit2 allowance must')), false);
   assert.equal(bound.openFacts.some(value => value.includes('two address-order')), false);
 });
+
+
+test('native address schemas require the IR launch profile and preserve historical compiler settings', () => {
+  const manifest = read('release/phase3/address-manifest.json');
+  for (const name of ['address-manifest.schema.json', 'address-manifest-draft.schema.json']) {
+    const schema = read(`release/phase3/${name}`);
+    assert.deepEqual(validateJsonSchema(schema, manifest), []);
+    for (const [runs, viaIR] of [[1000, false], [200, false], [1000, true]]) {
+      const changed = structuredClone(manifest);
+      changed.compiler.standardJson.optimizer.runs = runs;
+      changed.compiler.standardJson.viaIR = viaIR;
+      assert.notDeepEqual(validateJsonSchema(schema, changed), [], `${name}: ${runs}/${viaIR}`);
+    }
+  }
+  const schema = read('release/phase3/address-manifest.schema.json');
+  const historical = structuredClone(manifest.compiler);
+  historical.standardJson.optimizer.runs = 1000;
+  historical.standardJson.viaIR = false;
+  const historicalSchema = { $defs: schema.$defs, $ref: '#/$defs/draftCompiler' };
+  assert.deepEqual(validateJsonSchema(historicalSchema, historical), []);
+  assert.notDeepEqual(validateJsonSchema(historicalSchema, manifest.compiler), []);
+  // The materialized profile carries the same exact compiler values as its draft.
+  assert.equal(schema.$defs.nativeCompilerProfile.properties.optimizer.properties.runs.const, 200);
+  assert.equal(schema.$defs.nativeCompilerProfile.properties.viaIR.const, true);
+  assert.equal(schema.$defs.compilerProfile.properties.optimizer.properties.runs.const, 1000);
+  assert.equal(schema.$defs.compilerProfile.properties.viaIR.const, false);
+});
