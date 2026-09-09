@@ -7,8 +7,8 @@
   "presentation": {
     "description": "Hookemon buys gacha card packs, opens them, sells the cards and pays the proceeds to HKMN holders. Trading fees fund the packs.",
     "image": {
-      "sourcePath": "release/phase3/metadata/hkmn-logo.png",
-      "uri": "https://raw.githubusercontent.com/hookemonv4/hookemon-hkmn/de1c7ebc1e947b9116ee17942308d32f717cf8a4/release/phase3/metadata/hkmn-logo.png"
+      "sourcePath": "apps/web/public/comic/coin.png",
+      "uri": "https://hookemon.com/comic/coin.png"
     },
     "links": [
       {
