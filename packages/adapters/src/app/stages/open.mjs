@@ -7,6 +7,7 @@ import {
 import { requireCollectorOnlyMutationAuthority } from '../../../rehearsal/collector-only-authorization.mjs';
 import { assertTypedAmount } from '../../../../runner/src/cycle/money-schemas.mjs';
 import { AmbiguousCardMintError } from './errors.mjs';
+import { heldPackIdForMemo } from './held-pack.mjs';
 
 const DEFAULT_UNRESOLVED_CARD_DEADLINE_MINUTES = 30;
 const MINIMUM_UNRESOLVED_CARD_DEADLINE_MINUTES = 5;
@@ -58,7 +59,7 @@ async function holdPack(cycleRepository, config, context, evidence, { terminalSt
   }
   const description = await cycleRepository.describeCycle(context.cycleId);
   const costMicroUsd = description?.admission?.aggregateFundingUsd?.amountMicroUsd;
-  const packId = config?.pack?.code;
+  const packId = await heldPackIdForMemo({ cycleRepository, cycleId: context.cycleId, memo, config });
   if (typeof costMicroUsd !== 'string' || !canonicalUnsignedInteger.test(costMicroUsd)
     || typeof packId !== 'string' || packId.length === 0) {
     throw new Error('open cannot attribute a held card without a committed USD purchase cost and pack identifier');

@@ -64,6 +64,13 @@ infrastructure.
   realized proceeds into the durable custody ledger. Direct payout reads its recipient journal and
   may idempotently record successor dust and release its wallet nonce fence during terminal
   recovery. Reconciliation receives no signer, runner, or provider-mutation capability.
+- `src/app/stages/held-pack.mjs` exports `heldPackIdForMemo({ cycleRepository, cycleId, memo, config })`.
+  Open, epic-gate, and buyback call it before recording a held position. It resolves the pack
+  identity of a purchased memo from the persisted purchase plan: the per-order pack request and
+  admission order for `hookemon.policy-admission.v4`, the persisted purchase batch request and
+  admission pack id for legacy admissions. Mixed plans resolve each memo to its own order.
+  `existingHeldPackOutcome` returns the already recorded held position for a memo so a repeated
+  reconciliation tick never records a second one.
 - `src/app/stages/eligibility-snapshot.mjs`, `claim-process.mjs`, and `epic-gate.mjs` provide
   read-only probes. Eligibility snapshot completes through direct read-only reconciliation. Claim
   processing persists `PREPARED → SIGNED → BROADCAST → FINALIZED` in the chain journal and records
@@ -108,6 +115,10 @@ infrastructure.
   own: every mutation still passes through the same schema-bound policy-wallet authorization checks
   (destination, function, asset, and amount allowlists; single-use nonce; independently decoded
   signed-bytes verification) before a signer is ever invoked.
+- A held position carries the pack identity recorded in the durable purchase plan for its memo. The
+  optional `HOOKEMON_PACK_CODE` configuration is a fallback only for journals without any persisted
+  pack record; disagreeing durable sources or a memo without any durable identity fail the hold
+  instead of guessing.
 - Adapter imports, probes, and reconciliation remain usable while the active interface authority is
   provisional. A direct signer, signer broadcast, or provider mutation refuses that authority at the
   last local boundary before the external effect.
