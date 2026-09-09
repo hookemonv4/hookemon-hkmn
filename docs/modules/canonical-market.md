@@ -2,7 +2,7 @@
 
 ## Purpose
 
-The canonical-market module authenticates the one native ETH/HKMN pool and presents an executed native ETH observation as the gross quote-volume input to fee accounting. It owns the narrow hook initialization and swap callback boundary described by `REQ-canonical-market-1` through `REQ-canonical-market-7`.
+The canonical-market module authenticates the one native ETH and HKMN pool and presents an executed native ETH observation as the gross quote-volume input to fee accounting. It owns the narrow hook initialization and swap callback boundary described by `REQ-canonical-market-1` through `REQ-canonical-market-7`.
 
 ## Public interface
 
