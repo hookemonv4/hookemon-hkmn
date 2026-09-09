@@ -351,18 +351,20 @@ contract HookemonHook is FeeAccounting, MoneyRoles, CanonicalMarketCallback, Hoo
             params.payer == address(0) || params.payer == address(this)
                 || params.custody == address(0) || params.custody.code.length == 0
                 || params.liquidity == 0 || params.liquidity > uint256(uint128(type(int128).max))
-                || params.tickLower != -887220 || params.tickUpper != 887220
-                || params.tickLower % tickSpacing != 0 || params.tickUpper % tickSpacing != 0
-                || params.deadline < block.timestamp
+                || params.tickLower < TickMath.MIN_TICK || params.tickUpper > TickMath.MAX_TICK
+                || params.tickLower >= params.tickUpper || params.tickLower % tickSpacing != 0
+                || params.tickUpper % tickSpacing != 0 || params.deadline < block.timestamp
         ) revert InvalidSeedParams();
 
         PoolKey memory key = _canonicalPoolKey();
         uint256 hkmnMax = params.amount1Max;
         if (msg.value != params.amount0Max) revert SeedFundingMismatch();
         uint256 hkmnBalanceBefore = _tokenBalance(Currency.unwrap(hkmn), address(this));
-        if (hkmnMax == 0 || params.amount0Max == 0 || hkmnMax != hkmnBalanceBefore) {
+        if (hkmnMax == 0 || hkmnMax != hkmnBalanceBefore) {
             revert InvalidSeedParams();
         }
+
+        _validateSeedRange(key, params);
 
         PermanentPositionCustody custody = PermanentPositionCustody(params.custody);
         if (
@@ -389,12 +391,14 @@ contract HookemonHook is FeeAccounting, MoneyRoles, CanonicalMarketCallback, Hoo
         }
         _requireSolvent();
         uint256 hkmnDustTransferred;
-        if (graphMode) {
+        if (params.amount0Max == 0) {
+            hkmnDustTransferred = _transferHkmnDust(params.custody);
+        } else if (graphMode) {
             if (_tokenBalance(Currency.unwrap(hkmn), address(this)) != 0) {
                 revert SeedResidualTransferFailed();
             }
         } else {
-            hkmnDustTransferred = _transferHkmnDustToTreasury();
+            hkmnDustTransferred = _transferHkmnDust(_currentTreasury());
         }
         emit CanonicalLiquiditySeeded(
             params.payer, params.custody, mintedTokenId, refundWei, hkmnDustTransferred
@@ -763,6 +767,23 @@ contract HookemonHook is FeeAccounting, MoneyRoles, CanonicalMarketCallback, Hoo
             .approve(hkmnToken, positionManager, uint160(hkmnMax), uint48(block.timestamp));
     }
 
+    /// @dev Token-only inventory starts exactly at its upper boundary, where buys enter the range.
+    function _validateSeedRange(PoolKey memory key, SeedParams calldata params) private view {
+        if (params.amount0Max != 0) {
+            if (params.tickLower != -887220 || params.tickUpper != 887220) {
+                revert InvalidSeedParams();
+            }
+            return;
+        }
+        (uint160 price,,,) = poolManager.getSlot0(key.toId());
+        if (price != TickMath.getSqrtPriceAtTick(params.tickUpper)) revert InvalidSeedParams();
+        if (graphMode && !_graphConfigurationIsValid(price)) revert InvalidGraphIssuance();
+        uint256 span = uint256(price) - TickMath.getSqrtPriceAtTick(params.tickLower);
+        if (params.liquidity != (uint256(params.amount1Max) << 96) / span) {
+            revert InvalidSeedParams();
+        }
+    }
+
     /// @dev Matches pinned Pool.modifyLiquidity rounded-up principal debt in all tick regions.
     function _seedDebts(PoolKey memory key, SeedParams calldata params)
         private
@@ -843,13 +864,12 @@ contract HookemonHook is FeeAccounting, MoneyRoles, CanonicalMarketCallback, Hoo
         _approveToken(hkmnToken, permit2, 0);
     }
 
-    function _transferHkmnDustToTreasury() private returns (uint256 transferred) {
+    function _transferHkmnDust(address recipient) private returns (uint256 transferred) {
         address hkmnToken = Currency.unwrap(hkmn);
         transferred = _tokenBalance(hkmnToken, address(this));
         if (transferred != 0) {
-            (bool success, bytes memory result) = hkmnToken.call(
-                abi.encodeWithSelector(bytes4(0xa9059cbb), _currentTreasury(), transferred)
-            );
+            (bool success, bytes memory result) =
+                hkmnToken.call(abi.encodeWithSelector(bytes4(0xa9059cbb), recipient, transferred));
             if (!success || result.length != 32 || !abi.decode(result, (bool))) {
                 revert SeedResidualTransferFailed();
             }

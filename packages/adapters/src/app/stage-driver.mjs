@@ -795,6 +795,7 @@ async function stageConfigurationWithOperatorDeadline(config, readOperatorConfig
   return Object.freeze({
     ...base,
     unresolvedCardDeadlineMinutes: assertUnresolvedCardDeadlineMinutes(deadline),
+    processClaimLimit6hMicroUsd: operatorConfiguration?.processClaimLimit6hMicroUsd ?? '25000000000',
     ...(maxHeldPositions === undefined ? {} : { maxHeldPositions }),
     ...(maxHeldValueMicroUsdg === undefined ? {} : { maxHeldValueMicroUsdg }),
   });
@@ -1053,6 +1054,7 @@ function chainReconciliationRepository(cycleRepository, assertLease) {
     'recordBroadcast',
     'recordCustodyLedger',
     'recordFinality',
+    'finalizeProcessClaimUsd',
     'recordRelayLeg',
     'recordRelayLegSource',
     'settleRelayLeg',

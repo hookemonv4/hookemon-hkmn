@@ -358,7 +358,15 @@ export function validateSubmissionFeeOrdering(launchInputs, submission) {
     } else if (selection.status !== 'DERIVED' || !candidate || selection.selectedSqrtPriceX96 !== candidate.sqrtPriceX96) {
       fail('selected candidate price does not match native ordering');
     }
-    if ((candidate === null) !== (launchInputs.pool.quoteAsset.amountAtomic === null)) fail('native seed amount and candidate must be bound together');
+    const amount = launchInputs.pool.quoteAsset.amountAtomic;
+    const unselectedInventory = amount === '0' && candidate === null
+      && selection.status === 'OPEN_FACT' && selection.poolKey === null && selection.poolId === null
+      && launchInputs.pool.fullRange?.minimumTick === null
+      && launchInputs.pool.fullRange?.maximumTick === null
+      && launchInputs.seed?.nativeFunding?.amountWei === '0';
+    if (!unselectedInventory && (candidate === null) !== (amount === null)) {
+      fail('native seed amount and candidate must be bound together');
+    }
     for (const name of ['zeroForOneExactInput', 'zeroForOneExactOutput', 'oneForZeroExactInput', 'oneForZeroExactOutput']) {
       if (submission?.hook?.feeMechanism?.swapQuadrants?.[name]?.currency !== 'currency0') fail(`submission fee currency mismatch in ${name}`);
     }

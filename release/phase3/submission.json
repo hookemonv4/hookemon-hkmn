@@ -7,7 +7,7 @@
     "id": "hookemon-phase-three",
     "name": "Hookemon",
     "summary": "A fixed-supply HKMN market uses native ETH and a cumulative inclusive 3% gross quote-side fee.",
-    "userOutcome": "A reviewed graph and separate payable seed establish the canonical ETH and HKMN pool with permanent liquidity custody.",
+    "userOutcome": "A reviewed graph and authorized seed establish the canonical ETH and HKMN pool with permanent custody.",
     "category": "custom-hook-project",
     "whyV4": "Uniswap v4 callbacks and return deltas let the canonical hook collect its non-additive fee inside the authenticated pool lifecycle instead of adding a separate transfer tax."
   },
@@ -153,7 +153,7 @@
       "applicable": true,
       "actor": "Launch wallet through graphFactory",
       "valueFlow": "The proposed graph creates the HKMN target and allocates the complete supply to the resolved canonical-market hook before the owner seed.",
-      "custody": "The hook receives the complete HKMN supply for exact full-range seeding; permanent custody receives only the minted v4 position.",
+      "custody": "The hook receives the complete HKMN supply. Zero-native inventory locks the maximal position and its mechanical rounding remainder in permanent custody; a funded legacy seed requires exact full-range consumption.",
       "failure": "A source-supply or graph mismatch stops the seed path; no signing occurs from this package.",
       "event": "Graph target deployment and token allocation events.",
       "notApplicableReason": null
@@ -169,8 +169,8 @@
     },
     "liquidityFormation": {
       "applicable": true,
-      "actor": "Launch wallet supplies native ETH through the payable seed",
-      "valueFlow": "The graph allocates the complete HKMN stock to the hook. A separately authorized payable seed supplies the explicitly reviewed native maximum.",
+      "actor": "Launch wallet submits the seed with its exact selected native ETH maximum, including zero",
+      "valueFlow": "The graph allocates the complete HKMN stock to the hook. An explicit zero native maximum selects token-only inventory at the chosen upper tick; a positive maximum retains the funded full-range route.",
       "custody": "The permanent custody target receives the initial v4 position after the seed call.",
       "failure": "Wrong native value, expired deadline, wrong range, failed mint or rejected refund reverts the seed atomically.",
       "event": "Seed and custody binding events.",
@@ -180,7 +180,7 @@
       "applicable": true,
       "actor": "Launch wallet in Rabby",
       "valueFlow": "Only after provider preimage and preflight facts are resolved would the wallet sign the zero-value graph call and, after assertions, the owner seed call. Requirements revision 65 is not transaction authorization for either transaction.",
-      "custody": "The seed caller supplies ETH; the hook refunds only msg.value minus exact PositionManager debt to the specified payer.",
+      "custody": "The seed caller supplies exactly amount0Max. A zero maximum needs no creator ETH inventory; a positive maximum refunds only its excess over exact debt.",
       "failure": "A graph mismatch stops before the seed; a deployed but unseeded graph is not retried with widened allowances.",
       "event": "Wallet transaction receipts and post-deploy assertions.",
       "notApplicableReason": null
@@ -188,7 +188,7 @@
     "trading": {
       "applicable": true,
       "actor": "Authenticated PoolManager callback",
-      "valueFlow": "Each canonical ETH and HKMN swap follows its specified gross native fee quadrant.",
+      "valueFlow": "Each canonical swap follows its gross native fee quadrant. An initially empty PoolManager requires buyer ETH settlement before the callback takes its fee; pinned V4Router SETTLE, SWAP_EXACT_IN_SINGLE, TAKE_ALL is locally verified, with deployed provider routing still unresolved.",
       "custody": "The PoolManager handles swap settlement while the hook records only fee liability.",
       "failure": "An invalid PoolKey, currency mapping or delta reverts the entire swap without persistent accounting.",
       "event": "Swap and hook fee-accounting events.",
@@ -842,7 +842,7 @@
       "from": "launch-wallet",
       "to": "resolved canonical hook and custody",
       "amountRule": "The explicit reviewed native amount0Max and the complete 1000000000000000000000000000 HKMN amount1Max bound the seed.",
-      "settlement": "msg.value equals amount0Max. Only HKMN uses Permit2 approval; read current slot0 after approval, pay exact native debt, clear approvals and refund the difference to payer. Any HKMN residual or rejected refund reverts.",
+      "settlement": "msg.value equals amount0Max, including zero. Only HKMN uses Permit2 approval; exact native debt is paid and allowances cleared. Zero-native maximal inventory locks only its mechanical HKMN remainder in permanent custody. Funded graph seeds reject residual HKMN; rejected refunds revert.",
       "failure": "An invalid allowance, deadline, range, price, allocation or post-deploy assertion reverts the seed."
     },
     {

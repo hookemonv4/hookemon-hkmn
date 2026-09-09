@@ -16,6 +16,7 @@
     "@uniswap/v4-core/src/libraries/FixedPoint96.sol",
     "@uniswap/v4-core/src/libraries/FullMath.sol",
     "@uniswap/v4-core/src/libraries/Hooks.sol",
+    "@uniswap/v4-core/src/libraries/Pool.sol",
     "@uniswap/v4-core/src/libraries/Position.sol",
     "@uniswap/v4-core/src/libraries/SafeCast.sol",
     "@uniswap/v4-core/src/libraries/SqrtPriceMath.sol",
@@ -388,7 +389,7 @@
     },
     {
       "bytes": 30035,
-      "kind": "solidity-import",
+      "kind": "solidity-remapped-import",
       "path": "packages/contracts/lib/v4-core/src/libraries/Pool.sol",
       "sha256": "59c493035ad25d56f24a457e8b40d9d1e3784504b8ff13d171db1eb25c6f128e"
     },
@@ -789,10 +790,10 @@
       "sha256": "2f106f2f4773b8d7ef8c2364a95074ceb07ec2c80d38a7751e80fdfc9996ec02"
     },
     {
-      "bytes": 8550,
+      "bytes": 9345,
       "kind": "source-entry",
       "path": "packages/contracts/script/release/PhaseThreeReleasePlan.sol",
-      "sha256": "17a429958bf19e640da9f444a16c0d8e66bec3a82b2e4f68bc064b5a966b0453"
+      "sha256": "c6b0564deeff4dc42d47696cddfa79c46ef4b46032adca15ead277a2a9318a03"
     },
     {
       "bytes": 2740,
@@ -801,10 +802,10 @@
       "sha256": "d28572c4c8f902741be65be60ff67582916dfced092a3e2f0f0a938de21e29a3"
     },
     {
-      "bytes": 36358,
+      "bytes": 37409,
       "kind": "source-entry",
       "path": "packages/contracts/src/HookemonHook.sol",
-      "sha256": "c96b17a0e535ec97ed6e37cb8589b8262f4e6fe4aa2c7040dc2d1e7acdd8d0fa"
+      "sha256": "435a3138a67c6688098953ce52d5a720edffd3d2949d94386b48e78cebb2a002"
     },
     {
       "bytes": 7907,
@@ -864,7 +865,7 @@
       "bytes": 114606,
       "kind": "capability-test:phase-three-launch-graph",
       "path": "packages/contracts/test/integration/RobinhoodV4ArchiveFork.t.sol",
-      "sha256": "09e7b66de30b493636f5605fbdc7e7dc859f8baabd994f47893c73e22ce9eaf0"
+      "sha256": "471f698428a87ca02e218c67feb620e9fbbb3de0decf784f0a881da84fd9a0f8"
     },
     {
       "bytes": 31790,
@@ -897,16 +898,16 @@
       "sha256": "5c8215c096bb8921e5d4da2186127d69876f65a395d5c154ac892e477b0c809a"
     },
     {
-      "bytes": 7446,
+      "bytes": 10833,
       "kind": "test-entry",
       "path": "packages/contracts/test/release/PhaseThreeReleasePlan.t.sol",
-      "sha256": "38c4db1e76db14c0351e32b1328db26804251951e79eeb1a56cd305903a9a8e2"
+      "sha256": "94b08e6c393930a8ca48aa759b213ba5994f38f2ad7bcd09b2f447b95801ee5b"
     },
     {
       "bytes": 11654,
       "kind": "dependency-lock",
       "path": "product/dependency-pins.json",
-      "sha256": "2f1e3cbdd932fd08cae4873236c849149139cb31a66651d62c14591c4eba5e9f"
+      "sha256": "484bfda7519b3814e6fb61ba52936478de6e89154e60973dfd500cbf1d3befe3"
     },
     {
       "bytes": 2673,
@@ -939,16 +940,16 @@
       "sha256": "1f815a172ae5d3c2c946a42e9f8eb2a009903cf471f06fde040340c6f0c02da1"
     },
     {
-      "bytes": 9911,
+      "bytes": 9897,
       "kind": "project-surface-evidence:canonical-pool-hook",
       "path": "release/phase3/address-manifest.json",
-      "sha256": "cbfef74257ec3f697267accb69d613531990304a30a2048eb18d8555271ca8bf"
+      "sha256": "825406b8c104ee64d502f82b62acc363e287961ac73e120c972149059ca05a13"
     },
     {
-      "bytes": 75807,
+      "bytes": 75950,
       "kind": "capability-evidence:phase-three-launch-graph",
       "path": "release/phase3/address-manifest.schema.json",
-      "sha256": "d5d845da9fd4f2dede7f865a8e7e670616ceef3dcdd5e88c8c1a355fb720ce16"
+      "sha256": "1b857f69fcc711d37e8e9afefe0941a1b3463295c98ba88311c3cf40eb77dabb"
     },
     {
       "bytes": 4387,
@@ -978,25 +979,25 @@
       "bytes": 299507,
       "kind": "capability-evidence:phase-three-launch-graph",
       "path": "release/phase3/artifacts/custody.json",
-      "sha256": "d618a60be3470c29cef847a9db46bd2c7870a7b1b262c607c98e0ef30ef8811a"
+      "sha256": "943bf17d52aaf90de70640b18175430c043db9cb7e862468131da694c2fc0b3d"
     },
     {
-      "bytes": 1034941,
+      "bytes": 1072304,
       "kind": "capability-evidence:phase-three-launch-graph",
       "path": "release/phase3/artifacts/hook.json",
-      "sha256": "3f1d8c2c6c0e12e4d2633c9003623c36abd419ebb5ba40c11f436a1295a23080"
+      "sha256": "c823286da7036b9a31d66d2726e0297fd60405f01f34745606fbd70aa4c3ed6b"
     },
     {
       "bytes": 170734,
       "kind": "capability-evidence:phase-three-launch-graph",
       "path": "release/phase3/artifacts/token.json",
-      "sha256": "7b3b75b1ddf253a3bcab2f7c9fecf18fc1085d44cb1db0f4b753d58d16c7c100"
+      "sha256": "021386a1bfe2c753c658e82add866f0c7d1e393cad71046994fd0e03f1c46d0a"
     },
     {
-      "bytes": 253680,
+      "bytes": 254751,
       "kind": "capability-evidence:phase-three-launch-graph",
       "path": "release/phase3/build-info/launch.json",
-      "sha256": "6a05177d18a63d265d8b68d2a373a01bc0775cdf48b8697c662f7e2149a08457"
+      "sha256": "4df157b807ec319963fc0b6f0de5800cd2266df6af2c4397f042a1a67d2ad57c"
     },
     {
       "bytes": 16196,
@@ -1035,10 +1036,10 @@
       "sha256": "68d1ec551980a4773b75e6c8f3f98147a9f584ba9803848ad35b3b64271798a1"
     },
     {
-      "bytes": 6316,
+      "bytes": 6521,
       "kind": "project-surface-evidence:canonical-pool-hook",
       "path": "release/phase3/launch-inputs.json",
-      "sha256": "973b0e512374878512d702e4d6dca87713f3010a0ca065750f204497280ba566"
+      "sha256": "c623e4da9bc2e457f117c215a0f5f5d48731c85a491351af59e644712fc491a9"
     },
     {
       "bytes": 7425,
@@ -1047,28 +1048,28 @@
       "sha256": "5a941b14ce16a7148f0cfd184916daec275a92981b9abc5a4cf1f57aa9c42788"
     },
     {
-      "bytes": 406859,
+      "bytes": 410613,
       "kind": "capability-evidence:phase-three-launch-graph",
       "path": "release/phase3/package/create-request.json",
-      "sha256": "b8874972e5729f0da20d4efa06ef2cf5a875105ca85b962b03b1698d12c387b0"
+      "sha256": "8bfcbdd46e802f173ac74893bb64583b4be5331ce27d3ff8f62cdbd7fb5db12c"
     },
     {
-      "bytes": 11726,
+      "bytes": 12100,
       "kind": "capability-evidence:phase-three-launch-graph",
       "path": "release/phase3/package/graph-draft.json",
-      "sha256": "3b1e8d415ca046edf2ebd7df7d3b9a88178d475cff0930a3759974988303141d"
+      "sha256": "a3567588d99f5c2a0b2de1bfbebfd6031757ce92cc0457871917183d8c9d808d"
     },
     {
       "bytes": 3101,
       "kind": "capability-evidence:phase-three-launch-graph",
       "path": "release/phase3/package/package-manifest.json",
-      "sha256": "56377d1982e4dce99e1a49e09f8e64adc3af1d3f3ed92e7add5a8e6b6dfc99dc"
+      "sha256": "56a7e96e47c21da50540a08d0fcaff57a945376dec5f648666c0b82e16065859"
     },
     {
-      "bytes": 77516,
+      "bytes": 77972,
       "kind": "package:submission.json",
       "path": "release/phase3/submission.json",
-      "sha256": "607d12c9c7b9db881e01bc94bcb4e1649115390890b77f1892351c976ee4869c"
+      "sha256": "30e04213a6ee17e7d72a41b5b66c24f17888b26a4a04b65340efbfd908a063c9"
     },
     {
       "bytes": 3619,
@@ -1435,6 +1436,22 @@
       "specifier": "@uniswap/v4-core/src/libraries/Hooks.sol"
     },
     {
+      "importer": "packages/contracts/script/release/PhaseThreeReleasePlan.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/libraries/Pool.sol",
+      "specifier": "@uniswap/v4-core/src/libraries/Pool.sol"
+    },
+    {
+      "importer": "packages/contracts/test/release/PhaseThreeReleasePlan.t.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/libraries/Pool.sol",
+      "specifier": "@uniswap/v4-core/src/libraries/Pool.sol"
+    },
+    {
       "importer": "packages/contracts/lib/v4-periphery/src/PositionManager.sol",
       "kind": "solidity-remapped-import",
       "remappingPrefix": "@uniswap/v4-core/",
@@ -1492,6 +1509,14 @@
     },
     {
       "importer": "packages/contracts/test/release/PhaseThreePriceOracle.t.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/libraries/SqrtPriceMath.sol",
+      "specifier": "@uniswap/v4-core/src/libraries/SqrtPriceMath.sol"
+    },
+    {
+      "importer": "packages/contracts/test/release/PhaseThreeReleasePlan.t.sol",
       "kind": "solidity-remapped-import",
       "remappingPrefix": "@uniswap/v4-core/",
       "remappingTarget": "packages/contracts/lib/v4-core/",
@@ -1604,6 +1629,14 @@
     },
     {
       "importer": "packages/contracts/test/release/PhaseThreePriceOracle.t.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/libraries/TickMath.sol",
+      "specifier": "@uniswap/v4-core/src/libraries/TickMath.sol"
+    },
+    {
+      "importer": "packages/contracts/test/release/PhaseThreeReleasePlan.t.sol",
       "kind": "solidity-remapped-import",
       "remappingPrefix": "@uniswap/v4-core/",
       "remappingTarget": "packages/contracts/lib/v4-core/",
@@ -2388,8 +2421,8 @@
     }
   ],
   "javascriptImportResolutions": [],
-  "reviewTargetHash": "sha256:9ebb55727ce46f933f0cb6930028f44a0e0f13f85626cf63dde26faf1300d094",
+  "reviewTargetHash": "sha256:88792a5684980d8616a0de9d5f75c87cf50d8d7613b659c59316c12e7fb74ba3",
   "schemaVersion": 1,
   "standardVersion": "1.5.0",
-  "submissionHash": "sha256:2050a999d23af7df709e8454621feed76eb76c74168d32b9330eea4485168c75"
+  "submissionHash": "sha256:5461af38d410b902c6133bcfe19c5c0a39b3b3a58adfc5bd7e892d70ccd7cdfe"
 }

@@ -6,7 +6,7 @@ import { spawnSync } from 'node:child_process';
 import test from 'node:test';
 
 import {
-  deriveReleasePackageClosure, runVendoredPackageVerifier, verifyVendoredReviewTargetBuilder,
+  deriveReleasePackageClosure, runVendoredPackageVerifier, verifyVendoredReviewTargetBuilder, validateSubmissionFeeOrdering,
 } from '../verify-release-package-closure.mjs';
 import { scanTree } from '../check-cleanroom.mjs';
 
@@ -278,5 +278,24 @@ test('the release closure verifier rejects closure metadata and resolution mutat
     }
   } finally {
     rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('fee-ordering closure accepts only a fully unselected zero-native draft', () => {
+  const inputs = JSON.parse(readFileSync(resolve(root, 'release/phase3/launch-inputs.json')));
+  const submission = JSON.parse(readFileSync(resolve(root, 'release/phase3/submission.json')));
+  assert.doesNotThrow(() => validateSubmissionFeeOrdering(inputs, submission));
+  for (const mutate of [
+    value => { value.pool.fullRange.minimumTick = -887220; },
+    value => { value.pool.fullRange.maximumTick = 60; },
+    value => { value.seed.nativeFunding.amountWei = '1'; },
+    value => { value.pool.quoteAsset.amountAtomic = '1'; },
+    value => { value.pool.priceCandidates.selection.status = 'DERIVED'; },
+    value => { value.pool.priceCandidates.selection.poolKey = '0x00'; },
+    value => { value.pool.priceCandidates.selection.poolId = '0x00'; },
+    value => { value.pool.priceCandidates.selection.selectedSqrtPriceX96 = '1'; },
+  ]) {
+    const changed = structuredClone(inputs); mutate(changed);
+    assert.throws(() => validateSubmissionFeeOrdering(changed, submission));
   }
 });

@@ -22,6 +22,7 @@ function validConfiguration(overrides = {}) {
     maxUnitPriceMicroUsd: '25000000',
     maxCycleBudgetMicroUsd: '25500000',
     max24HourBudgetMicroUsd: '1836000000',
+    processClaimLimit6hMicroUsd: '25000000000',
     paused: false,
     liveMode: false,
     maxCyclesPerDay: 10,

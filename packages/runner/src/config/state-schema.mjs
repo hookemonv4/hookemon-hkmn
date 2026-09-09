@@ -21,6 +21,7 @@ const configurationFields = [
   'maxUnitPriceMicroUsd',
   'maxCycleBudgetMicroUsd',
   'max24HourBudgetMicroUsd',
+  'processClaimLimit6hMicroUsd',
   'paused',
   'liveMode',
   'maxCyclesPerDay',
@@ -218,9 +219,15 @@ function assertSpendLedger(value, cycleLedger) {
  * schema-clean copy. Throws on any violation; never mutates its input.
  */
 export function assertOperatorConfiguration(value) {
+  if (value?.schema === OPERATOR_CONFIGURATION_SCHEMA && !Object.hasOwn(value, 'processClaimLimit6hMicroUsd')) {
+    value = { ...value, processClaimLimit6hMicroUsd: '25000000000' };
+  }
   assertNoSecretMaterial(value, 'operator configuration');
   assertExactPlainObject(value, configurationFields, 'operator configuration');
   if (value.schema !== OPERATOR_CONFIGURATION_SCHEMA) throw new Error('operator configuration schema is invalid');
+
+  const processClaimLimit6hMicroUsd = assertMicroUsdAmount(value.processClaimLimit6hMicroUsd, 'operator configuration processClaimLimit6hMicroUsd');
+  if (processClaimLimit6hMicroUsd > 50_000_000_000n) throw new Error('operator configuration processClaimLimit6hMicroUsd exceeds the fixed hard cap');
 
   const intervalMinutes = assertIntegerInRange(value.intervalMinutes, 'operator configuration intervalMinutes', {
     min: minimumIntervalMinutes,
@@ -294,6 +301,7 @@ export function assertOperatorConfiguration(value) {
     maxUnitPriceMicroUsd: value.maxUnitPriceMicroUsd,
     maxCycleBudgetMicroUsd: value.maxCycleBudgetMicroUsd,
     max24HourBudgetMicroUsd: value.max24HourBudgetMicroUsd,
+    processClaimLimit6hMicroUsd: value.processClaimLimit6hMicroUsd,
     paused,
     liveMode,
     maxCyclesPerDay,
@@ -331,6 +339,7 @@ export function createDefaultOperatorConfiguration() {
     maxUnitPriceMicroUsd: '0',
     maxCycleBudgetMicroUsd: '0',
     max24HourBudgetMicroUsd: '0',
+    processClaimLimit6hMicroUsd: '25000000000',
     paused: false,
     liveMode: DEFAULT_LIVE_MODE,
     maxCyclesPerDay: 0,
@@ -359,12 +368,12 @@ export function migrateOperatorConfiguration(value) {
   if ([legacyConfigurationSchema, 'hookemon.operator-configuration.v5'].includes(value?.schema)) {
     assertNoSecretMaterial(value, 'legacy operator configuration');
     const v4 = value.schema === legacyConfigurationSchema;
-    assertExactPlainObject(value, configurationFields.filter(field => field !== 'rewardRecipientLimit' && (!v4 || field !== 'packPlan')), 'legacy operator configuration');
+    assertExactPlainObject(value, configurationFields.filter(field => field !== 'processClaimLimit6hMicroUsd' && field !== 'rewardRecipientLimit' && (!v4 || field !== 'packPlan')), 'legacy operator configuration');
     const configuration = assertOperatorConfiguration({ ...value, schema: OPERATOR_CONFIGURATION_SCHEMA,
       packPlan: v4 ? createEmptyPackPlan() : value.packPlan, rewardRecipientLimit: DEFAULT_REWARD_RECIPIENT_LIMIT });
     return Object.freeze({ configuration, migrated: true });
   }
-  return Object.freeze({ configuration: assertOperatorConfiguration(value), migrated: false });
+  return Object.freeze({ configuration: assertOperatorConfiguration(value), migrated: !Object.hasOwn(value, 'processClaimLimit6hMicroUsd') });
 }
 
 export function decodeHistoricalOperatorConfiguration(value) {

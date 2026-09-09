@@ -101,3 +101,5 @@ node --test --test-timeout=120000 packages/runner/test/operator/control.test.mjs
 Active operator monetary controls use USD micro-units (`*MicroUsd`). Cycle reservations keep
 `releaseAmountWei` distinct from `releaseCostMicroUsd`; cap usage reads the USD spend ledger.
 Native principal and gas never enter a USD cap field without authenticated valuation.
+
+The managed claim path uses the durable [Process USD budget](process-usd-budget.md). `processClaimLimit6hMicroUsd` defaults to USD25,000, accepts zero, and is owner-adjustable up to USD50,000; it does not replace the other spend controls.

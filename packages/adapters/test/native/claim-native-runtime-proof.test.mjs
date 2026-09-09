@@ -52,7 +52,7 @@ test('reverted native claim records authenticated gas once without crediting pri
     evm: { perTransactionGasPriceCap: amount(eth, '100'), nativeReserve: amount(eth, '30000') },
     solana: { priorityFeeCap: amount({ chainId: sol.chainId, assetId: 'microlamports-per-compute-unit', decimals: 0 }, '100'), lamportReserve: amount({ chainId: sol.chainId, assetId: 'native', decimals: 9 }, '200') } } };
   let ledger = null;
-  const repository = { describeCycle: async () => ({ admission: { schema: 'hookemon.policy-admission.v3' }, releaseAmount: '42',
+  const repository = { finalizeProcessClaimUsd: async (_id, { proof }) => assert.equal(proof.receiptStatus, 'reverted'), describeCycle: async () => ({ admission: { schema: 'hookemon.policy-admission.v3' }, releaseAmount: '42',
       custodyLedgers: new Map(ledger ? [['4663\u0000native', structuredClone(ledger)]] : []),
       chainAttempts: new Map([['claim', { attempt: { stage: 'claim-process', state: 'BROADCAST', hash: input.expected.transactionHash, rawBytes: input.signedTransaction, requestDigest: 'synthetic' } }]]) }),
     readStage: async () => ({ status: 'COMPLETE' }), readClaimPreconditions: async () => ({}),

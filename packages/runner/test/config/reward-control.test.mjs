@@ -19,7 +19,7 @@ test('recipient control accepts every option, preserves revisions and rejects co
 
 test('native migrations default future selection while preserving safety and pack revision', () => {
   const configured = applyOperatorConfiguration(createDefaultOperatorConfiguration(), { packPlan: { orders: [{ pack: 'alpha', quantity: 2 }] }, paused: true, executionPaused: true });
-  const { rewardRecipientLimit, ...v5 } = configured;
+  const { rewardRecipientLimit, processClaimLimit6hMicroUsd, ...v5 } = configured;
   v5.schema = 'hookemon.operator-configuration.v5';
   assert.deepEqual(migrateOperatorConfiguration(v5), { configuration: configured, migrated: true });
   const { packPlan, ...v4 } = v5;
@@ -27,6 +27,7 @@ test('native migrations default future selection while preserving safety and pac
   const result = migrateOperatorConfiguration(v4).configuration;
   assert.equal(result.configurationRevision, configured.configurationRevision);
   assert.equal(result.rewardRecipientLimit, 200);
+  assert.equal(result.processClaimLimit6hMicroUsd, '25000000000');
   assert.equal(result.paused, true);
   assert.deepEqual(result.packPlan.orders, []);
   assert.throws(() => migrateOperatorConfiguration({ ...v5, unexpected: 1 }));
