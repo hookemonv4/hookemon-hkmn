@@ -335,6 +335,7 @@ export async function preparePurchaseRequest({ adapters, config, cycleRepository
     operation: 'purchase',
     playerAddress,
     quantity,
+    ...(quantity === 1 ? { generation: { endpoint: 'generatePack', turbo: false } } : {}),
     ...(bounds === null ? {} : bounds),
   };
   if (typeof packType !== 'string' || packType.length === 0) return request;
@@ -418,6 +419,13 @@ export async function mutatePurchase({ liveMode, adapters, signerClient, config,
   let legacyPolicy = null;
   let admittedUnitAmountAtomic = null;
   if (batch === null) {
+    // New single-pack requests bind the endpoint and mode in the durable stage request.
+    // An older request without this field retains its original batch semantics.
+    const generation = prepared.generation;
+    if (generation !== undefined && (!exactKeysOnly(generation, ['endpoint', 'turbo'])
+      || generation.endpoint !== 'generatePack' || generation.turbo !== false || quantity !== 1)) {
+      throw new Error('purchase generation must bind one non-turbo generatePack request');
+    }
     requireCollectorOnlyMutationAuthority(config, preflightAuthority);
 
     // Canonical typed-money validation of the immutable admitted per-pack amount, and proof its
@@ -470,6 +478,10 @@ export async function mutatePurchase({ liveMode, adapters, signerClient, config,
       legacyPolicy = requirePolicy(config, 'purchase');
     }
 
+    if (generation !== undefined && typeof adapters.collectorCrypt.generatePack !== 'function') {
+      throw new Error('purchase requires the bound generatePack transport');
+    }
+
     // Persist exactly what is about to be requested -- cycle, quantity, and pack code -- before
     // the batch call itself. If the call's response is lost with no memo at all, this durable,
     // human-readable intent (not just the generic stage attempt's opaque request digest) is what
@@ -481,11 +493,17 @@ export async function mutatePurchase({ liveMode, adapters, signerClient, config,
       playerAddress: prepared.playerAddress,
     });
 
-    const generated = await adapters.collectorCrypt.generateYoloPacks({
-      playerAddress: prepared.playerAddress,
-      quantity,
-      ...(prepared.packType ? { packType: prepared.packType } : {}),
-    });
+    const generated = generation === undefined
+      ? await adapters.collectorCrypt.generateYoloPacks({
+        playerAddress: prepared.playerAddress,
+        quantity,
+        ...(prepared.packType ? { packType: prepared.packType } : {}),
+      })
+      : { packs: [await adapters.collectorCrypt.generatePack({
+        playerAddress: prepared.playerAddress,
+        turbo: false,
+        ...(prepared.packType ? { packType: prepared.packType } : {}),
+      })] };
     unsignedTransactionsByMemo = new Map(generated.packs.map(pack => [pack.memo, pack.transaction]));
     const packs = generated.packs.map((pack, packIndex) => ({
       packIndex,
@@ -565,11 +583,14 @@ export async function mutatePurchase({ liveMode, adapters, signerClient, config,
 }
 
 async function reconcilePack({ adapters, config, context, asset, pack, playerAddress, deadlineSinceMs, unitPurchase = null }) {
+  const unresolved = reason => pastDeadline(deadlineSinceMs, config, context)
+    ? { determined: true, outcome: 'anomaly', evidence: { reason, memo: pack.memo } }
+    : { determined: false };
   let packStatus;
   try {
     packStatus = await adapters.collectorCrypt.getPackStatus({ memo: pack.memo });
   } catch {
-    return { determined: false };
+    return unresolved('provider pack status remained unavailable past the reconcile deadline');
   }
   if (packStatus.memo !== pack.memo) {
     return { determined: true, outcome: 'anomaly', evidence: { reason: 'pack status memo did not match', packStatus } };
@@ -578,10 +599,10 @@ async function reconcilePack({ adapters, config, context, asset, pack, playerAdd
     if (!pastDeadline(deadlineSinceMs, config, context)) return { determined: false };
     return {
       determined: true,
-      outcome: 'notPurchased',
+      outcome: 'anomaly',
       packIndex: pack.packIndex,
       memo: pack.memo,
-      evidence: { reason: 'no provider purchase evidence before the reconcile deadline' },
+      evidence: { reason: 'missing provider evidence cannot prove that no purchase debit occurred' },
     };
   }
   if (!plainObject(packStatus.pack) || typeof packStatus.pack.transaction_signature !== 'string'
@@ -593,9 +614,9 @@ async function reconcilePack({ adapters, config, context, asset, pack, playerAdd
   try {
     signatureStatus = await readFinalizedSignatureStatus(adapters.solana.client, signature);
   } catch {
-    return { determined: false };
+    return unresolved('purchase signature lookup remained unavailable past the reconcile deadline');
   }
-  if (signatureStatus === null) return { determined: false };
+  if (signatureStatus === null) return unresolved('purchase signature remained unfinalized past the reconcile deadline');
   if (signatureStatus.err) {
     return {
       determined: true,
@@ -609,7 +630,7 @@ async function reconcilePack({ adapters, config, context, asset, pack, playerAdd
   try {
     entries = await getFinalizedTokenBalanceChanges(adapters.solana.client, signature);
   } catch {
-    return { determined: false };
+    return unresolved('purchase settlement evidence remained unavailable past the reconcile deadline');
   }
   const debits = entries.filter(entry => entry.owner === playerAddress && entry.mint === asset.assetId && BigInt(entry.postAmount) < BigInt(entry.preAmount));
   if (debits.length !== 1) {
