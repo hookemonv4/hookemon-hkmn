@@ -1,3 +1,5 @@
+import { createRewardSelectionSnapshot, assertRewardSelectionSnapshot } from '../../../runner/src/automation/reward-selection-snapshot.mjs';
+import { createEligibilityPayoutManifest } from '../../../runner/src/distribution/pro-rata.mjs';
 import { assertPackPlanSnapshot, createPackPlanSnapshot } from '../../../runner/src/automation/pack-plan-snapshot.mjs';
 import { isProcessQuoteUsdValuation, readProcessQuoteUsdProvenance, relayQuoteDigest, parseQuoteResponse } from '../relay-client.mjs';
 import { requireLiveMutationAuthority, createTestProfileMutationAuthority } from '../../../runner/src/cycle/preflight.mjs';
@@ -3167,6 +3169,17 @@ function applyPackOrderEvent({ admission, cycleId, payload, kind, intents, reque
   }
 }
 
+function assertCycleRewardSelectionEvidence(cycleId, rewardSelection, evidence) {
+  if (rewardSelection === null && evidence?.schema !== 'hookemon.eligibility-payout-manifest.v2') return;
+  if (rewardSelection === null || evidence?.schema !== 'hookemon.eligibility-payout-manifest.v2'
+    || evidence.cycleId !== cycleId
+    || canonicalJson(evidence.selection?.rewardSelection ?? null) !== canonicalJson(rewardSelection)) {
+    throw new Error('eligibility selection does not match the frozen cycle policy');
+  }
+  const { schema, ...input } = evidence;
+  createEligibilityPayoutManifest(input);
+}
+
 export class CycleRepository {
   #store;
   #now;
@@ -3352,6 +3365,7 @@ export class CycleRepository {
     let releaseAmount = null;
     let admission = null;
     let packPlanSnapshot = null;
+    let rewardSelection = null;
     let nativeAdmissionProvenance = null;
     let mode = null;
     let providerMode = null;
@@ -3368,6 +3382,9 @@ export class CycleRepository {
       }
       if (entry.kind === 'cycle-opened') {
         if (releaseAmount !== null) throw new Error('stored cycle has a second cycle-opened event');
+        if (Object.hasOwn(entry.payload, 'rewardSelection')) {
+          rewardSelection = assertRewardSelectionSnapshot(entry.payload.rewardSelection, { cycleId });
+        }
         if (Object.hasOwn(entry.payload, 'packPlanSnapshot')) {
           packPlanSnapshot = assertPackPlanSnapshot(entry.payload.packPlanSnapshot, { cycleId });
         }
@@ -4177,6 +4194,11 @@ export class CycleRepository {
         terminalAtMs = assertOptionalTerminalAtMs(entry.payload.completedAtMs, 'stored cycle-completed event');
       }
     }
+    const frozenEligibility = stages.get('eligibility-snapshot');
+    if (frozenEligibility?.status === 'COMPLETE') {
+      assertCycleRewardSelectionEvidence(cycleId, rewardSelection,
+        await this.#resolveStageEvidence(cycleId, 'eligibility-snapshot', frozenEligibility.evidence));
+    }
     this.#restoreAdmissionValuations(admission, nativeAdmissionProvenance);
     return {
       cycleId,
@@ -4187,6 +4209,7 @@ export class CycleRepository {
       rehearsalSessionId,
       admission,
       packPlanSnapshot,
+      rewardSelection,
       stages,
       preparedStages,
       attempts,
@@ -4313,6 +4336,7 @@ export class CycleRepository {
       }
       const profile = {
         ...(state.packPlanSnapshot === null ? {} : { packPlanSnapshot: state.packPlanSnapshot }),
+        ...(state.rewardSelection === null ? {} : { rewardSelection: structuredClone(state.rewardSelection) }),
         ...(state.providerMode === null ? {} : { providerMode: state.providerMode }),
         ...(state.dryRun ? { dryRun: true } : {}),
         ...(state.rehearsalSessionId === null ? {} : { rehearsalSessionId: state.rehearsalSessionId }),
@@ -4357,7 +4381,7 @@ export class CycleRepository {
 
   async createCycle({
     releaseAmount, mode, providerMode = null, dryRun = false, rehearsalSessionId = null,
-    cycleId = null, admission = null, operations = null, packPlan,
+    cycleId = null, admission = null, operations = null, packPlan, rewardRecipientLimit, configurationRevision,
   }) {
     assertReleaseAmount(releaseAmount);
     assertCycleMode(mode);
@@ -4367,6 +4391,10 @@ export class CycleRepository {
     const active = await this.readActiveCycle();
     if (active) throw new Error('cycle-repository createCycle: a cycle is already active');
     const openedCycleId = cycleId === null ? generateCycleId(this.#now()) : assertReservedCycleId(cycleId);
+    if (rewardRecipientLimit === undefined && configurationRevision !== undefined) throw new Error('cycle reward configuration revision requires a recipient limit');
+    const rewardSelection = rewardRecipientLimit === undefined ? null : createRewardSelectionSnapshot({
+      cycleId: openedCycleId, rewardRecipientLimit, configurationRevision,
+    });
     const packPlanSnapshot = packPlan === undefined
       ? null
       : createPackPlanSnapshot({ cycleId: openedCycleId, plan: packPlan });
@@ -4404,6 +4432,7 @@ export class CycleRepository {
       ...(rehearsalSessionId === null ? {} : { rehearsalSessionId }),
       ...(admitted === null ? {} : { admission: admitted }),
       ...(packPlanSnapshot === null ? {} : { packPlanSnapshot }),
+      ...(rewardSelection === null ? {} : { rewardSelection: structuredClone(rewardSelection) }),
       ...(nativeAdmissionProvenance === null ? {} : { nativeAdmissionProvenance }),
       openedAtMs: this.#now(),
     });
@@ -4411,6 +4440,7 @@ export class CycleRepository {
       cycleId: openedCycleId, releaseAmount, mode, providerMode, dryRun, rehearsalSessionId,
       admission: (await this.#replay(openedCycleId)).admission,
       ...(packPlanSnapshot === null ? {} : { packPlanSnapshot }),
+      ...(rewardSelection === null ? {} : { rewardSelection: structuredClone(rewardSelection) }),
     };
   }
 
@@ -4692,6 +4722,7 @@ export class CycleRepository {
       }
       return; // idempotent retry
     }
+    if (stage === 'eligibility-snapshot') assertCycleRewardSelectionEvidence(cycleId, state.rewardSelection, evidence);
     assertPreparedOrderedCompletion(state, stage);
     assertReconciledCompletion(state, stage, evidence);
     const storedEvidence = await this.#preparePagedStageEvidence(cycleId, stage, evidence);

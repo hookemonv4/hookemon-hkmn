@@ -1,3 +1,4 @@
+import { createRewardSelectionSnapshot } from '../../src/automation/reward-selection-snapshot.mjs';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
@@ -23,10 +24,11 @@ class MemoryCycleRepository {
   created = [];
 
   async readActiveCycle() { return this.active; }
-  async createCycle({ releaseAmount, mode, providerMode = null, rehearsalSessionId = null, packPlan }) {
+  async createCycle({ releaseAmount, mode, providerMode = null, rehearsalSessionId = null, packPlan, rewardRecipientLimit, configurationRevision }) {
     if (this.active !== null) throw new Error('active cycle exists');
     this.active = { cycleId: `cycle-${this.next++}`, releaseAmount, mode, providerMode, rehearsalSessionId };
     if (packPlan !== undefined) this.active.packPlanSnapshot = { plan: structuredClone(packPlan) };
+    if (rewardRecipientLimit !== undefined) this.active.rewardSelection = createRewardSelectionSnapshot({ cycleId: this.active.cycleId, rewardRecipientLimit, configurationRevision });
     this.created.push(structuredClone(this.active));
     this.stages.set(this.active.cycleId, new Map());
     return structuredClone(this.active);
@@ -60,7 +62,7 @@ const readyBudget = () => ({
   activeCycleId: null,
 });
 
-function fixture({ readPackPlan, budget = readyBudget(), crashStage = null, liveMode = false, mode = undefined, providerMode = undefined, policyEngine = undefined, packId = undefined, recoveryGuard = undefined, beforeComplete = undefined, now = () => 1_000, stageContextSink = undefined } = {}) {
+function fixture({ readCycleConfiguration, readPackPlan, budget = readyBudget(), crashStage = null, liveMode = false, mode = undefined, providerMode = undefined, policyEngine = undefined, packId = undefined, recoveryGuard = undefined, beforeComplete = undefined, now = () => 1_000, stageContextSink = undefined } = {}) {
   const leaseStore = new MemoryLeaseStore();
   const cycles = new MemoryCycleRepository();
   const executions = [];
@@ -99,6 +101,7 @@ function fixture({ readPackPlan, budget = readyBudget(), crashStage = null, live
     },
     feeSettlementObserver: { observe: async cycleId => ({ cycleId, status: 'PENDING_BENEFICIARY_CLAIMS' }) },
   };
+  if (readCycleConfiguration !== undefined) serviceConfig.readCycleConfiguration = readCycleConfiguration;
   if (readPackPlan !== undefined) serviceConfig.readPackPlan = readPackPlan;
   if (policyEngine !== undefined) serviceConfig.policyEngine = policyEngine;
   if (packId !== undefined) serviceConfig.packId = packId;
@@ -755,5 +758,25 @@ test('edit after cycle starts does not reread or rewrite its frozen plan during 
 test('empty selected plan starts no cycle even when a legacy pack is configured', async () => {
   const { service, cycles } = fixture({ packId: 'legacy-pack', readPackPlan: async () => ({ schema: 'hookemon.pack-plan.v1', revision: 2, orders: [] }) });
   assert.equal((await service.runOnce()).status, 'WAITING_FOR_ADMISSION');
+  assert.equal(cycles.created.length, 0);
+});
+
+// REQ-cycle-runner-3 revision72: one persisted selection survives changed settings.
+test('one authoritative config read freezes selection before a crash and resumed stages reuse it', async () => {
+  let reads = 0;
+  const configuration = { configurationRevision: 7, rewardRecipientLimit: 300, packPlan: { schema: 'hookemon.pack-plan.v1', revision: 1, orders: [{ pack: 'pack-a', quantity: 1 }] } };
+  const contexts = [];
+  const { service, cycles } = fixture({ readCycleConfiguration: async () => { reads++; return configuration; }, crashStage: 'claim-process', stageContextSink: c => contexts.push(c) });
+  await assert.rejects(service.runOnce({}), /simulated crash/);
+  const frozen = structuredClone(cycles.active.rewardSelection);
+  configuration.rewardRecipientLimit = 600; configuration.configurationRevision++;
+  assert.equal((await service.runOnce({})).status, 'COMPLETE');
+  assert.equal(reads, 1);
+  assert.equal(frozen.rewardRecipientLimit, 300);
+  assert.ok(contexts.every(context => context.rewardSelection.digest === frozen.digest));
+});
+test('an explicit missing configuration cannot open an unbound new cycle', async () => {
+  const { service, cycles } = fixture({ readCycleConfiguration: async () => null });
+  assert.equal((await service.runOnce({})).status, 'WAITING_FOR_CONFIGURATION');
   assert.equal(cycles.created.length, 0);
 });

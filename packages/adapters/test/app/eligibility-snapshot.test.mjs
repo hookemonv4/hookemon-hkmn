@@ -1,3 +1,4 @@
+import { createRewardSelectionSnapshot } from '../../../runner/src/automation/reward-selection-snapshot.mjs';
 import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -857,3 +858,36 @@ test('does not write an unfenced terminal hold after the snapshot lease is lost'
   );
   assert.equal(cycleRepository.holds.length, 0);
 });
+
+for (const limit of [100,200,300,400,500,600]) {
+  test(`selection ${limit} retains full replay evidence and durable frozen policy`, async t => {
+    const directory = await mkdtemp(join(tmpdir(), 'selected-eligibility-'));
+    t.after(() => rm(directory, { recursive: true, force: true }));
+    const repository = await CycleRepository.open(directory, () => 1000);
+    const cycle = await repository.createCycle({ cycleId: `selected-${limit}`, releaseAmount: '1', mode: 'production', rewardRecipientLimit: limit, configurationRevision: 1 });
+    const logs = Array.from({ length: limit + 1 }, (_, i) => rawTransfer({ blockNumber: 1, logIndex: i, from: ZERO_ADDRESS, to: `0x${(i+1).toString(16).padStart(40,'0')}`, value: 1 }));
+    logs.push(rawTransfer({ blockNumber: 1, logIndex: limit + 1, from: ZERO_ADDRESS, to: OPERATIONS, value: 9 }));
+    const client = fakeRpc({ logs });
+    const config = baseConfig();
+    config.eligibilitySnapshot.launchManifest.supply.amountAtomic = String(limit + 10);
+    config.eligibilitySnapshot.launchManifestDigest = launchManifestDigest(config.eligibilitySnapshot.launchManifest);
+    config.eligibilitySnapshot.feasibility.nativeBalanceWei = String(BigInt(limit)*100000n + 10n);
+    const evidence = await freezeEligibilityBeforeClaim({ adapters: dualSourceAdapters(client), config, context: { cycleId: cycle.cycleId, rewardSelection: cycle.rewardSelection } });
+    assert.equal(evidence.schema, 'hookemon.eligibility-payout-manifest.v2');
+    assert.equal(evidence.entries.length, limit);
+    assert.equal(evidence.selection.holderSnapshot.holderCount, limit + 1);
+    assert.equal(evidence.selection.excludedBalanceTotal.amountAtomic, '9');
+    assert.equal(evidence.selection.unselectedEligibleBalanceTotal.amountAtomic, '1');
+    assert.equal(evidence.feasibility.transactionCount, limit);
+    await repository.prepareStage(cycle.cycleId, 'eligibility-snapshot');
+    const other = structuredClone(evidence);
+    other.selection.rewardSelection = createRewardSelectionSnapshot({ cycleId: cycle.cycleId, configurationRevision: 2, rewardRecipientLimit: limit });
+    await assert.rejects(repository.completeStage(cycle.cycleId, 'eligibility-snapshot', other), /frozen cycle policy/);
+    await repository.completeStage(cycle.cycleId, 'eligibility-snapshot', evidence);
+    const restarted = await CycleRepository.open(directory, () => 2000);
+    assert.deepEqual((await restarted.readStage(cycle.cycleId, 'eligibility-snapshot')).evidence, evidence);
+    assert.deepEqual((await restarted.readActiveCycle()).rewardSelection, cycle.rewardSelection);
+    config.eligibilitySnapshot.feasibility.nativeBalanceWei = '1';
+    await assert.rejects(freezeEligibilityBeforeClaim({ adapters: dualSourceAdapters(client), config, context: { cycleId: cycle.cycleId, rewardSelection: cycle.rewardSelection } }), /feasibility/);
+  });
+}

@@ -1719,7 +1719,7 @@ export async function compose(config) {
       now,
       leaseStore,
       budgetReader: buildBudgetReader({ config: resolved, cycleRepository, readConfiguration, liveMode }),
-      ...(liveMode ? { readPackPlan: async () => (await readConfiguration())?.packPlan ?? { schema: 'hookemon.pack-plan.v1', revision: 0, orders: [] } } : {}),
+      ...(liveMode ? { readCycleConfiguration: readConfiguration } : {}),
       // Only a live production cycle with a resolved money configuration and Operations accounts is
       // quote-bound: those are what a quote is denominated in and routed to, so a composition
       // without them has nothing to price. Rehearsal, dry-run and such partial compositions keep the

@@ -307,7 +307,7 @@ function assertRequest(value) {
     payoutSourceDigest: value.payoutSourceDigest,
   });
   if (!value.plan || typeof value.plan !== 'object' || Array.isArray(value.plan)
-    || value.plan.schema !== 'hookemon.supplementary-direct-payout-plan.v2'
+    || !['hookemon.supplementary-direct-payout-plan.v2', 'hookemon.supplementary-direct-payout-plan.v3'].includes(value.plan.schema)
     || value.plan.cycleId !== settlement.cycleId
     || value.plan.manifestId !== settlement.manifestId
     || value.plan.supplementaryIndex !== settlement.supplementaryIndex

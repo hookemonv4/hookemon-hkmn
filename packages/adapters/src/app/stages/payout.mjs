@@ -294,7 +294,8 @@ function rebuildPlanFromFrozenEvidence(value) {
   return compileDirectPayoutPlan({
     cycleId: value.cycleId,
     eligibilityManifest: {
-      schema: 'hookemon.eligibility-payout-manifest.v1',
+      schema: value.schema === 'hookemon.direct-payout-plan.v3' ? 'hookemon.eligibility-payout-manifest.v2' : 'hookemon.eligibility-payout-manifest.v1',
+      ...(value.schema === 'hookemon.direct-payout-plan.v3' ? { selection: eligibility?.selection } : {}),
       cycleId: value.cycleId,
       snapshotBlock: eligibility?.snapshotBlock,
       snapshotHash: eligibility?.snapshotHash,
@@ -330,7 +331,7 @@ function assertPlan(value) {
   if (Object.keys(value).length !== PLAN_FIELDS.length || !PLAN_FIELDS.every(field => Object.hasOwn(value, field))) {
     fail('direct payout plan must use the immutable plan schema');
   }
-  if (value.schema !== 'hookemon.direct-payout-plan.v2') fail('direct payout plan schema is invalid');
+  if (!['hookemon.direct-payout-plan.v2', 'hookemon.direct-payout-plan.v3'].includes(value.schema)) fail('direct payout plan schema is invalid');
   if (typeof value.cycleId !== 'string' || value.cycleId.length === 0) fail('direct payout plan cycleId is invalid');
   if (typeof value.planDigest !== 'string' || !DIGEST.test(value.planDigest)) fail('direct payout plan digest is invalid');
   if (!Array.isArray(value.allocations)) fail('direct payout plan allocations are invalid');

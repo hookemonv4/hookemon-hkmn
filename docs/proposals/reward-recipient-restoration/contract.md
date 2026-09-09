@@ -1,8 +1,8 @@
 # Native reward recipient restoration
 
-Status: proposed compatibility contract, pending owner approval. No restoration implementation or deployment is included.
+Status: owner-approved compatibility contract. The owner answered "ja" to the explicit approval question for this contract and its proposed spec revision on 2026-09-09 in task 01a083d9-313d-7511-b041-5a9630e6b6a1. Implementation is in progress; this is not deployment evidence.
 
-Baseline: origin/main `20eb8e4e`, requirements revision 71. Historical selection references: `07203cd64892ca3620bc4cdb960d38f9ad9f0dd0` and `69f8b71c`. The accompanying `requirements.patch` proposes revision 72 and changes only REQ-dashboard-2, REQ-cycle-runner-3, REQ-eligibility-snapshot-1 and REQ-direct-payout-1. Rebase the proposal if main's requirements advance; never overwrite another revision.
+Baseline: origin/main `20eb8e4e`, requirements revision 71. Historical selection references: `07203cd64892ca3620bc4cdb960d38f9ad9f0dd0` and `69f8b71c`. The accompanying `requirements.patch` records the approved revision 72 and changes only REQ-dashboard-2, REQ-cycle-runner-3, REQ-eligibility-snapshot-1 and REQ-direct-payout-1. Rebase the proposal if main's requirements advance; never overwrite another revision.
 
 ## Financial compatibility
 

@@ -1,3 +1,4 @@
+import { assertRewardRecipientLimit } from '../config/reward-recipient-selection.mjs';
 import { assertPackPlan } from '../config/pack-plan.mjs';
 import { decideCycleBudget } from './budget-gate.mjs';
 import { acquireLease, assertLeaseCurrent, releaseLease, renewLease } from './exclusive-lease.mjs';
@@ -80,6 +81,7 @@ export class AutomatedCycleService {
   #providerMode;
   #packId;
   #readPackPlan;
+  #readCycleConfiguration;
   #policyEngine;
   #policyCapMicroUsd;
   #recoveryGuard;
@@ -103,7 +105,7 @@ export class AutomatedCycleService {
       'feeSettlementObserver',
       'liveMode',
     ];
-    const optionalFields = ['readPackPlan', 'packId', 'policyEngine', 'mode', 'providerMode', 'dryRun', 'policyCapMicroUsd', 'recoveryGuard', 'beforeComplete', 'beforeMutation', 'rehearsalSessionId', 'admissionPlanner', 'quoteRefreshPlanner', 'operationsAccounts'];
+    const optionalFields = ['readCycleConfiguration', 'readPackPlan', 'packId', 'policyEngine', 'mode', 'providerMode', 'dryRun', 'policyCapMicroUsd', 'recoveryGuard', 'beforeComplete', 'beforeMutation', 'rehearsalSessionId', 'admissionPlanner', 'quoteRefreshPlanner', 'operationsAccounts'];
     const keys = Object.keys(config);
     if (!requiredFields.every(field => Object.hasOwn(config, field)) || keys.some(field => !requiredFields.includes(field) && !optionalFields.includes(field))) {
       throw new Error('automated cycle service configuration must use the exact schema');
@@ -161,7 +163,7 @@ export class AutomatedCycleService {
       throw new Error('automated cycle service policyCapMicroUsd must be a canonical unsigned decimal string');
     }
     if (liveMode && policyEngine === null) throw new Error('live automated cycle service requires a policyEngine');
-    if (liveMode && typeof config.readPackPlan !== 'function' && (typeof config.packId !== 'string' || config.packId.length === 0)) {
+    if (liveMode && typeof config.readCycleConfiguration !== 'function' && typeof config.readPackPlan !== 'function' && (typeof config.packId !== 'string' || config.packId.length === 0)) {
       throw new Error('live automated cycle service requires a policy packId');
     }
     if (config.packId !== undefined && (typeof config.packId !== 'string' || config.packId.length === 0)) {
@@ -174,6 +176,9 @@ export class AutomatedCycleService {
     this.#packId = config.packId ?? null;
     if (config.readPackPlan !== undefined && typeof config.readPackPlan !== 'function') throw new Error('readPackPlan must be a function');
     this.#readPackPlan = config.readPackPlan ?? null;
+    if (config.readCycleConfiguration !== undefined && typeof config.readCycleConfiguration !== 'function') throw new Error('readCycleConfiguration must be a function');
+    if (config.readCycleConfiguration && config.readPackPlan) throw new Error('cycle configuration and pack plan must share one reader');
+    this.#readCycleConfiguration = config.readCycleConfiguration ?? null;
     this.#policyEngine = policyEngine;
     this.#policyCapMicroUsd = config.policyCapMicroUsd ?? null;
     this.#recoveryGuard = config.recoveryGuard ?? null;
@@ -399,7 +404,14 @@ export class AutomatedCycleService {
         }
         // Only now is the cycle worth pricing. The identifier is reserved rather than invented so
         // one identity spans plan, evaluation and creation; an unused reservation journals nothing.
-        const packPlan = this.#readPackPlan === null ? undefined : assertPackPlan(await this.#readPackPlan());
+        const cycleConfiguration = this.#readCycleConfiguration === null ? undefined : structuredClone(await this.#readCycleConfiguration());
+        if (cycleConfiguration === null) return { status: 'WAITING_FOR_CONFIGURATION', cycleId: null, stage: null };
+        if (cycleConfiguration !== undefined) {
+          assertRewardRecipientLimit(cycleConfiguration.rewardRecipientLimit);
+          if (!Number.isSafeInteger(cycleConfiguration.configurationRevision) || cycleConfiguration.configurationRevision < 0) throw new Error('cycle configuration revision is invalid');
+        }
+        const packPlan = cycleConfiguration !== undefined ? assertPackPlan(cycleConfiguration.packPlan)
+          : this.#readPackPlan === null ? undefined : assertPackPlan(await this.#readPackPlan());
         if (packPlan !== undefined && packPlan.orders.length === 0) return { status: 'WAITING_FOR_ADMISSION', cycleId: null, stage: null, requiredProcessWei: '0' };
         const selectedPackId = packPlan?.orders[0]?.pack ?? this.#packId;
         const reservedCycleId = this.#admissionPlanner === null ? null : this.#cycleRepository.nextCycleId();
@@ -455,6 +467,10 @@ export class AutomatedCycleService {
         }
         assertLeaseCurrent({ store: this.#leaseStore, lease, now: this.#now() });
         cycle = await this.#cycleRepository.createCycle({
+          ...(cycleConfiguration === undefined ? {} : {
+            rewardRecipientLimit: cycleConfiguration.rewardRecipientLimit,
+            configurationRevision: cycleConfiguration.configurationRevision,
+          }),
           releaseAmount: decision.releaseAmount,
           ...(packPlan === undefined ? {} : { packPlan }),
           mode: this.#mode,
@@ -568,6 +584,7 @@ export class AutomatedCycleService {
         }
         await assertJoinPreconditions(this.#cycleRepository, cycle.cycleId, stage);
         const context = {
+          ...(cycle.rewardSelection === undefined ? {} : { rewardSelection: cycle.rewardSelection }),
           cycleId: cycle.cycleId,
           stage,
           runner,

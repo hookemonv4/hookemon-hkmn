@@ -5,6 +5,8 @@ import {
 } from '../../robinhood-rpc.mjs';
 import {
   buildEligibilityHolderSet,
+  buildHolderSnapshot,
+  selectEligibilityRecipients,
   digestTransferLogReplay,
 } from '../../../../runner/src/distribution/snapshot-indexer.mjs';
 import { createEligibilityPayoutManifest } from '../../../../runner/src/distribution/pro-rata.mjs';
@@ -399,7 +401,18 @@ export async function freezeEligibilityBeforeClaim({ adapters, config, context }
     throw new EligibilitySnapshotError(`snapshot block ${snapshotBlock.number} hash changed after log paging`);
   }
   context.assertLease?.();
-  const feasibility = evaluatePayoutFeasibility({ entries: holderSet.entries, feasibility: normalized.feasibility });
+  const selected = context.rewardSelection === undefined ? null : selectEligibilityRecipients({
+    rewardSelection: context.rewardSelection,
+    supply: holderSet.supply,
+    holderSnapshot: buildHolderSnapshot({
+      chainId: normalized.chainId, tokenAddress: normalized.tokenAddress,
+      blockNumber: snapshotBlock.number.toString(), blockHash: snapshotBlock.hash,
+      finalized: true, totalSupply: normalized.supply.amountAtomic,
+      excludedAddresses: normalized.exclusions, transferLogs: primaryScan.logs,
+    }),
+  });
+  const entries = selected?.entries ?? holderSet.entries;
+  const feasibility = evaluatePayoutFeasibility({ entries, feasibility: normalized.feasibility });
   const manifest = createEligibilityPayoutManifest({
     cycleId: context.cycleId,
     snapshotBlock: snapshotBlock.number.toString(),
@@ -409,7 +422,8 @@ export async function freezeEligibilityBeforeClaim({ adapters, config, context }
       depth: normalized.finality.depth.toString(),
     },
     supply: holderSet.supply,
-    entries: holderSet.entries,
+    entries,
+    ...(selected === null ? {} : { selection: selected.selection }),
     exclusions: holderSet.exclusions,
     feasibility,
     logCompleteness,

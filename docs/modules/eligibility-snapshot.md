@@ -6,7 +6,7 @@ The eligibility-snapshot stage freezes HKMN holder weights and a pre-claim nativ
 
 ## Public interface
 
-- `freezeEligibilityBeforeClaim({ adapters, config, context })` selects `latest - K` only when a fresh finalized-head read proves that candidate finalized, pins its hash, replays HKMN `Transfer` logs from two sources, and returns `hookemon.eligibility-payout-manifest.v1` evidence.
+- `freezeEligibilityBeforeClaim({ adapters, config, context })` selects `latest - K` only when a fresh finalized-head read proves that candidate finalized, pins its hash, replays HKMN `Transfer` logs from two sources, and returns legacy `hookemon.eligibility-payout-manifest.v1` evidence or selection-bearing v2 evidence for a cycle with an explicit frozen reward policy.
 - `reconcileLiveEligibilitySnapshot(...)` runs the same flow. On verification failure it rechecks the supplied lease before it records `HELD_DATA_UNVERIFIED` or `HELD_UNAVAILABLE` through `cycleRepository.holdCycle()` and then rethrows.
 - `evaluatePayoutFeasibility({ entries, feasibility })` calculates recipient and transaction counts,
   maximum native fee, reserve, required native amount, the current plan-limit check, and the
@@ -25,12 +25,8 @@ The runtime configuration requires `chainId`, `hkmn.{address,deployBlock,decimal
 - Both replays cover every page from the configured deployment block through the selected block. Each must produce the exact ordered Transfer-tuple digest, and the primary replay must reconcile mint minus burn to typed immutable launch supply.
 - The stage only emits `dual-source` completeness evidence. Source IDs distinguish configured clients but do not themselves authenticate provider provenance; a frozen provider-authority binding is required before that provenance can be treated as independent.
 - The excluded set comes only from the launch manifest and role history. Unlisted contract recipients remain eligible at their own addresses.
-- A holder set is never shortened to fit a recipient limit. The feasibility envelope decides whether the cycle is held before claim processing.
-- The current recipient and transaction check is the lower of the configured maximum and the
-  1,025 plan limit. It is not yet an executable capacity check: the journal's 64-item array bound
-  rejects a persisted eligibility manifest and direct-payout state above 64 holders. A storage or
-  owner-approved capacity revision must align these limits before a live claim can rely on this
-  gate.
+- Full holder replay remains complete. A cycle with a frozen reward policy selects the top N positive non-excluded direct balances, breaking ties by normalized address. Its v2 manifest binds the complete holder snapshot, selected count, policy digest and selected/unselected/excluded balance totals. Historical cycles without a policy retain all eligible holders.
+- Selected-cycle feasibility uses the selected recipient count conservatively and never shrinks selection to fit gas or transaction limits. The independent direct-payout capacity ceiling is 10,000; selected limits are 100 through 1000. Full replay must also fit its separately validated evidence storage bounds.
 
 ## State transitions
 
@@ -44,10 +40,7 @@ The runtime configuration requires `chainId`, `hkmn.{address,deployBlock,decimal
 
 - Provide a verified depth for `robinhood-stage-finality-v1`; an absent depth is refused before any RPC read.
 - Supply a content-addressed launch manifest and two genuinely independent log sources before reconciling.
-- Keep measured transfer gas, gas-price ceiling, native reserve, native balance, and
-  recipient/transaction limits current before reconciliation. Values above 1,025 do not increase
-  the plan limit, and no value above 64 is currently persistence-safe for production.
-- Do not configure a feasible large holder set until durable content-addressed manifest storage is available for the full entry array.
+- Keep measured transfer gas, gas-price ceiling, native reserve, native balance and transaction capacity current. Store large evidence through the existing content-addressed paged-stage path; a selected count does not permit truncating full replay evidence.
 - Ensure the production composition supplies token decimals, snapshot configuration, and both log clients. Missing values fail closed before claim processing.
 
 ## Recovery pointers
@@ -55,8 +48,7 @@ The runtime configuration requires `chainId`, `hkmn.{address,deployBlock,decimal
 - For a changed hash, unavailable finalized head, or unstable page, discard the candidate and reconcile from a newly selected block.
 - For supply or source disagreement, correct the authority record or provider evidence and run a new reconciliation; never patch entries or a digest.
 - For an exceeded envelope, increase verified operating capacity and use an owner-approved
-  payout-capacity/storage revision before creating a new immutable manifest. Never shorten the
-  holder set to fit the current limit.
+  payout-capacity/storage revision before creating a new immutable manifest. Never silently reduce an already selected set to fit capacity.
 - For lease loss, let the current lease holder reconcile the cycle. Do not write a terminal state from a stale worker.
 
 Native payout uses the frozen HKMN weights without changing token supply or exclusions. The eligibility envelope measures native gas separately; payout admission and the first signature verify that current ETH covers both attributed principal and the frozen fee envelope plus reserve.
