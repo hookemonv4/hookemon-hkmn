@@ -20,6 +20,8 @@
 // nothing here loses precision or depends on floating-point rounding.
 
 import { createHash } from 'node:crypto';
+import { assertRewardSelectionSnapshot } from '../automation/reward-selection-snapshot.mjs';
+import { assertBoundedCanonicalValue } from '../cycle/journal.mjs';
 
 import { assertDigest } from '../cycle/schemas.mjs';
 
@@ -482,4 +484,42 @@ export function toSnapshotCandidate(holderSnapshot, { directBalances } = {}) {
     finalized: true,
     directBalances: balances.map(({ recipient, directHkmnBalance }) => ({ recipient, directHkmnBalance })),
   };
+}
+
+/** Selects finalized direct balances; evidence retains the complete authenticated holder snapshot. */
+export function selectEligibilityRecipients({ holderSnapshot, supply, rewardSelection }) {
+  assertBoundedCanonicalValue(holderSnapshot, 'reward selection holder snapshot', { objects: 200_000, arrays: 10_000, arrayItems: 10_000, aggregateBytes: 33_554_432 });
+  const snapshot = assertHolderSnapshot(holderSnapshot);
+  assertRewardSelectionSnapshot(rewardSelection);
+  assertTypedHkmnAmount(supply, 'reward selection supply', { chainId: snapshot.chainId, tokenAddress: snapshot.tokenAddress, decimals: supply?.decimals });
+  if (supply.amountAtomic !== snapshot.totalSupply || BigInt(snapshot.totalHolderBalance) + BigInt(snapshot.totalExcludedBalance) !== BigInt(snapshot.totalSupply)) throw new Error('reward selection full supply does not reconcile');
+  const selected = [...snapshot.directBalances].sort((a, b) => {
+    const difference = BigInt(b.directHkmnBalance) - BigInt(a.directHkmnBalance);
+    return difference < 0n ? -1 : difference > 0n ? 1 : compareAddresses(a.recipient, b.recipient);
+  }).slice(0, rewardSelection.rewardRecipientLimit).sort((a, b) => compareAddresses(a.recipient, b.recipient));
+  const amount = amountAtomic => ({ ...supply, amountAtomic });
+  const entries = selected.map(({ recipient, directHkmnBalance }) => ({ recipient, hkmnBalance: amount(directHkmnBalance) }));
+  const selectedTotal = selected.reduce((sum, entry) => sum + BigInt(entry.directHkmnBalance), 0n);
+  const content = {
+    schema: 'hookemon.reward-selection-evidence.v1',
+    rewardSelection: { ...rewardSelection },
+    holderSnapshot: structuredClone(snapshot),
+    eligibleCount: snapshot.holderCount,
+    selectedCount: selected.length,
+    selectedBalanceTotal: amount(selectedTotal.toString()),
+    unselectedEligibleBalanceTotal: amount((BigInt(snapshot.totalHolderBalance) - selectedTotal).toString()),
+    excludedBalanceTotal: amount(snapshot.totalExcludedBalance),
+  };
+  return { entries, selection: { ...content, digest: snapshotDigest({ domain: content.schema, selection: content, entries }) } };
+}
+
+/** Recomputes the rank, supply totals and both evidence digests before accepting a selected manifest. */
+export function assertEligibilitySelection(selection, manifest) {
+  assertExactShape(selection, ['schema', 'rewardSelection', 'holderSnapshot', 'eligibleCount', 'selectedCount', 'selectedBalanceTotal', 'unselectedEligibleBalanceTotal', 'excludedBalanceTotal', 'digest'], 'reward selection evidence');
+  assertRewardSelectionSnapshot(selection.rewardSelection, { cycleId: manifest.cycleId });
+  const expected = selectEligibilityRecipients({ holderSnapshot: selection.holderSnapshot, supply: manifest.supply, rewardSelection: selection.rewardSelection });
+  const snapshot = selection.holderSnapshot;
+  if (snapshot.blockNumber !== manifest.snapshotBlock || snapshot.blockHash !== manifest.snapshotHash || snapshot.holderSnapshotDigest !== manifest.holderSnapshotDigest || snapshotDigest(snapshot.excludedAddresses) !== snapshotDigest(manifest.exclusions)) throw new Error('reward selection holder snapshot does not match manifest');
+  if (snapshotDigest(expected.selection) !== snapshotDigest(selection) || snapshotDigest(expected.entries) !== snapshotDigest(manifest.entries)) throw new Error('reward selection evidence or selected entries mismatch');
+  return expected.selection;
 }

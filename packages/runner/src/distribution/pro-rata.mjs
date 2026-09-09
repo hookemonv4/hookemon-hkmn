@@ -30,7 +30,7 @@
 // This module never mutates, weakens, or reimplements `reconcile.mjs`'s or `manifest.mjs`'s own
 // verification invariants -- it only produces input that already conforms to them.
 
-import { toSnapshotCandidate } from './snapshot-indexer.mjs';
+import { assertEligibilitySelection, toSnapshotCandidate } from './snapshot-indexer.mjs';
 
 // Mirrors `CanonicalMerkleSum.TREE_WIDTH` (packages/contracts/src/payout/CanonicalMerkleSum.sol).
 export const CHUNK_ENTRY_LIMIT = 1024;
@@ -168,7 +168,8 @@ function assertExclusions(value) {
  * later distribution path.
  */
 export function createEligibilityPayoutManifest(inputValue) {
-  const input = assertExactObject(inputValue, ELIGIBILITY_MANIFEST_INPUT_FIELDS, 'eligibility manifest input');
+  const selected = Object.hasOwn(inputValue ?? {}, 'selection');
+  const input = assertExactObject(inputValue, selected ? [...ELIGIBILITY_MANIFEST_INPUT_FIELDS, 'selection'] : ELIGIBILITY_MANIFEST_INPUT_FIELDS, 'eligibility manifest input');
   if (typeof input.cycleId !== 'string' || input.cycleId.length === 0) {
     throw new Error('eligibility manifest cycleId is invalid');
   }
@@ -231,7 +232,8 @@ export function createEligibilityPayoutManifest(inputValue) {
   }
 
   return {
-    schema: 'hookemon.eligibility-payout-manifest.v1',
+    schema: selected ? 'hookemon.eligibility-payout-manifest.v2' : 'hookemon.eligibility-payout-manifest.v1',
+    ...(selected ? { selection: assertEligibilitySelection(input.selection, input) } : {}),
     cycleId: input.cycleId,
     snapshotBlock: input.snapshotBlock,
     snapshotHash: input.snapshotHash,
