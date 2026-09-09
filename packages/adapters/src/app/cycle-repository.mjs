@@ -59,6 +59,7 @@ const LEGACY_ACCOUNTING_STAGES = Object.freeze(['funding', 'distribution']);
 const OPERATIONAL_STAGE_SET = new Set(OPERATIONAL_CYCLE_STAGES);
 const LEGACY_ACCOUNTING_STAGE_SET = new Set(LEGACY_ACCOUNTING_STAGES);
 const POST_TERMINAL_RECORD_KINDS = new Set([
+  'process-usd-claim-finalized',
   'stage-attempted',
   'stage-attempt-failed',
   'stage-attempt-sent-unknown',
@@ -82,6 +83,7 @@ const POST_TERMINAL_RECORD_KINDS = new Set([
   'supplementary-chain-attempt-recovery-context-recorded',
 ]);
 const POST_COMPLETION_RECORD_KINDS = new Set([
+  'process-usd-claim-finalized',
   'held-position-owner-decision-recorded',
   'held-position-resolved',
   'supplementary-settlement-advanced',
@@ -197,6 +199,8 @@ export const CYCLE_REPOSITORY_INTERFACE = Object.freeze([
   'settleRelayLeg',
   'readStandingAuthorityDecision',
   'recordStandingAuthorityDecision',
+  'reserveProcessUsdClaim',
+  'finalizeProcessUsdClaim',
   'reserveWalletNonce',
   'assertWalletNonce',
   'releaseWalletNonce',
@@ -3180,6 +3184,37 @@ function assertCycleRewardSelectionEvidence(cycleId, rewardSelection, evidence) 
   createEligibilityPayoutManifest(input);
 }
 
+const PROCESS_USD_WINDOW_MS = 21_600_000;
+const PROCESS_USD_HARD_MAX_MICRO = 50_000_000_000n;
+const PROCESS_USD_DEFAULT_MICRO = '25000000000';
+
+function processUsdBudgetKey(hook) {
+  if (typeof hook !== 'string' || !/^0x[0-9a-fA-F]{40}$/.test(hook) || /^0x0{40}$/i.test(hook)) {
+    throw new Error('process USD budget requires the canonical hook');
+  }
+  return `process-usd-claims:4663:${hook.toLowerCase()}`;
+}
+
+function validateProcessUsdBudget(value) {
+  exactObject(value, ['schema', 'entries'], 'process USD budget');
+  if (value.schema !== 'hookemon.process-usd-budget.v1' || !Array.isArray(value.entries)) throw new Error('invalid process USD budget');
+  const ids = new Set();
+  for (const entry of value.entries) {
+    exactObject(entry, ['cycleId', 'amountWei', 'amountMicroUsd', 'valuationDigest', 'state', 'confirmedAtMs', 'transactionHash'], 'process USD reservation');
+    if (typeof entry.cycleId !== 'string' || ids.has(entry.cycleId)
+      || typeof entry.amountWei !== 'string' || !/^[1-9][0-9]*$/.test(entry.amountWei)
+      || typeof entry.amountMicroUsd !== 'string' || !/^[1-9][0-9]*$/.test(entry.amountMicroUsd)
+      || BigInt(entry.amountMicroUsd) > PROCESS_USD_HARD_MAX_MICRO || !digestPattern.test(entry.valuationDigest)
+      || !['RESERVED', 'CONFIRMED', 'REVERTED'].includes(entry.state)
+      || (entry.state === 'RESERVED' ? entry.confirmedAtMs !== null || entry.transactionHash !== null
+        : !Number.isSafeInteger(entry.confirmedAtMs) || entry.confirmedAtMs < 0 || !/^0x[0-9a-f]{64}$/.test(entry.transactionHash))) {
+      throw new Error('invalid process USD reservation');
+    }
+    ids.add(entry.cycleId);
+  }
+  return value;
+}
+
 export class CycleRepository {
   #store;
   #now;
@@ -3820,6 +3855,11 @@ export class CycleRepository {
           throw new Error('stored standing authority decision conflicts with prior decision');
         }
         standingAuthorityDecisions.set(decision.intentDigest, decision);
+      } else if (['process-usd-claim-reserved', 'process-usd-claim-finalized'].includes(entry.kind)) {
+        exactObject(entry.payload, ['hook', 'reservation'], 'stored process USD claim');
+        processUsdBudgetKey(entry.payload.hook);
+        validateProcessUsdBudget({ schema: 'hookemon.process-usd-budget.v1', entries: [entry.payload.reservation] });
+        if (entry.payload.reservation.cycleId !== cycleId) throw new Error('stored process USD cycle mismatch');
       } else if (entry.kind === 'wallet-nonce-reserved') {
         const reservation = assertWalletNonceReservation(entry.payload.reservation, 'stored wallet nonce reservation');
         if (reservation.cycleId !== cycleId || reservation.state !== 'HELD') {
@@ -6493,6 +6533,79 @@ export class CycleRepository {
       }
     }
     throw lastContention ?? new Error('cycle-repository recordStandingAuthorityDecision: authority reservation contention did not resolve');
+  }
+
+  /** Owner-configured USD policy for the managed claim path; the hook itself still enforces wei. */
+  async reserveProcessUsdClaim(cycleId, { hook, amountWei, limitMicroUsd = PROCESS_USD_DEFAULT_MICRO }) {
+    if (typeof limitMicroUsd !== 'string' || !/^(0|[1-9][0-9]*)$/.test(limitMicroUsd)
+      || BigInt(limitMicroUsd) > PROCESS_USD_HARD_MAX_MICRO) throw new Error('process USD claim limit exceeds the hard maximum or is invalid');
+    const state = await this.#replay(cycleId);
+    if (state.terminalState) throw new Error('process USD claim cannot reserve a terminal cycle');
+    const key = processUsdBudgetKey(hook);
+    const valuation = state.admission?.aggregateFundingUsd;
+    const asset = { chainId: '4663', assetId: 'native', decimals: 18, amountAtomic: amountWei };
+    if (state.releaseAmount !== amountWei || state.admission?.processLiabilityEvidence?.hook?.toLowerCase() !== hook.toLowerCase()
+      || !this.isDurableQuoteUsdValuation(valuation, { amount: asset, rounding: 'up' })) {
+      throw new Error('process USD claim requires fresh authenticated exact-amount admission valuation');
+    }
+    const now = currentRepositoryTime(this.#now);
+    const existing = await this.#store.readGlobalKey(key);
+    const budget = validateProcessUsdBudget(existing ?? { schema: 'hookemon.process-usd-budget.v1', entries: [] });
+    const reservation = { cycleId, amountWei, amountMicroUsd: valuation.amountMicroUsd,
+      valuationDigest: digest(valuation), state: 'RESERVED', confirmedAtMs: null, transactionHash: null };
+    const previous = budget.entries.find(entry => entry.cycleId === cycleId);
+    if (previous && canonicalJson(previous) !== canonicalJson(reservation)) throw new Error('process USD claim reservation differs or is already finalized');
+    const used = budget.entries.reduce((total, entry) => total + (
+      entry.state === 'RESERVED' || (entry.state === 'CONFIRMED' && now - entry.confirmedAtMs < PROCESS_USD_WINDOW_MS)
+        ? BigInt(entry.amountMicroUsd) : 0n), 0n);
+    if (BigInt(limitMicroUsd) === 0n || used + (previous ? 0n : BigInt(reservation.amountMicroUsd)) > BigInt(limitMicroUsd)) {
+      throw new Error('process USD rolling six-hour limit exceeded');
+    }
+    if (previous) return structuredClone(previous);
+    const value = { ...budget, entries: [...budget.entries, reservation] };
+    await this.#append(cycleId, 'process-usd-claim-reserved', { hook: hook.toLowerCase(), reservation }, {
+      operation: 'reserveProcessUsdClaim',
+      ...(existing === null ? { globalKeyReservations: [{ key, value }] }
+        : { globalKeyReplacements: [{ key, expectedValue: existing, value }] }),
+    });
+    return structuredClone(reservation);
+  }
+
+  /** Only a live native payment/gas capability can settle a durable reservation. */
+  async finalizeProcessUsdClaim(cycleId, { hook, proof }) {
+    const key = processUsdBudgetKey(hook);
+    const existing = await this.#store.readGlobalKey(key);
+    if (existing === null) throw new Error('process USD claim has no durable reservation');
+    const budget = validateProcessUsdBudget(existing);
+    const previous = budget.entries.find(entry => entry.cycleId === cycleId);
+    if (!previous) throw new Error('process USD claim has no durable reservation');
+    const state = await this.#replay(cycleId);
+    const onchainCycleId = `0x${createHash('sha256').update(cycleId, 'utf8').digest('hex')}`;
+    const confirmed = isProcessNativePaymentProof(proof, { kind: 'hook-claim', source: hook.toLowerCase(),
+      amountWei: previous.amountWei, cycleId: onchainCycleId });
+    if (!confirmed) {
+      const attempts = [...state.chainAttempts.values()].filter(record => record.attempt.stage === 'claim-process'
+        && record.attempt.hash === proof?.transactionHash && digest(record.attempt.rawBytes) === proof.transactionDigest);
+      if (proof?.receiptStatus !== 'reverted' || attempts.length !== 1) throw new Error('process USD claim finality is unverified');
+      // Reuse the native gas capability validator against the already recorded custody ledger.
+      // JSON receipt lookalikes cannot release capacity.
+      applyNativeCustodyGasPayment(state.custodyLedgers.get('4663\u0000native'), proof);
+    }
+    const confirmedAtMs = Number(BigInt(proof.timestampUnixSeconds) * 1000n);
+    if (!Number.isSafeInteger(confirmedAtMs) || confirmedAtMs < 0 || confirmedAtMs > currentRepositoryTime(this.#now)) {
+      throw new Error('process USD claim finality timestamp is invalid');
+    }
+    const reservation = { ...previous, state: confirmed ? 'CONFIRMED' : 'REVERTED', confirmedAtMs,
+      transactionHash: proof.transactionHash };
+    if (previous.state !== 'RESERVED') {
+      if (canonicalJson(previous) !== canonicalJson(reservation)) throw new Error('process USD claim finality conflicts');
+      return structuredClone(previous);
+    }
+    const value = { ...budget, entries: budget.entries.map(entry => entry.cycleId === cycleId ? reservation : entry) };
+    await this.#append(cycleId, 'process-usd-claim-finalized', { hook: hook.toLowerCase(), reservation }, {
+      globalKeyReplacements: [{ key, expectedValue: existing, value }],
+    });
+    return structuredClone(reservation);
   }
 
   async reserveWalletNonce(cycleId, reservationValue) {

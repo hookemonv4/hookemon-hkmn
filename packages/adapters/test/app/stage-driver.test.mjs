@@ -234,12 +234,13 @@ test('reads the current operator deadline while reconciling a card mutation', as
     reconciliationEvidence: null,
   }]]);
   let deadline = null;
+  let processLimit = null;
   const driver = createStageDriver({
     liveMode: true,
     adapters: { collectorCrypt: null, relay: null, robinhood: { client: null }, solana: { client: null } },
     signerClient: null,
     config: baseConfig(),
-    readOperatorConfiguration: async () => ({ unresolvedCardDeadlineMinutes: 37 }),
+    readOperatorConfiguration: async () => ({ unresolvedCardDeadlineMinutes: 37, processClaimLimit6hMicroUsd: '50000000000' }),
     cycleRepository: fakeCycleRepository(new Map(), '0', attempts),
     stageHandlers: {
       purchase: {
@@ -248,6 +249,7 @@ test('reads the current operator deadline while reconciling a card mutation', as
         async mutate() { throw new Error('reconciliation must not mutate'); },
         async reconcileLive({ config }) {
           deadline = config.unresolvedCardDeadlineMinutes;
+          processLimit = config.processClaimLimit6hMicroUsd;
           return { reconciled: true };
         },
       },
@@ -256,6 +258,7 @@ test('reads the current operator deadline while reconciling a card mutation', as
 
   assert.deepEqual(await driver.reconcile({ cycleId: CYCLE_ID, stage: 'purchase' }), { reconciled: true });
   assert.equal(deadline, 37);
+  assert.equal(processLimit, '50000000000');
 });
 
 test('limits held-position persistence to card-stage reconciliation', async () => {
@@ -1601,6 +1604,8 @@ function writeAheadRepository() {
   const chainKeyFor = (cycleId, stage, requestDigest) => `${cycleId}:${stage}:${requestDigest}`;
   const custodyKeyFor = ledger => `${ledger.chainId}\u0000${ledger.assetId}`;
   return {
+    async reserveProcessUsdClaim() {},
+    async finalizeProcessUsdClaim() {},
     attempts,
     chainAttempts,
     custodyLedgers,
