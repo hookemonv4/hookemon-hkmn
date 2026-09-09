@@ -22,7 +22,7 @@
     },
     "workflow": {
       "path": ".github/workflows/v4-gates.yml",
-      "sha256": "5a530f2f4705673a2e101170c284ef6c39da95b6ef17089571fdf502c1c99e25"
+      "sha256": "df9fa88e6030ec74bf27fb6edf90970a91d45ac38d7b29ce7e364c2b6b2843ab"
     },
     "forkProof": {
       "path": ".github/workflows/fork-proof.yml",
@@ -64,7 +64,7 @@
   "controlScripts": {
     "commitIdentityAllowlist": {
       "path": "scripts/check-commit-identity.mjs",
-      "sha256": "9b89ef928d69676f07bea9052d0c5bb2e4c1c151de5dc590d9c7685711316cba",
+      "sha256": "6c2fe1989a16b7a0f1594a4c79b3ef7450c2d17b4d465ccf0b74fd738a1e703a",
       "rule": "This script's HISTORICAL_IDENTITY_EXCEPTIONS map is the commit-identity allowlist. The verifier accepts only its static supported digest, and CI loads this checker from the protected pull-request base or push merge-base before it scans the candidate range. A candidate cannot accept its own checker and pin change."
     },
     "forkPinVerifier": {
@@ -84,11 +84,11 @@
     },
     "controlDependencyVerifier": {
       "path": "scripts/verify-control-dependencies.mjs",
-      "sha256": "20577b51e3644f62f77c2d9bfde16245a752690e74c69a5d5ec67fa0f1ae3d0a",
+      "sha256": "f1e876a829ff94b9b919af78f3f5a1b6b9e988d451f6023ec30029a5439270db",
       "closure": [
         {
           "path": "scripts/verify-control-dependencies.mjs",
-          "sha256": "20577b51e3644f62f77c2d9bfde16245a752690e74c69a5d5ec67fa0f1ae3d0a"
+          "sha256": "f1e876a829ff94b9b919af78f3f5a1b6b9e988d451f6023ec30029a5439270db"
         },
         {
           "path": "scripts/lib/util.mjs",
@@ -131,7 +131,7 @@
       "version": "8.30.1",
       "config": {
         "path": ".gitleaks.toml",
-        "sha256": "17cff1b01ddbf5003b9dd202c9b534878c659b8935c23d9f0c2023ea0f68d10a"
+        "sha256": "99572a32133e4a123b803028a7ae095d4040a44fe9a151dbeabc5d07f88f5a89"
       },
       "distributions": {
         "linux-x64": {

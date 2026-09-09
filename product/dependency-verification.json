@@ -272,17 +272,22 @@
   "controlGatePinBump": {
     "schema": "hookemon.control-gate-pin-bump.v2",
     "approvalToken": "OWNER APPROVED",
-    "basePinsSha256": "a125fe9564b49f50d71f4e1dd2a76de38115be3db644201d1e660b4ad913456e",
-    "candidatePinsSha256": "534b96bfaeaa6a3334d377b46ab6410f2c35ecafb13f57b200d0f47f32ff5451",
+    "basePinsSha256": "534b96bfaeaa6a3334d377b46ab6410f2c35ecafb13f57b200d0f47f32ff5451",
+    "candidatePinsSha256": "f0005e9d7dfc35a885c2d170fc45e3e1c094d841695b6ce54efb106f58cade66",
     "baseChecker": {
       "path": "scripts/verify-control-dependencies.mjs",
-      "blobId": "9faac6f636cc872c8dc5e46f17ed799f0407b1a7"
+      "blobId": "814dd4fc8d7568610cb8d6755397f3d82a59b055"
     },
     "controls": [
       {
+        "path": ".github/workflows/v4-gates.yml",
+        "previousSha256": "5a530f2f4705673a2e101170c284ef6c39da95b6ef17089571fdf502c1c99e25",
+        "sha256": "df9fa88e6030ec74bf27fb6edf90970a91d45ac38d7b29ce7e364c2b6b2843ab"
+      },
+      {
         "path": "scripts/verify-control-dependencies.mjs",
-        "previousSha256": "c9a155d541258b5aa4ce886b2df8ed1adfb73f5f915542cc97e08638be413a8a",
-        "sha256": "20577b51e3644f62f77c2d9bfde16245a752690e74c69a5d5ec67fa0f1ae3d0a"
+        "previousSha256": "20577b51e3644f62f77c2d9bfde16245a752690e74c69a5d5ec67fa0f1ae3d0a",
+        "sha256": "f1e876a829ff94b9b919af78f3f5a1b6b9e988d451f6023ec30029a5439270db"
       }
     ]
   }
