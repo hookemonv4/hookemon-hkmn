@@ -8245,7 +8245,7 @@
       ]
     },
     "docs/modules/control-supply-chain.md": {
-      "sha256": "1d5cac0ebaefa637fe80eb67612a99915b2196d11693b41ebba8fd2d2087a4ac",
+      "sha256": "5304c7927e495a42533c1eb935e63ebdbd799743b47a498f550bef3b37a49e5c",
       "matches": [
         {
           "rule": "private-email",
