@@ -153,19 +153,20 @@ test('the release draft keeps provider target order and source-bound artifact ev
   assert.equal(PROGRAMMABLE_GRAPH_FACTORY, '0x0B6b3F40f84Df25D3bd69238f937096177DD09Bd');
 });
 
-test('native seed remains explicit and unselected while preserving the complete stock', () => {
+test('native seed binds zero while its range remains unselected and preserves the complete stock', () => {
   const inputs = readJson('release/phase3/launch-inputs.json');
   assert.equal(inputs.token.allocation.canonicalPoolBps, 10_000);
   assert.equal(inputs.token.allocation.remainderCustodyBps, 0);
   assert.equal(inputs.pool.baseAsset.amountAtomic, '1000000000000000000000000000');
   assert.equal(inputs.pool.quoteAsset.assetId, 'native');
   assert.equal(inputs.pool.quoteAsset.decimals, 18);
-  assert.equal(inputs.pool.quoteAsset.amountAtomic, null);
+  assert.equal(inputs.pool.quoteAsset.amountAtomic, '0');
+  assert.deepEqual(inputs.pool.fullRange, { minimumTick: null, maximumTick: null });
   assert.equal(inputs.pool.priceCandidates.nativeCurrency0, null);
   assert.equal(inputs.pool.priceCandidates.selection.status, 'OPEN_FACT');
   assert.equal(inputs.pool.priceCandidates.selection.selectedOrdering, 'nativeCurrency0');
   assert.deepEqual(Object.keys(inputs.pool.priceCandidates), ['nativeCurrency0', 'selection']);
-  assert.equal(inputs.seed.nativeFunding.amountWei, null);
+  assert.equal(inputs.seed.nativeFunding.amountWei, '0');
   assert.equal(inputs.seed.graphFunding.amountAtomic, '0');
 });
 

@@ -34,7 +34,7 @@ import {
   verifyAddressManifest,
 } from '../launch/build-address-manifest.mjs';
 import { materializePhaseThreePriceSelection, verifyPhaseThreeMaterializedSeedManifest } from '../programmable/lib/package.mjs';
-import { deriveNativePriceCandidate } from '../programmable/lib/phase3-release.mjs';
+import { deriveNativePriceCandidate, deriveNativeSeedCandidate } from '../programmable/lib/phase3-release.mjs';
 import { isEip55Address, toEip55Address } from '../programmable/lib/eip55.mjs';
 import { validateJsonSchema } from '../programmable/lib/json-schema.mjs';
 
@@ -1592,13 +1592,24 @@ test('native version refuses historical quote, implicit limits and unbound seed 
 });
 
 
-test('native materialized seed binds explicit funding and eighteen-word hook policy without historical approval reuse', () => {
+for (const inventoryUpper of [null, 60, 6000]) test(`native materialized seed binds funding and policy for inventory upper ${inventoryUpper}`, () => {
   const fixture = makeFixture({ native: true });
   try {
     const inputs = fixture.input;
+    if (inventoryUpper !== null) {
+      inputs.pool.seedMaximumWei = '0';
+      inputs.seedIntent.tickUpper = inventoryUpper;
+      const zero = deriveNativeSeedCandidate({ nativeWei: '0', hkmnAtomic: inputs.pool.hkmnAtomic,
+        ...inputs.seedIntent, tickSpacing: inputs.pool.tickSpacing });
+      inputs.pool.priceCandidates.nativeCurrency0.sqrtPriceX96 = zero.sqrtPriceX96;
+      setCanonicalInitializerCalldata(inputs);
+      const wrong = structuredClone(inputs); wrong.pool.priceCandidates.nativeCurrency0.sqrtPriceX96 = '1';
+      assert.throws(() => deriveAddresses({ launchInputs: wrong, inputDirectory: fixture.directory }), /native price/);
+    }
     const manifest = buildAddressManifest({ launchInputs: inputs, inputDirectory: fixture.directory });
-    const candidate = deriveNativePriceCandidate({ nativeWei: inputs.pool.seedMaximumWei, hkmnAtomic: inputs.pool.hkmnAtomic });
+    const candidate = deriveNativeSeedCandidate({ nativeWei: inputs.pool.seedMaximumWei, hkmnAtomic: inputs.pool.hkmnAtomic, ...inputs.seedIntent, tickSpacing: inputs.pool.tickSpacing });
     const release = JSON.parse(readFileSync(resolve(root, 'release/phase3/launch-inputs.json')));
+    release.pool.fullRange = { minimumTick: inputs.seedIntent.tickLower, maximumTick: inputs.seedIntent.tickUpper };
     release.roles.quoteCurrency = inputs.quoteCurrency;
     release.pool.quoteAsset.amountAtomic = candidate.amount0Max;
     release.pool.priceCandidates.nativeCurrency0 = candidate;

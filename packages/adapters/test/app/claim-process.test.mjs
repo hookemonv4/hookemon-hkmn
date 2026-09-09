@@ -138,6 +138,8 @@ function chainRepository() {
   const custodyLedgers = new Map();
   const writes = [];
   const repo = {
+    async reserveProcessClaimUsd() {},
+    async finalizeProcessClaimUsd() {},
     get chainAttempt() { return chainAttempt; },
     set chainAttempt(value) { chainAttempt = value; },
     get custodyLedgers() { return new Map(custodyLedgers); },
@@ -201,6 +203,8 @@ function chainRepository() {
 test('mutateClaimProcess persists signed raw bytes and replays those exact bytes after a broadcast interruption', async () => {
   const account = privateKeyToAccount(`0x${'1'.repeat(64)}`);
   const cycleRepository = chainRepository();
+  const usdReservations = [];
+  cycleRepository.reserveProcessClaimUsd = async (cycleId, value) => { usdReservations.push({ cycleId, ...value }); };
   const walletReservations = [];
   let reservationEstablished = false;
   cycleRepository.reserveWalletNonce = async (cycleId, reservation) => {
@@ -242,7 +246,8 @@ test('mutateClaimProcess persists signed raw bytes and replays those exact bytes
             async estimateFeesPerGas() { return { maxFeePerGas: 2n, maxPriorityFeePerGas: 1n }; },
             async getBalance() { return 1_000_000n; },
             async sendRawTransaction({ serializedTransaction }) {
-              broadcastCalls += 1;
+              assert.equal(usdReservations.length, 2, 'USD guard must run again before broadcast');
+            broadcastCalls += 1;
               assert.match(serializedTransaction, /^0x[0-9a-f]+$/i);
               throw new Error('temporary RPC failure');
             },
@@ -252,6 +257,8 @@ test('mutateClaimProcess persists signed raw bytes and replays those exact bytes
       signerClient: {
         evm: {
           async sign({ transaction }) {
+            assert.equal(usdReservations.length, 1, 'USD must be reserved before signing');
+            assert.equal(usdReservations[0].limitMicroUsd, '25000000000');
             signCalls += 1;
             const { from, ...unsigned } = transaction;
             return {

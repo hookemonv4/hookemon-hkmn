@@ -2,6 +2,7 @@
 pragma solidity 0.8.26;
 
 import { TickMath } from "@uniswap/v4-core/src/libraries/TickMath.sol";
+import { Pool } from "@uniswap/v4-core/src/libraries/Pool.sol";
 import { SqrtPriceMath } from "@uniswap/v4-core/src/libraries/SqrtPriceMath.sol";
 
 /// @notice Draft-only validator for the frozen Phase 3 policy before provider address derivation.
@@ -26,19 +27,19 @@ contract PhaseThreeReleasePlan {
     bytes32 public constant TOKEN_RUNTIME_TEMPLATE_CODE_HASH =
         0x7ff51070f093ca0416aaf3407fbdfb6b2f45f63e1f9395261ac7b6920f188e15;
     bytes32 public constant TOKEN_ARTIFACT_SHA256 =
-        0x7b3b75b1ddf253a3bcab2f7c9fecf18fc1085d44cb1db0f4b753d58d16c7c100;
+        0x021386a1bfe2c753c658e82add866f0c7d1e393cad71046994fd0e03f1c46d0a;
     bytes32 public constant HOOK_CREATION_CODE_HASH =
-        0xefe377c78f3143219f2bbde8b98d48ade578ec858a318c97ed03bd247a542cd7;
+        0xe82cda5819ee3ac8019358dcd1059b19ff5613e9586015423571e7a1db6b0ba3;
     bytes32 public constant HOOK_RUNTIME_TEMPLATE_CODE_HASH =
-        0x48b586046a8849c27094560246a5e0feabe8a08c60b0a23c1008a0704482bfb0;
+        0x2a0f13f5f62c644c19223bf641fbe3ed93a6e7a2e5f02ff478a0eb7086c5f6ba;
     bytes32 public constant HOOK_ARTIFACT_SHA256 =
-        0x3f1d8c2c6c0e12e4d2633c9003623c36abd419ebb5ba40c11f436a1295a23080;
+        0xc823286da7036b9a31d66d2726e0297fd60405f01f34745606fbd70aa4c3ed6b;
     bytes32 public constant CUSTODY_CREATION_CODE_HASH =
         0x612740484e055828758b43eaccb7d5fdc6927423e6ab84b433221999a2ebce77;
     bytes32 public constant CUSTODY_RUNTIME_TEMPLATE_CODE_HASH =
         0xf66dd925b98becf4c6f4410abf52e0c95e31b407eb99115f19d1357b6cbf5334;
     bytes32 public constant CUSTODY_ARTIFACT_SHA256 =
-        0xd618a60be3470c29cef847a9db46bd2c7870a7b1b262c607c98e0ef30ef8811a;
+        0x943bf17d52aaf90de70640b18175430c043db9cb7e862468131da694c2fc0b3d;
 
     uint256 public constant TOTAL_SUPPLY = 1_000_000_000e18;
     uint256 public constant POOL_ALLOCATION = TOTAL_SUPPLY;
@@ -133,9 +134,7 @@ contract PhaseThreeReleasePlan {
                 || draft.custodyRuntimeTemplateCodeHash != CUSTODY_RUNTIME_TEMPLATE_CODE_HASH
                 || draft.totalSupply != TOTAL_SUPPLY || draft.poolAllocation != POOL_ALLOCATION
                 || draft.remainderCustodyAllocation != REMAINDER_CUSTODY_ALLOCATION
-                || draft.nativeSeedWei == 0 || draft.tickLower != TICK_LOWER
-                || draft.tickUpper != TICK_UPPER || draft.fee != POOL_FEE
-                || draft.tickSpacing != TICK_SPACING
+                || draft.fee != POOL_FEE || draft.tickSpacing != TICK_SPACING
                 || draft.programmableFeeBps != PROGRAMMABLE_FEE_BPS
                 || draft.treasuryFeeBps != TREASURY_FEE_BPS
                 || draft.processFeeBps != PROCESS_FEE_BPS
@@ -153,10 +152,24 @@ contract PhaseThreeReleasePlan {
 
     function _isFeasibleNativeSeedTuple(Draft calldata draft) private pure returns (bool) {
         if (
-            draft.nativeSeedWei == 0 || draft.nativeSeedWei > type(uint128).max
-                || draft.amount0Max != draft.nativeSeedWei || draft.amount1Max != POOL_ALLOCATION
-                || draft.liquidity == 0 || draft.liquidity > uint128(type(int128).max)
+            draft.nativeSeedWei > type(uint128).max || draft.amount0Max != draft.nativeSeedWei
+                || draft.amount1Max != POOL_ALLOCATION || draft.liquidity == 0
+                || draft.liquidity > uint128(type(int128).max)
         ) return false;
+        if (draft.nativeSeedWei == 0) {
+            if (
+                draft.tickLower < TickMath.MIN_TICK || draft.tickUpper >= TickMath.MAX_TICK
+                    || draft.tickLower >= draft.tickUpper || draft.tickLower % TICK_SPACING != 0
+                    || draft.tickUpper % TICK_SPACING != 0
+                    || draft.liquidity > Pool.tickSpacingToMaxLiquidityPerTick(TICK_SPACING)
+            ) return false;
+            uint160 inventoryLower = TickMath.getSqrtPriceAtTick(draft.tickLower);
+            uint160 inventoryUpper = TickMath.getSqrtPriceAtTick(draft.tickUpper);
+            return draft.sqrtPriceX96 == inventoryUpper
+                && uint256(draft.liquidity)
+                    == (POOL_ALLOCATION << 96) / (uint256(inventoryUpper) - inventoryLower);
+        }
+        if (draft.tickLower != TICK_LOWER || draft.tickUpper != TICK_UPPER) return false;
         uint160 lower = TickMath.getSqrtPriceAtTick(TICK_LOWER);
         uint160 upper = TickMath.getSqrtPriceAtTick(TICK_UPPER);
         if (draft.sqrtPriceX96 <= lower || draft.sqrtPriceX96 >= upper) return false;

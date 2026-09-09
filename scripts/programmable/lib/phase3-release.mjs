@@ -365,3 +365,42 @@ export function deriveNativePriceCandidate({ nativeWei, hkmnAtomic }) {
     refundWei: (native - debt.amount0).toString(),
   };
 }
+
+/** Token-only currency1 inventory at an explicitly selected upper boundary. */
+export function deriveTokenInventoryCandidate({ hkmnAtomic, tickLower, tickUpper, tickSpacing }) {
+  if (typeof hkmnAtomic !== 'string' || !/^[1-9][0-9]*$/.test(hkmnAtomic)) {
+    throw new Error('hkmnAtomic must be a positive canonical integer string');
+  }
+  const stock = BigInt(hkmnAtomic);
+  if (stock > (1n << 128n) - 1n) throw new Error('hkmnAtomic exceeds the seed uint128 maximum');
+  if (!Number.isSafeInteger(tickSpacing) || tickSpacing < 1 || tickSpacing > 32767
+    || !Number.isSafeInteger(tickLower) || !Number.isSafeInteger(tickUpper)
+    || tickLower < -887272 || tickUpper > 887272 || tickLower >= tickUpper
+    || tickLower % tickSpacing !== 0 || tickUpper % tickSpacing !== 0) {
+    throw new Error('token inventory requires explicit valid aligned tick bounds and spacing');
+  }
+  const lower = sqrtPriceAtTick(tickLower);
+  const upper = sqrtPriceAtTick(tickUpper);
+  // Initialization at MAX_SQRT_PRICE is excluded by PoolManager.
+  if (tickUpper === 887272) throw new Error('token inventory upper price is outside initialization bounds');
+  const span = upper - lower;
+  const liquidity = stock * Q96 / span;
+  const tickCount = BigInt(Math.floor(887272 / tickSpacing) - Math.floor(-887272 / tickSpacing) + 1);
+  const maxPerTick = ((1n << 128n) - 1n) / tickCount;
+  if (liquidity <= 0n || liquidity > (1n << 127n) - 1n || liquidity > maxPerTick) {
+    throw new Error('token inventory liquidity exceeds signed or per-tick bounds');
+  }
+  const tokenDebt = (liquidity * span + Q96 - 1n) / Q96;
+  return {
+    sqrtPriceX96: upper.toString(), sqrtLowerX96: lower.toString(), sqrtUpperX96: upper.toString(),
+    liquidity: liquidity.toString(), amount0Max: '0', amount1Max: hkmnAtomic,
+    consumedAmount0: '0', consumedAmount1: tokenDebt.toString(), consumedHkmn: tokenDebt.toString(),
+    lockedHkmnDust: (stock - tokenDebt).toString(), refundWei: '0',
+  };
+}
+
+/** Keep the explicit zero-inventory mode distinct from legacy funded full-range pricing. */
+export function deriveNativeSeedCandidate({ nativeWei, hkmnAtomic, tickLower, tickUpper, tickSpacing }) {
+  if (nativeWei === '0') return deriveTokenInventoryCandidate({ hkmnAtomic, tickLower, tickUpper, tickSpacing });
+  return deriveNativePriceCandidate({ nativeWei, hkmnAtomic });
+}

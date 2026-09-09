@@ -2726,7 +2726,7 @@
             },
             "seedMaximumWei": {
               "type": "string",
-              "pattern": "^[1-9][0-9]*$"
+              "pattern": "^(?:0|[1-9][0-9]*)$"
             },
             "hkmnAtomic": {
               "const": "1000000000000000000000000000"
@@ -2773,10 +2773,14 @@
               "$ref": "#/$defs/address"
             },
             "tickLower": {
-              "const": -887220
+              "type": "integer",
+              "minimum": -887272,
+              "maximum": 887272
             },
             "tickUpper": {
-              "const": 887220
+              "type": "integer",
+              "minimum": -887272,
+              "maximum": 887272
             },
             "maxDeadlineSeconds": {
               "type": "integer",
