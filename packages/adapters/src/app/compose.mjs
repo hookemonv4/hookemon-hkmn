@@ -1719,16 +1719,19 @@ export async function compose(config) {
       now,
       leaseStore,
       budgetReader: buildBudgetReader({ config: resolved, cycleRepository, readConfiguration, liveMode }),
-      ...(liveMode ? { readPackPlan: async () => (await readConfiguration())?.packPlan ?? { schema: 'hookemon.pack-plan.v1', revision: 0, orders: [] } } : {}),
       // Only a live production cycle with a resolved money configuration and Operations accounts is
       // quote-bound: those are what a quote is denominated in and routed to, so a composition
       // without them has nothing to price. Rehearsal, dry-run and such partial compositions keep the
       // previous unadmitted path, where decideCycleBudget still uses its configured static sum and
-      // outbound still refuses for want of a repository-owned admission.
+      // outbound still refuses for want of a repository-owned admission. The saved pack plan is read
+      // only alongside that planner: it selects what the planner prices, and a composition without a
+      // planner (the live Collector-only rehearsal has no executable plan) must not wait forever on
+      // an empty selection instead of reaching its own configured-pack admission refusal.
       ...(liveMode && mode === 'production'
         && resolved.moneyConfiguration?.assets?.solanaStablecoin && resolved.moneyConfiguration?.assets?.eth
         && typeof resolved.accounts?.evm === 'string' && typeof resolved.accounts?.solana === 'string'
         ? {
+          readPackPlan: async () => (await readConfiguration())?.packPlan ?? { schema: 'hookemon.pack-plan.v1', revision: 0, orders: [] },
           admissionPlanner: buildAdmissionPlanner({
             config: resolved,
             adapters,

@@ -1524,16 +1524,27 @@ test('plan admission validates distinct unit prices against one exact aggregate'
   assert.equal(normalized.quantity, 2);
   assert.deepEqual(normalized.orders.map(order => order.unitPurchase.amountAtomic), ['25000000', '50000000']);
   assert.ok(Object.isFrozen(normalized.packPlan.orders));
-  for (const mutate of [
-    value => { value.orders[1].packId = 'base-pack'; },
-    value => { value.orders[1].quantity = 2; },
-    value => { value.quantity = 1; },
-    value => { value.aggregatePurchase.amountAtomic = '50000000'; },
-    value => { value.orders[1].unitRelayQuote.raw.details.currencyOut.amount = '1'; },
-    value => { value.processLiabilityEvidence.ceilingAtomic = '1'; },
+  for (const [mutate, expected] of [
+    [value => { value.orders[1].packId = 'base-pack'; }, /policy admission order differs from the cycle pack plan/],
+    [value => { value.orders[1].quantity = 2; }, /policy admission order differs from the cycle pack plan/],
+    [value => { value.quantity = 1; }, /policy admission quantity differs from the plan total/],
+    // A bare aggregate amount edit is caught first by the aggregate leg's own exact-output identity.
+    [value => { value.aggregatePurchase.amountAtomic = '50000000'; }, /aggregate quote exact-output identity is invalid/],
+    // A self-consistent two-pack aggregate leg (25000000 x 2) still fails the plan's 75000000 total.
+    [value => {
+      const { packId, unitPurchase, unitFundingQuote, unitFundingUsd, unitRelay, unitRelayQuote, schema, quantity, ...aggregate }
+        = exactOutputAdmission({ cycleId: value.cycleId, quantity: 2, aggregateFunding: '70000000' });
+      Object.assign(value, aggregate);
+    }, /policy admission aggregate differs from the plan purchase total/],
+    [value => { value.orders[1].unitRelayQuote.raw.details.currencyOut.amount = '1'; }, /policy admission order 1 unit quote raw destination does not bind the admitted asset amount/],
+    // The liability record stays internally consistent (ceiling = min(processLiability, remaining
+    // capacity)) and is one unit below the 70000000 aggregate funding quote.
+    [value => {
+      Object.assign(value.processLiabilityEvidence, { processLiability: '69999999', remainingProcessClaimCapacity: '69999999', ceilingAtomic: '69999999' });
+    }, /policy admission aggregateFundingQuote exceeds the persisted process liability ceiling/],
   ]) {
     const invalid = structuredClone(admission); mutate(invalid);
-    assert.throws(() => assertPolicyAdmission(invalid));
+    assert.throws(() => assertPolicyAdmission(invalid), expected);
   }
 });
 

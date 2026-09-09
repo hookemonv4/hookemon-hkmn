@@ -565,7 +565,7 @@ export async function runBuiltInForkCycle(t, { runtime, directory, credential, i
   ];
 
   const calls = {
-    getMachines: 0, generateYoloPacks: 0, getPackStatus: 0, submitTransaction: 0, openPack: 0,
+    getMachines: 0, generatePack: 0, generateYoloPacks: 0, getPackStatus: 0, submitTransaction: 0, openPack: 0,
     getNfts: 0, getBuybackAvailable: 0, buyback: 0, getBuybackCheck: 0,
   };
   const packMemosInBatchOrder = [MEMO_PACK_0, MEMO_PACK_1];
@@ -589,21 +589,34 @@ export async function runBuiltInForkCycle(t, { runtime, directory, credential, i
   const memoPackTypes = new Map();
   let generatedCount = 0;
   let purchaseCallbackCalled = false;
+  // One generation implementation behind both provider transports: a single-pack plan order arrives
+  // through the bound non-turbo `generatePack`, a multi-pack order through `generateYoloPacks`.
+  // Both hand out the same pre-built candidates in plan order, and the first generation call of
+  // either kind fires `duringPurchase`, so the callback timing is unchanged.
+  async function generateCandidates({ playerAddress, quantity, packType }) {
+    assert.equal(playerAddress, operator.publicKey.toBase58());
+    assert.ok(currentPlan.orders.some(order => order.pack === packType));
+    if (duringPurchase && !purchaseCallbackCalled) { purchaseCallbackCalled = true; await duringPurchase({ composition, request, cycleId }); }
+    const selected = packs.slice(generatedCount, generatedCount + quantity);
+    assert.equal(selected.length, quantity);
+    generatedCount += quantity;
+    for (const pack of selected) memoPackTypes.set(pack.memo, packType);
+    return selected;
+  }
   const collectorCrypt = {
     async getMachines() {
       calls.getMachines += 1;
       return structuredClone(catalog);
     },
+    async generatePack({ playerAddress, turbo, packType }) {
+      calls.generatePack += 1;
+      assert.equal(turbo, false);
+      const [pack] = await generateCandidates({ playerAddress, quantity: 1, packType });
+      return pack;
+    },
     async generateYoloPacks({ playerAddress, quantity, packType }) {
       calls.generateYoloPacks += 1;
-      assert.equal(playerAddress, operator.publicKey.toBase58());
-      assert.ok(currentPlan.orders.some(order => order.pack === packType));
-      if (duringPurchase && !purchaseCallbackCalled) { purchaseCallbackCalled = true; await duringPurchase({ composition, request, cycleId }); }
-      const selected = packs.slice(generatedCount, generatedCount + quantity);
-      assert.equal(selected.length, quantity);
-      generatedCount += quantity;
-      for (const pack of selected) memoPackTypes.set(pack.memo, packType);
-      return { packs: selected };
+      return { packs: await generateCandidates({ playerAddress, quantity, packType }) };
     },
     async getPackStatus({ memo }) {
       calls.getPackStatus += 1;
