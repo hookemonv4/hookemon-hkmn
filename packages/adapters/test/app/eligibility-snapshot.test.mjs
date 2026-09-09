@@ -1,3 +1,5 @@
+import { compileDirectPayoutPlan, createNativePayoutAmount } from '../../../runner/src/distribution/payout-plan.mjs';
+import { createDirectPayoutState, assertPayoutManifestUnchanged } from '../../src/app/stages/payout.mjs';
 import { createRewardSelectionSnapshot } from '../../../runner/src/automation/reward-selection-snapshot.mjs';
 import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -887,6 +889,18 @@ for (const limit of [100,200,300,400,500,600]) {
     const restarted = await CycleRepository.open(directory, () => 2000);
     assert.deepEqual((await restarted.readStage(cycle.cycleId, 'eligibility-snapshot')).evidence, evidence);
     assert.deepEqual((await restarted.readActiveCycle()).rewardSelection, cycle.rewardSelection);
+    const plan = compileDirectPayoutPlan({ cycleId: cycle.cycleId, eligibilityManifest: evidence,
+      finalizedReturn: createNativePayoutAmount({ assetId: 'native', amountAtomic: String(limit + 1) }),
+      previousDust: createNativePayoutAmount({ assetId: 'native', amountAtomic: '0' }),
+      returnBinding: { operations: OPERATIONS, assetId: 'native', evidenceDigest: `sha256:${'e'.repeat(64)}` } });
+    const payout = createDirectPayoutState({ plan, operations: OPERATIONS, assetId: 'native', firstNonce: '0' });
+    await restarted.persistPagedPayoutState(cycle.cycleId, 'payout', payout);
+    const reopened = await CycleRepository.open(directory, () => 3000);
+    const restored = await reopened.readPagedPayoutState(cycle.cycleId, 'payout');
+    assert.deepEqual(restored, payout);
+    assert.equal(restored.recipients.length, limit);
+    assert.equal(restored.plan.eligibility.selection.selectedCount, limit);
+    assert.doesNotThrow(() => assertPayoutManifestUnchanged(restored, plan));
     config.eligibilitySnapshot.feasibility.nativeBalanceWei = '1';
     await assert.rejects(freezeEligibilityBeforeClaim({ adapters: dualSourceAdapters(client), config, context: { cycleId: cycle.cycleId, rewardSelection: cycle.rewardSelection } }), /feasibility/);
   });
