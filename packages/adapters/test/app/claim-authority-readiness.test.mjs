@@ -1,3 +1,4 @@
+import { isProcessQuoteUsdValuation } from '../../src/relay-client.mjs';
 import { nativeProducedAdmissionFixture } from '../native/admission-fixture.mjs';
 // Missing-authority nonce recovery, prevention slice: claim-process.mjs reserves the global EVM
 // wallet nonce (reserveClaimWalletNonce) before it reaches any signer, and its own missing-authority
@@ -118,6 +119,13 @@ function claimAuthorityReadinessRepository() {
   const chainAttempts = new Map();
   const custodyLedgers = new Map();
   const decisions = new Map();
+  const admissions = new Map();
+  const usdReservations = new Map();
+  const usdReservationCalls = [];
+  async function admissionFor(cycleId) {
+    if (!admissions.has(cycleId)) admissions.set(cycleId, nativeProducedAdmissionFixture(cycleId, { amountWei: '1', nowMs: Date.now() }));
+    return admissions.get(cycleId);
+  }
   const keyFor = (cycleId, stage) => `${cycleId}:${stage}`;
   const chainKeyFor = (cycleId, stage, requestDigest) => `${cycleId}:${stage}:${requestDigest}`;
   const custodyKeyFor = ledger => `${ledger.chainId}\u0000${ledger.assetId}`;
@@ -127,11 +135,27 @@ function claimAuthorityReadinessRepository() {
     custodyLedgers,
     recordedStageRequestDigests: [],
     walletNonceReservations: [],
+    usdReservations,
+    usdReservationCalls,
+    async reserveProcessUsdClaim(cycleId, { hook, amountWei, limitMicroUsd }) {
+      const admission = await admissionFor(cycleId);
+      const valuation = admission.aggregateFundingUsd;
+      assert.equal(hook, `0x${'1'.repeat(40)}`);
+      assert.equal(amountWei, '1');
+      assert.equal(limitMicroUsd, '25000000000');
+      assert.ok(isProcessQuoteUsdValuation(valuation, { amount: admission.aggregateFundingQuote, rounding: 'up' }));
+      assert.ok(Date.now() >= valuation.observedAtMs && Date.now() < valuation.validUntilMs);
+      assert.ok(BigInt(valuation.amountMicroUsd) <= BigInt(limitMicroUsd));
+      const existing = usdReservations.get(cycleId);
+      if (existing) assert.deepEqual(existing, valuation);
+      else usdReservations.set(cycleId, valuation);
+      usdReservationCalls.push(cycleId);
+    },
     async readStage(_cycleId, stage) {
       return stage === 'eligibility-snapshot' ? { status: 'COMPLETE', evidence: { finalized: true } } : { status: 'PENDING' };
     },
     async readClaimPreconditions() { return { heldAssets: false, unattributed: false, unresolvedObligations: false }; },
-    async describeCycle(cycleId) { return { admission: await nativeProducedAdmissionFixture(cycleId, { amountWei: '1' }), releaseAmount: '1', chainAttempts: new Map(chainAttempts), custodyLedgers: new Map(custodyLedgers) }; },
+    async describeCycle(cycleId) { return { admission: await admissionFor(cycleId), releaseAmount: '1', chainAttempts: new Map(chainAttempts), custodyLedgers: new Map(custodyLedgers) }; },
     async readStageAttempt(cycleId, stage) {
       const record = attempts.get(keyFor(cycleId, stage));
       return record?.responseEvidence ?? null;
@@ -304,6 +328,7 @@ test('claim-process refuses before reserving the wallet nonce when the operator-
     cycleRepository.walletNonceReservations.length, 0,
     'the global wallet nonce must never be reserved for a claim-process attempt whose own authorization is unavailable',
   );
+  assert.equal(cycleRepository.usdReservations.size, 0, 'missing authority cannot reserve USD capacity');
   assert.equal(cycleRepository.chainAttempts.size, 0, 'no chain attempt may be durably prepared before authority is verified available');
   assert.equal(
     cycleRepository.recordedStageRequestDigests.length, 1,
@@ -367,6 +392,8 @@ test('the same prepared claim reaches its one real signature once the operator-e
     cycleRepository.walletNonceReservations.length, 1,
     'the wallet nonce must be reserved exactly once, only on the attempt that actually reaches the signer',
   );
+  assert.equal(cycleRepository.usdReservationCalls.length, 2, 'USD is checked before signing and again before broadcast');
+  assert.equal(cycleRepository.usdReservations.size, 1, 'retry uses one immutable USD reservation');
   const [{ attempt }] = cycleRepository.chainAttempts.values();
   assert.equal(attempt.state, 'BROADCAST');
 });
@@ -469,6 +496,8 @@ test('authority revoked between a successful readiness check and the actual sign
     /standing authority artifact has no matching step authorization/,
   );
 
+  assert.equal(cycleRepository.usdReservations.size, 1, 'authority revocation after readiness leaves the conservative USD reservation intact');
+  assert.equal(cycleRepository.usdReservationCalls.length, 1, 'the refused signature must never reach the broadcast USD check');
   assert.equal(resolverCalls, 2, 'the real resolver must have been consulted both at readiness and again at the actual sign boundary');
   assert.equal(signCalls.count, 0, 'no real signer call may occur once authority refuses at the sign boundary');
   assert.equal(broadcasted.length, 0, 'no broadcast may occur once authority refuses at the sign boundary');
