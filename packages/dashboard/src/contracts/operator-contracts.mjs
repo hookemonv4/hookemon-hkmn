@@ -223,7 +223,15 @@ export function assertBootstrap(value) {
     requiredKeys(catalog, ['status', 'fetchedAtMs', 'packs'], invalid);
     boundedText(catalog.status, invalid);
     if (!Number.isSafeInteger(catalog.fetchedAtMs) || catalog.fetchedAtMs < 0) invalid();
-    boundedArray(catalog.packs, 10_000, invalid);
+    boundedArray(catalog.packs, 10_000, invalid).forEach(pack => {
+      const record = requiredRecord(pack, invalid);
+      exactKeys(record, new Set(['id', 'name', 'priceMicroStablecoin', 'available']), invalid);
+      requiredKeys(record, ['id', 'name', 'priceMicroStablecoin', 'available'], invalid);
+      boundedText(record.id, invalid);
+      boundedText(record.name, invalid);
+      if (typeof record.priceMicroStablecoin !== 'string' || !/^(0|[1-9][0-9]*)$/.test(record.priceMicroStablecoin)) invalid();
+      if (record.available !== null && (!Number.isSafeInteger(record.available) || record.available < 0)) invalid();
+    });
   }
   return source;
 }

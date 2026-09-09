@@ -56,6 +56,7 @@ import { createStageDriver } from './stage-driver.mjs';
 import { projectCycleAccounting, projectPolicyCustody } from './accounting-projection.mjs';
 import { MoneyConfigurationRejected, validateMoneyConfiguration } from './environment.mjs';
 import { createSupplementaryBuybackHandler } from './stages/supplementary-buyback.mjs';
+import { catalogAtomicAmount, createActivationReadiness } from './activation-readiness.mjs';
 import {
   mutateSupplementaryPayout,
   mutateSupplementaryReturn,
@@ -241,7 +242,7 @@ function buildDashboardIdentities(config) {
   });
 }
 
-async function composeDashboard({ dashboardConfig, chainId, operationsAddress, cycleRepository, operatorControl, readLastTick, adapters, identities, getSchedulerView, listRecentWinners }) {
+async function composeDashboard({ dashboardConfig, chainId, operationsAddress, cycleRepository, operatorControl, readLastTick, adapters, identities, getSchedulerView, listRecentWinners, execution, now }) {
   const auditVerification = await verifyAuditChain(dashboardConfig.auditLogPath);
   if (!auditVerification.valid) {
     throw new Error(`compose dashboard audit chain is invalid at sequence ${auditVerification.brokenAtSequence}: ${auditVerification.reason}`);
@@ -268,6 +269,11 @@ async function composeDashboard({ dashboardConfig, chainId, operationsAddress, c
     auditLogPath: dashboardConfig.auditLogPath,
     accessJwtVerifier,
     lastTick: readLastTick,
+    ...createActivationReadiness({
+      collectorClient: adapters.collectorCrypt ?? null,
+      execution,
+      now,
+    }),
     listPacks: adapters.collectorCrypt
       ? async () => adapters.collectorCrypt.getMachines()
       : null,
@@ -608,25 +614,6 @@ function withRestartInjection(stageDriver, restartInjector) {
 /** Reads observed reserve inputs from composition config and the spend limit from the current
  * operator state. A missing or disabled configuration returns a non-ready budget for a live
  * service, while a dry-run remains able to exercise its explicitly supplied read-only budget. */
-const CATALOG_PRICE = /^(0|[1-9][0-9]*)(\.[0-9]+)?$/;
-
-/**
- * Scales a catalog price expressed in whole settlement units into atomic units without ever going
- * through a float. A price with more fractional digits than the asset has decimals is refused
- * rather than rounded: rounding a pack price silently changes what the cycle is authorized to buy.
- */
-function catalogAtomicAmount(price, decimals, label) {
-  const text = typeof price === 'number' && Number.isFinite(price) ? String(price) : price;
-  if (typeof text !== 'string' || !CATALOG_PRICE.test(text)) {
-    throw new Error(`${label} is not a canonical catalog price`);
-  }
-  const [whole, fraction = ''] = text.split('.');
-  if (fraction.length > decimals) throw new Error(`${label} has more precision than the settlement asset`);
-  const atomic = BigInt(whole) * 10n ** BigInt(decimals) + BigInt((fraction.padEnd(decimals, '0')) || '0');
-  if (atomic <= 0n) throw new Error(`${label} must be positive`);
-  return atomic;
-}
-
 /** The one configured machine for this pack, with its price validated as exact catalog evidence. */
 function admittedCatalogUnit({ catalog, packId, settlementAsset }) {
   if (!catalog || typeof catalog !== 'object' || !Array.isArray(catalog.machines)) {
@@ -1912,6 +1899,8 @@ export async function compose(config) {
       adapters,
       identities: buildDashboardIdentities(resolved),
       operationsAddress: resolved.accounts.evm,
+      execution: resolved.execution,
+      now: Date.now,
     })
     : null;
 

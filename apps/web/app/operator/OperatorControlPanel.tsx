@@ -50,8 +50,9 @@ type OperatorState = {
 type Pack = {
   id: string;
   name: string;
-  priceMicroUsdc: string;
-  available: number;
+  priceMicroStablecoin?: string;
+  priceMicroUsdc?: string;
+  available: number | null;
 };
 
 type Bootstrap = {
@@ -684,7 +685,9 @@ export default function OperatorControlPanel() {
                     <span>
                       <strong>{pack.name}</strong>
                       <small>
-                        {formatMicroStablecoin(pack.priceMicroUsdc)} (Collector Crypt, Solana stablecoin) · {pack.available} verfügbar
+                        {pack.priceMicroStablecoin || pack.priceMicroUsdc
+                          ? formatMicroStablecoin(pack.priceMicroStablecoin ?? pack.priceMicroUsdc ?? "")
+                          : "Preis nicht verfügbar"} (Collector Crypt, Solana stablecoin){pack.available !== null ? ` · ${pack.available} verfügbar` : ""}
                       </small>
                     </span>
                   </label>

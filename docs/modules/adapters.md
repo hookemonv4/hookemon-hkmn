@@ -99,6 +99,17 @@ infrastructure.
   `reconcileLive` must return `null` for unavailable evidence or a canonical value; `undefined` is
   rejected without advancing the attempt. The driver never completes a stage directly.
 
+### Activation catalog and readiness
+
+The composed dashboard receives `readCatalog` and `readReadiness` readers from
+`src/app/activation-readiness.mjs`. The catalog reader returns a public Collector machine catalog
+with prices exposed as `priceMicroStablecoin` in the stablecoin's six-decimal atomic unit, caches successful reads for one minute, shares concurrent
+refreshes, and returns `STALE` or `UNAVAILABLE` instead of throwing when the provider is down.
+Non-public machines and prices that cannot be scaled canonically are omitted. Readiness reports
+the ordered reason codes `catalog-not-loaded`, `authority-unavailable`, `configuration-missing`,
+`pack-plan-not-in-catalog`, and `execution-profile-inspection`; it never adds a scheduler budget
+wait or recheck path.
+
 ## Invariants
 
 - Only `packages/adapters` may depend on pinned npm packages with a lockfile; nothing else in the

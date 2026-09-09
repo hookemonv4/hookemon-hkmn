@@ -63,8 +63,11 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
  * @param {() => {at: number, intervalMs: number}|null} [ctx.lastTick] - optional; feeds `nextCycleAt`
  *   when this process is composed next to a live scheduler that reports its own tick times.
  * @param {number} [ctx.chainId] - when supplied, must match the selected dashboard profile.
- * @param {object|null} [ctx.catalog] @param {object} [ctx.readiness] - passed straight through to
- *   `/operator/api/bootstrap`.
+ * @param {object|null} [ctx.catalog] @param {object} [ctx.readiness] - static bootstrap values used
+ *   when the dynamic readers below are absent.
+ * @param {() => Promise<object>} [ctx.readCatalog] - dynamic bootstrap catalog reader.
+ * @param {(input: {authorityStatus: object|null, catalog: object|null}) => Promise<object>} [ctx.readReadiness]
+ *   - dynamic bootstrap readiness reader.
  * @param {(route: string, error: Error) => void} [ctx.onError]
  * @param {string} [ctx.staticPageHtml] - the built-in status page (defaults to reading
  *   src/public/index.html).

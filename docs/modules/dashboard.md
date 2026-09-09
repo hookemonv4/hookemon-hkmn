@@ -38,6 +38,15 @@ or moving custody.
 
 ## Invariants
 
+Bootstrap catalog and activation readiness are supplied dynamically by the composed adapters
+context when available. Each catalog pack has the exact wire shape
+`{ id, name, priceMicroStablecoin, available }`; the catalog contains only public, canonically priced packs and may be
+`NOT_CONFIGURED`, `UNAVAILABLE`, `STALE`, or `LOADED`. `readiness.reasons` uses the stable codes
+`catalog-not-loaded`, `authority-unavailable`, `configuration-missing`, `pack-plan-not-in-catalog`,
+and `execution-profile-inspection`, in that order with duplicates removed. The standalone server
+continues to support static `catalog` and `readiness` context values. Readiness does not invent
+budget waiting or scheduler rechecks; the scheduler remains responsible for those decisions.
+
 - Every offered control maps to at most one `operatorControl.execute({ expectedRevision, command })`
   call. The dashboard has no local substitute for an unavailable authority.
 - The active-cycle display uses a terminal state before lifecycle stages. A missing payout remains

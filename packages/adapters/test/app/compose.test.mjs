@@ -1674,6 +1674,8 @@ test('compose dashboard identities expose exactly the read-only, secret-free ide
     'collectorCryptConfigured', 'relayConfigured', 'rehearsalMode',
   ];
   const identities = composition.dashboard.ctx.identities;
+  assert.equal(typeof composition.dashboard.ctx.readCatalog, 'function');
+  assert.equal(typeof composition.dashboard.ctx.readReadiness, 'function');
   assert.deepEqual(Object.keys(identities).sort(), [...expectedKeys].sort());
   assert.equal(Object.getPrototypeOf(identities), Object.prototype);
   assert.equal(Object.isFrozen(identities), true);

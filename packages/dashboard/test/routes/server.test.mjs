@@ -185,6 +185,25 @@ test('bootstrap accepts the proxy credential and an optional valid Access assert
   assert.equal(result.body.state.desiredStatus, 'active');
 });
 
+test('bootstrap uses dynamic catalog and readiness readers when supplied', async t => {
+  const calls = [];
+  const server = await buildTestServer(t, {
+    readCatalog: async () => {
+      calls.push('catalog');
+      return { status: 'LOADED', fetchedAtMs: 1, packs: [{ id: 'base-pack', name: 'Base', priceMicroStablecoin: '1', available: null }] };
+    },
+    readReadiness: async ({ authorityStatus, catalog }) => {
+      calls.push(['readiness', authorityStatus.configuration !== null, catalog.status]);
+      return { ready: true, reasons: [] };
+    },
+  });
+  const result = await server.get('/operator/api/bootstrap', AUTH);
+  assert.equal(result.status, 200, result.diagnostics);
+  assert.equal(result.body.catalog.packs[0].id, 'base-pack');
+  assert.deepEqual(result.body.readiness, { ready: true, reasons: [] });
+  assert.deepEqual(calls, ['catalog', ['readiness', true, 'LOADED']]);
+});
+
 test('bootstrap projects only its published hard caps when runner custody caps are present', async t => {
   assert.equal(OPERATOR_HARD_CAPS.maxHeldPositions, '10');
   const server = await buildTestServer(t);
