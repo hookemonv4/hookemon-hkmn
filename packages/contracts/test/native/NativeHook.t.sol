@@ -136,7 +136,7 @@ contract NativeHookTest is Test, DeployPermit2 {
         uint160 upper = TickMath.getSqrtPriceAtTick(887220);
         uint128 liquidity =
             LiquidityAmounts.getLiquidityForAmount1(lower, fixturePrice, token.totalSupply());
-        assertEq(
+        assertLe(
             SqrtPriceMath.getAmount1Delta(lower, fixturePrice, liquidity, true), token.totalSupply()
         );
         nativeDebt = SqrtPriceMath.getAmount0Delta(fixturePrice, upper, liquidity, true);
@@ -275,6 +275,38 @@ contract NativeHookTest is Test, DeployPermit2 {
         assertEq(token.balanceOf(address(this)), 0);
     }
 
+    function testTokenInventoryLocksOnlyMechanicalRoundingInPermanentCustody() external {
+        fixtureUpperTick = 6000;
+        setUp();
+        _tokenOnlySeed();
+        uint256 expectedDebt = SqrtPriceMath.getAmount1Delta(
+            TickMath.getSqrtPriceAtTick(seed.tickLower),
+            TickMath.getSqrtPriceAtTick(seed.tickUpper),
+            uint128(seed.liquidity),
+            true
+        );
+        uint256 residual = token.totalSupply() - expectedDebt;
+        assertEq(residual, 1);
+        _seed();
+        assertEq(token.balanceOf(address(manager)), expectedDebt);
+        assertEq(token.balanceOf(address(custody)), residual);
+        assertEq(token.balanceOf(address(hook)), 0);
+        assertEq(token.balanceOf(TREASURY), 0);
+        assertEq(address(manager).balance, 0);
+        assertEq(positions.ownerOf(hook.canonicalPositionTokenId()), address(custody));
+        (bool escaped,) = address(custody)
+            .call(abi.encodeWithSignature("transfer(address,uint256)", address(this), residual));
+        assertFalse(escaped);
+        assertEq(token.balanceOf(address(custody)), residual);
+        _inventoryBuy();
+        _swap(false, -int256(token.balanceOf(address(this))));
+        assertEq(
+            token.balanceOf(address(manager)) + token.balanceOf(address(custody)),
+            token.totalSupply()
+        );
+        assertEq(address(hook).balance, hook.totalLiability());
+    }
+
     function testTokenOnlySeedRejectsUnexpectedValueAndSecondSeed() external {
         _tokenOnlySeed();
         vm.prank(LAUNCH);
@@ -327,7 +359,7 @@ contract NativeHookTest is Test, DeployPermit2 {
         seed.tickLower = -887220;
         seed.liquidity -= 100;
         vm.prank(LAUNCH);
-        vm.expectRevert(HookemonHook.SeedResidualTransferFailed.selector);
+        vm.expectRevert(HookemonHook.InvalidSeedParams.selector);
         hook.seedCanonicalLiquidity(seed);
         assertFalse(hook.canonicalLiquiditySeeded());
         assertEq(positions.nextTokenId(), 1);
