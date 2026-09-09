@@ -388,6 +388,7 @@
           "basis": "reviewed-native-71-or-retained-provider-source"
         },
         {
+
           "rule": "historical-architecture",
           "offset": 5487,
           "length": 4,
@@ -779,6 +780,7 @@
           "sha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
           "tokenStart": 2534,
           "tokenLength": 4,
+
           "tokenSha256": "8591ee9090c0c02ca1f103cb637131d8f358870aba145245ff083e138fdd705b",
           "basis": "reviewed-native-71-or-retained-provider-source"
         },
@@ -1174,6 +1176,7 @@
           "sha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
           "tokenStart": 3974,
           "tokenLength": 4,
+
           "tokenSha256": "8591ee9090c0c02ca1f103cb637131d8f358870aba145245ff083e138fdd705b",
           "basis": "reviewed-native-71-or-retained-provider-source"
         }
@@ -1566,6 +1569,7 @@
           "rule": "historical-architecture",
           "offset": 41717,
           "length": 8,
+
           "sha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
           "tokenStart": 41717,
           "tokenLength": 27,
@@ -1954,6 +1958,7 @@
           "sha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
           "tokenStart": 65009,
           "tokenLength": 8,
+
           "tokenSha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
           "basis": "reviewed-native-71-or-retained-provider-source"
         },
@@ -2338,6 +2343,7 @@
           "basis": "reviewed-native-71-or-retained-provider-source"
         },
         {
+
           "rule": "historical-architecture",
           "offset": 472179,
           "length": 8,
@@ -2721,6 +2727,7 @@
           "rule": "historical-architecture",
           "offset": 963678,
           "length": 8,
+
           "sha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
           "tokenStart": 963678,
           "tokenLength": 8,
@@ -3102,6 +3109,7 @@
           "offset": 1414446,
           "length": 8,
           "sha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
+
           "tokenStart": 1414446,
           "tokenLength": 27,
           "tokenSha256": "07e2f36ec0dae44bc4e8d11b0f2e46a58979ff4b23b0272aab077727a3c615a2",
@@ -3484,6 +3492,7 @@
           "sha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
           "tokenStart": 1747971,
           "tokenLength": 8,
+
           "tokenSha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
           "basis": "reviewed-native-71-or-retained-provider-source"
         },
@@ -3864,6 +3873,7 @@
           "sha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
           "tokenStart": 2079448,
           "tokenLength": 24,
+
           "tokenSha256": "5ac0d597343941b72f13dc0777ad8133e93f9820958d4c1f35c19813f2a623b2",
           "basis": "reviewed-native-71-or-retained-provider-source"
         },
@@ -4244,6 +4254,7 @@
           "sha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
           "tokenStart": 2438308,
           "tokenLength": 24,
+
           "tokenSha256": "5ac0d597343941b72f13dc0777ad8133e93f9820958d4c1f35c19813f2a623b2",
           "basis": "reviewed-native-71-or-retained-provider-source"
         },
@@ -4624,6 +4635,7 @@
           "sha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
           "tokenStart": 2992532,
           "tokenLength": 27,
+
           "tokenSha256": "07e2f36ec0dae44bc4e8d11b0f2e46a58979ff4b23b0272aab077727a3c615a2",
           "basis": "reviewed-native-71-or-retained-provider-source"
         },
@@ -5004,6 +5016,7 @@
           "sha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
           "tokenStart": 3370098,
           "tokenLength": 17,
+
           "tokenSha256": "1de80fb766bd978946291da751d7295105d0288ca94b9ba83341a44105fe9fc1",
           "basis": "reviewed-native-71-or-retained-provider-source"
         },
@@ -5384,6 +5397,7 @@
           "sha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
           "tokenStart": 3755998,
           "tokenLength": 27,
+
           "tokenSha256": "07e2f36ec0dae44bc4e8d11b0f2e46a58979ff4b23b0272aab077727a3c615a2",
           "basis": "reviewed-native-71-or-retained-provider-source"
         },
@@ -5766,6 +5780,7 @@
           "rule": "historical-architecture",
           "offset": 2884,
           "length": 8,
+
           "sha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
           "tokenStart": 2884,
           "tokenLength": 8,
@@ -6159,6 +6174,7 @@
         }
       ]
     },
+
     "packages/runner/src/operator/state-file.mjs": {
       "sha256": "91d7f9678e054e37db4622a607522830a11fb9fef40538316107c27db1154053",
       "matches": [
@@ -6554,6 +6570,7 @@
           "sha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
           "tokenStart": 5762,
           "tokenLength": 12,
+
           "tokenSha256": "9c94a2d57ad4a044c006da3265ccbfe85cb3a994a069a90226c1d017b7bdc21f",
           "basis": "reviewed-native-71-or-retained-provider-source"
         },
@@ -6944,6 +6961,7 @@
         }
       ]
     },
+
     "feasibility/native-test-capital-20260908/relay-outbound-response.json": {
       "sha256": "2fb148afcdef4f018d4abb9b7533a3960807bcfe91198c081296083bbb918a10",
       "matches": [
@@ -7328,6 +7346,7 @@
           "tokenStart": 19174,
           "tokenLength": 8,
           "tokenSha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
+
           "basis": "unchanged-chainDeployment-from-native-preflight-materialization"
         },
         {
@@ -7709,6 +7728,7 @@
           "sha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
           "tokenStart": 3264,
           "tokenLength": 4,
+
           "tokenSha256": "8591ee9090c0c02ca1f103cb637131d8f358870aba145245ff083e138fdd705b",
           "basis": "reviewed-native-budget-provider-evidence-or-usd-arithmetic"
         },
@@ -8067,6 +8087,7 @@
           "sha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
           "tokenStart": 328173,
           "tokenLength": 8,
+
           "tokenSha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
           "basis": "official-router-closed-source-standards-references-and-signature-domain"
         },

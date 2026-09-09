@@ -7,6 +7,12 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { DEFAULT_DIGEST_RULES, scanDigestMarkers, scanTree } from '../check-cleanroom.mjs';
+import {
+  GITLEAKS_SAFE_BOUNDARY_PEEK_BYTES,
+  SAFE_BOUNDARY_GAP_BYTES,
+  maxBlankLineGapBytes,
+  stringifyWithSafeBoundaries,
+} from '../lib/safe-boundary-json.mjs';
 
 const repoRoot = resolve(fileURLToPath(new URL('../..', import.meta.url)));
 const scanner = join(repoRoot, 'scripts', 'check-cleanroom.mjs');
@@ -653,4 +659,38 @@ test('native recognition manifest tampering fails before scanning', () => {
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test('safe-boundary JSON keeps a blank line inside every Gitleaks fragment peek window', () => {
+  const digest = 'ab'.repeat(32);
+  const value = {
+    schema: 'fixture',
+    files: Object.fromEntries(Array.from({ length: 1500 }, (_, index) => [
+      `fixtures/file-${index}.json`,
+      { sha256: digest, matches: [{ offset: index, length: 4, sha256: digest, tokenStart: index, tokenLength: 4, tokenSha256: digest }] },
+    ])),
+  };
+  const plain = `${JSON.stringify(value, null, 2)}\n`;
+  assert.ok(Buffer.byteLength(plain) > 100_000 + GITLEAKS_SAFE_BOUNDARY_PEEK_BYTES, 'fixture spans more than one fragment');
+  assert.equal(maxBlankLineGapBytes(plain), Buffer.byteLength(plain), 'pretty-printed JSON has no blank line');
+
+  const text = stringifyWithSafeBoundaries(value);
+  assert.ok(SAFE_BOUNDARY_GAP_BYTES < GITLEAKS_SAFE_BOUNDARY_PEEK_BYTES);
+  assert.ok(maxBlankLineGapBytes(text) <= SAFE_BOUNDARY_GAP_BYTES);
+  assert.deepEqual(JSON.parse(text), value);
+  assert.equal(stringifyWithSafeBoundaries(JSON.parse(text)), text, 'serialization is canonical');
+  assert.equal(text.replaceAll('\n\n', '\n'), plain, 'only empty lines are inserted');
+  assert.doesNotMatch(text, /\n\n\n/);
+  assert.ok(maxBlankLineGapBytes(stringifyWithSafeBoundaries(value, { maxGapBytes: 2_048 })) <= 2_048);
+  assert.throws(() => stringifyWithSafeBoundaries(value, { maxGapBytes: GITLEAKS_SAFE_BOUNDARY_PEEK_BYTES + 1 }), RangeError);
+  assert.throws(() => stringifyWithSafeBoundaries({ long: 'x'.repeat(4_096) }, { maxGapBytes: 2_048 }), RangeError);
+});
+
+test('native recognition manifest is the canonical safe-boundary serialization', () => {
+  const text = readFileSync(join(repoRoot, 'scripts/native-cleanroom-recognition.json'), 'utf8');
+  assert.ok(
+    maxBlankLineGapBytes(text) <= SAFE_BOUNDARY_GAP_BYTES,
+    'a Gitleaks 8.30.1 fragment boundary could split a digest line; regenerate with stringifyWithSafeBoundaries',
+  );
+  assert.equal(stringifyWithSafeBoundaries(JSON.parse(text)), text, 'manifest must be regenerated with stringifyWithSafeBoundaries');
 });
