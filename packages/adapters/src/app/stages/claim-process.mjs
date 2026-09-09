@@ -208,7 +208,7 @@ export async function prepareClaimProcessRequest({ config, cycleRepository, cont
   if (hasUnresolvedCustody(custody)) {
     throw new Error('claim-process refuses while custody has unresolved assets or obligations');
   }
-  if (cycle?.admission?.schema !== 'hookemon.policy-admission.v3') throw new Error('native claim refuses historical or unbound cycle admission');
+  if (!['hookemon.policy-admission.v3', 'hookemon.policy-admission.v4'].includes(cycle?.admission?.schema)) throw new Error('native claim refuses historical or unbound cycle admission');
   const amountAtomic = cycle?.releaseAmount;
   if (typeof amountAtomic !== 'string' || !ATOMIC_AMOUNT.test(amountAtomic) || amountAtomic === '0') {
     throw new Error('claim-process requires a positive canonical cycle release amount');

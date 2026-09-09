@@ -1,3 +1,4 @@
+import { assertPackPlan } from '../config/pack-plan.mjs';
 import { decideCycleBudget } from './budget-gate.mjs';
 import { acquireLease, assertLeaseCurrent, releaseLease, renewLease } from './exclusive-lease.mjs';
 import { PolicyRefusalError } from './policy-engine.mjs';
@@ -78,6 +79,7 @@ export class AutomatedCycleService {
   #mode;
   #providerMode;
   #packId;
+  #readPackPlan;
   #policyEngine;
   #policyCapMicroUsd;
   #recoveryGuard;
@@ -101,7 +103,7 @@ export class AutomatedCycleService {
       'feeSettlementObserver',
       'liveMode',
     ];
-    const optionalFields = ['packId', 'policyEngine', 'mode', 'providerMode', 'dryRun', 'policyCapMicroUsd', 'recoveryGuard', 'beforeComplete', 'beforeMutation', 'rehearsalSessionId', 'admissionPlanner', 'quoteRefreshPlanner', 'operationsAccounts'];
+    const optionalFields = ['readPackPlan', 'packId', 'policyEngine', 'mode', 'providerMode', 'dryRun', 'policyCapMicroUsd', 'recoveryGuard', 'beforeComplete', 'beforeMutation', 'rehearsalSessionId', 'admissionPlanner', 'quoteRefreshPlanner', 'operationsAccounts'];
     const keys = Object.keys(config);
     if (!requiredFields.every(field => Object.hasOwn(config, field)) || keys.some(field => !requiredFields.includes(field) && !optionalFields.includes(field))) {
       throw new Error('automated cycle service configuration must use the exact schema');
@@ -159,7 +161,7 @@ export class AutomatedCycleService {
       throw new Error('automated cycle service policyCapMicroUsd must be a canonical unsigned decimal string');
     }
     if (liveMode && policyEngine === null) throw new Error('live automated cycle service requires a policyEngine');
-    if (liveMode && (typeof config.packId !== 'string' || config.packId.length === 0)) {
+    if (liveMode && typeof config.readPackPlan !== 'function' && (typeof config.packId !== 'string' || config.packId.length === 0)) {
       throw new Error('live automated cycle service requires a policy packId');
     }
     if (config.packId !== undefined && (typeof config.packId !== 'string' || config.packId.length === 0)) {
@@ -170,6 +172,8 @@ export class AutomatedCycleService {
     this.#mode = mode;
     this.#providerMode = providerMode;
     this.#packId = config.packId ?? null;
+    if (config.readPackPlan !== undefined && typeof config.readPackPlan !== 'function') throw new Error('readPackPlan must be a function');
+    this.#readPackPlan = config.readPackPlan ?? null;
     this.#policyEngine = policyEngine;
     this.#policyCapMicroUsd = config.policyCapMicroUsd ?? null;
     this.#recoveryGuard = config.recoveryGuard ?? null;
@@ -268,7 +272,7 @@ export class AutomatedCycleService {
     if (custody === null) return false;
     const replacement = await this.#quoteRefreshPlanner.plan({
       cycleId: cycle.cycleId,
-      packId: this.#packId,
+      packId: cycle.admission?.orders?.[0]?.packId ?? cycle.admission?.packId ?? this.#packId,
       admission: cycle.admission,
       custody,
     });
@@ -278,7 +282,7 @@ export class AutomatedCycleService {
       cycleId: cycle.cycleId,
       releaseAmountWei: cycle.releaseAmount,
       releaseCostMicroUsd: cycle.admission?.aggregateFundingUsd?.amountMicroUsd ?? cycle.releaseCostMicroUsd,
-      packId: this.#packId,
+      packId: cycle.admission?.orders?.[0]?.packId ?? cycle.admission?.packId ?? this.#packId,
       liveMode: this.#liveMode,
       mode: this.#mode,
       capMicroUsd: this.#policyCapMicroUsd ?? undefined,
@@ -395,12 +399,16 @@ export class AutomatedCycleService {
         }
         // Only now is the cycle worth pricing. The identifier is reserved rather than invented so
         // one identity spans plan, evaluation and creation; an unused reservation journals nothing.
+        const packPlan = this.#readPackPlan === null ? undefined : assertPackPlan(await this.#readPackPlan());
+        if (packPlan !== undefined && packPlan.orders.length === 0) return { status: 'WAITING_FOR_ADMISSION', cycleId: null, stage: null, requiredProcessWei: '0' };
+        const selectedPackId = packPlan?.orders[0]?.pack ?? this.#packId;
         const reservedCycleId = this.#admissionPlanner === null ? null : this.#cycleRepository.nextCycleId();
         const admission = this.#admissionPlanner === null
           ? null
           : await this.#admissionPlanner.plan({
             cycleId: reservedCycleId,
-            packId: this.#packId,
+            packId: selectedPackId,
+            ...(packPlan === undefined ? {} : { packPlan }),
             nowMs: this.#now(),
           });
         if (this.#admissionPlanner !== null && admission === null) {
@@ -433,7 +441,7 @@ export class AutomatedCycleService {
             capMicroUsd: this.#policyCapMicroUsd ?? undefined,
             admission,
             cycleId: reservedCycleId,
-            packId: this.#packId,
+            packId: selectedPackId,
             operations: this.#operationsAccounts ?? undefined,
           });
           if (!policyDecision?.allowed) {
@@ -448,6 +456,7 @@ export class AutomatedCycleService {
         assertLeaseCurrent({ store: this.#leaseStore, lease, now: this.#now() });
         cycle = await this.#cycleRepository.createCycle({
           releaseAmount: decision.releaseAmount,
+          ...(packPlan === undefined ? {} : { packPlan }),
           mode: this.#mode,
           ...(admission === null ? {} : { cycleId: reservedCycleId, admission, operations: this.#operationsAccounts ?? null }),
           ...(this.#providerMode === null ? {} : { providerMode: this.#providerMode }),
@@ -499,17 +508,18 @@ export class AutomatedCycleService {
           };
         }
       }
+      const cyclePackId = cycle.admission?.orders?.[0]?.packId ?? cycle.admission?.packId ?? this.#packId;
       const runner = this.#runnerFactory(cycle.cycleId);
       const assertMutationAllowed = async ({
         boundary = 'mutation',
         cycleId = cycle.cycleId,
         releaseAmountWei = cycle.releaseAmount,
-        packId = this.#packId,
+        packId = cyclePackId,
         requestDigest = null,
         fencingToken = lease.fencingToken,
         stage = activeContext?.stage ?? null,
       } = {}) => {
-        if (cycleId !== cycle.cycleId || releaseAmountWei !== cycle.releaseAmount || packId !== this.#packId) {
+        if (cycleId !== cycle.cycleId || releaseAmountWei !== cycle.releaseAmount || packId !== cyclePackId) {
           throw new Error('automated cycle mutation guard context does not match the active cycle');
         }
         if (stage !== activeContext?.stage) throw new Error('automated cycle mutation guard stage does not match the active stage');
@@ -565,7 +575,7 @@ export class AutomatedCycleService {
           fencingToken: lease.fencingToken,
           releaseAmountWei: cycle.releaseAmount,
           releaseCostMicroUsd: cycle.admission?.aggregateFundingUsd?.amountMicroUsd ?? cycle.releaseCostMicroUsd,
-          packId: this.#packId,
+          packId: cycle.admission?.orders?.[0]?.packId ?? cycle.admission?.packId ?? this.#packId,
           nowMs: this.#now(),
           assertLease,
           assertMutationAllowed,
@@ -583,7 +593,7 @@ export class AutomatedCycleService {
               cycleId: cycle.cycleId,
               releaseAmountWei: cycle.releaseAmount,
               releaseCostMicroUsd: cycle.admission?.aggregateFundingUsd?.amountMicroUsd ?? cycle.releaseCostMicroUsd,
-              packId: this.#packId,
+              packId: cycle.admission?.orders?.[0]?.packId ?? cycle.admission?.packId ?? this.#packId,
               liveMode: this.#liveMode,
               mode: this.#mode,
               capMicroUsd: this.#policyCapMicroUsd ?? undefined,
@@ -597,7 +607,7 @@ export class AutomatedCycleService {
               cycleId: cycle.cycleId,
               releaseAmountWei: cycle.releaseAmount,
               releaseCostMicroUsd: cycle.admission?.aggregateFundingUsd?.amountMicroUsd ?? cycle.releaseCostMicroUsd,
-              packId: this.#packId,
+              packId: cycle.admission?.orders?.[0]?.packId ?? cycle.admission?.packId ?? this.#packId,
               liveMode: this.#liveMode,
               mode: this.#mode,
               capMicroUsd: this.#policyCapMicroUsd ?? undefined,

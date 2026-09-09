@@ -44,7 +44,7 @@ export function buildPublicCycleStatus({ profileId, internalStatus, configuratio
 
   const native = internalStatus.activeCycle?.accounting
     ? internalStatus.activeCycle.accounting.schema === 'hookemon.native-round-accounting.v1'
-    : configuration?.schema === 'hookemon.operator-configuration.v4';
+    : ['hookemon.operator-configuration.v4', 'hookemon.operator-configuration.v5'].includes(configuration?.schema);
   const status = {
     schemaVersion: native ? 7 : 6,
     profile: profile.id,

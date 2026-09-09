@@ -161,7 +161,7 @@ function collectorOnlyMoneyConfiguration() {
   };
 }
 
-// Exact fetched 25-USDC quote valued at USD 21; the fixture deliberately assumes no parity.
+// Exact fetched 25-settlement token quote valued at USD 21; the fixture deliberately assumes no parity.
 async function collectorPackFundingUsd(operator) {
   const zero = `0x${'0'.repeat(40)}`;
   const client = createRelayClient({ now: () => 1_000, quoteValidityMs: 60_000,
@@ -3088,7 +3088,7 @@ function fullRelayClient({ now = () => 1_000 } = {}) {
 test('liveMode true fails closed before claim signing when canonical nonce reads are unavailable', async t => {
   const stateDir = await tempStateDir(t);
   const statePath = join(stateDir, 'operator-state.json');
-  await writeOperatorState(statePath, livePolicyPatch('collector-nova'));
+  await writeOperatorState(statePath, { ...livePolicyPatch('collector-nova'), packPlan: { orders: [{ pack: 'collector-nova', quantity: 1 }] } });
   const distributionDir = await mkdtemp(join(tmpdir(), 'hookemon-compose-distribution-'));
   t.after(() => rm(distributionDir, { recursive: true, force: true }));
 

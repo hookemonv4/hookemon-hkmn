@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { readFile } from 'node:fs/promises';
 import { createRelayClient, createQuoteUsdValuation } from '../src/relay-client.mjs';
-import { collectorOnlyPackUsdCost } from '../src/app/compose.mjs';
+import { collectorOnlyPackCostMicroUsd } from '../src/app/compose.mjs';
 // Production entrypoint: one command that starts (or single-steps) the autonomous cycle loop against
 // real configuration read from the environment (never from a file inside this repository — see
 // environment.mjs). Subcommands:
@@ -606,7 +606,7 @@ export async function priceCollectorOnlyConfig(env, { fetchImpl = globalThis.fet
   if (env.execution?.profile !== 'rehearsal' || env.execution?.providerMode !== 'live'
     || env.rehearsal?.mode !== 'collector-only') return env;
   if (env.collectorCrypt?.packFundingUsd) {
-    collectorOnlyPackUsdCost(env);
+    collectorOnlyPackCostMicroUsd(env);
     return env;
   }
   if (!Number.isSafeInteger(env.relayQuoteValidityMs) || env.relayQuoteValidityMs <= 0) {
@@ -616,14 +616,14 @@ export async function priceCollectorOnlyConfig(env, { fetchImpl = globalThis.fet
   const recipient = release.roles?.operations;
   if (typeof recipient !== 'string' || !/^0x[0-9a-fA-F]{40}$/.test(recipient)) throw new Error('Collector USD quote requires the public Operations release role');
   const price = env.collectorCrypt?.packPrice;
-  if (!price || price.decimals !== 6 || price.assetId !== 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v') throw new Error('Collector USD quote requires exact USDC identity');
+  if (!price || price.decimals !== 6 || price.assetId !== 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v') throw new Error('Collector USD quote requires exact settlement token identity');
   const amount = { chainId: '792703809', assetId: price.assetId, decimals: price.decimals, amountAtomic: price.amountAtomic };
   const relay = createRelayClient({ baseUrl: env.relay.baseUrl, quoteValidityMs: env.relayQuoteValidityMs, fetchImpl, now });
   const quote = await relay.quoteReturnBridge({ user: env.accounts.solana, recipient, amount: amount.amountAtomic,
     originCurrency: amount.assetId, skipRouteCheck: true });
   const packFundingUsd = createQuoteUsdValuation({ quote, side: 'origin', amount, rounding: 'up', nowMs: now() });
   const priced = { ...env, now, collectorCrypt: { ...env.collectorCrypt, packFundingUsd } };
-  collectorOnlyPackUsdCost(priced);
+  collectorOnlyPackCostMicroUsd(priced);
   return priced;
 }
 
@@ -638,7 +638,7 @@ export async function initializeCollectorOnlyPolicy({
   const env = await priceCollectorOnlyConfig(readEnvironmentFn(environment, { profile: 'rehearsal' }), { fetchImpl, ...(now ? { now } : {}) });
   assertRehearsalProfile({ env, collectorOnly: true, relayRoundtrip: false });
   const packPriceAtomic = env.collectorCrypt?.packPrice?.amountAtomic;
-  const packCostMicroUsd = collectorOnlyPackUsdCost(env);
+  const packCostMicroUsd = collectorOnlyPackCostMicroUsd(env);
   assertLiveCollectorOnlyRunOptions({
     env,
     cycles: 1,
@@ -786,7 +786,7 @@ export function assertLiveCollectorOnlyRunOptions({ env, cycles, capMicroUsd, re
   if (typeof packPrice !== 'string' || !/^(0|[1-9][0-9]*)$/.test(packPrice)) {
     throw new Error('live collector-only rehearsal requires a typed configured pack price');
   }
-  if (capMicroUsd !== collectorOnlyPackUsdCost(env)) throw new Error('live collector-only rehearsal requires the exact authenticated USD purchase cost cap');
+  if (capMicroUsd !== collectorOnlyPackCostMicroUsd(env)) throw new Error('live collector-only rehearsal requires the exact authenticated USD purchase cost cap');
   return true;
 }
 
@@ -827,7 +827,7 @@ export async function buildManualApprovalHandoff({ composition, env, statePath }
     configuration: state.configuration,
     cycleId: active.cycleId,
     releaseAmountWei: active.releaseAmount,
-    releaseCostMicroUsd: active.admission?.aggregateFundingUsd?.amountMicroUsd ?? collectorOnlyPackUsdCost(env),
+    releaseCostMicroUsd: active.admission?.aggregateFundingUsd?.amountMicroUsd ?? collectorOnlyPackCostMicroUsd(env),
     ...(active.admission ? { admission: active.admission } : {}),
     packId: env.pack.code,
     liveMode: liveCollectorOnly,

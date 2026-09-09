@@ -181,6 +181,9 @@ const RECONCILIATION_REPOSITORY_METHODS = Object.freeze([
   'readClaimPreconditions',
   'readPackBatchIntent',
   'readPackBatchRequest',
+  'readPackOrderIntent',
+  'readPackOrderRequest',
+  'readPackOrderReconciliation',
   'listHeldPositions',
   'listKnownCycleIds',
 ]);
@@ -338,6 +341,27 @@ function rejectLegacyRelayOperationalAttempt(stage, attemptRecord) {
       details,
     );
   }
+}
+
+async function canResumePlanPurchase(cycleRepository, context, current) {
+  if (context.stage !== 'purchase' || !['SENT_UNKNOWN', 'PREPARED'].includes(current?.attempt?.state)
+    || typeof cycleRepository.describeCycle !== 'function'
+    || typeof cycleRepository.readPackOrderReconciliation !== 'function'
+    || typeof cycleRepository.readPackOrderIntent !== 'function' || typeof cycleRepository.readPackOrderRequest !== 'function') return false;
+  const cycle = await cycleRepository.describeCycle(context.cycleId);
+  if (cycle?.terminalState || cycle?.admission?.schema !== 'hookemon.policy-admission.v4') return false;
+  let generated = 0;
+  let missing = false;
+  for (const order of cycle.admission.orders) {
+    const intent = await cycleRepository.readPackOrderIntent(context.cycleId, order.orderIndex);
+    const response = await cycleRepository.readPackOrderRequest(context.cycleId, order.orderIndex);
+    if (intent === null && response === null) { missing = true; continue; }
+    if (missing || intent === null || response === null || intent.requestDigest !== current.attempt.requestDigest
+      || intent.admissionDigest !== digest(cycle.admission)) return false;
+    if (await cycleRepository.readPackOrderReconciliation(context.cycleId, order.orderIndex) === null) return false;
+    generated++;
+  }
+  return generated > 0 && generated < cycle.admission.orders.length;
 }
 
 function requestDigest(context, request) {
@@ -968,6 +992,10 @@ function cardReconciliationRepository(cycleRepository, context) {
     const holdCycle = leaseFencedReadMethod(cycleRepository, 'holdCycle', context.assertLease);
     if (holdCycle) repository.holdCycle = holdCycle;
   }
+  if (context.stage === 'purchase') {
+    const record = leaseFencedReadMethod(cycleRepository, 'recordPackOrderReconciliation', context.assertLease);
+    if (record) repository.recordPackOrderReconciliation = record;
+  }
   if (CUSTODY_LEDGER_RECONCILIATION_STAGES.has(context.stage)) {
     const recordCustodyLedger = leaseFencedReadMethod(cycleRepository, 'recordCustodyLedger', context.assertLease);
     if (recordCustodyLedger) repository.recordCustodyLedger = recordCustodyLedger;
@@ -1428,7 +1456,8 @@ export function createStageDriver({
       }
 
       const current = await cycleRepository.readOperationalStageAttempt(context.cycleId, context.stage);
-      if (current && !chainJournal && current.attempt.state !== 'NOT_SENT') {
+      const resumePlanPurchase = !chainJournal && await canResumePlanPurchase(cycleRepository, context, current);
+      if (current && !chainJournal && current.attempt.state !== 'NOT_SENT' && !resumePlanPurchase) {
         throw new Error(`stage-driver: "${context.stage}" already has a prepared or sent attempt and requires reconciliation`);
       }
       if (current && chainJournal && current.attempt.state === 'SENT_UNKNOWN') {
@@ -1456,14 +1485,18 @@ export function createStageDriver({
         throw error;
       }
       const preparedRequestDigest = requestDigest(context, request);
-      if (!chainJournal) {
+      if (resumePlanPurchase && current.attempt.requestDigest !== preparedRequestDigest) throw new Error('plan purchase resume requires the original parent request digest');
+      if (context.stage === 'purchase' && Array.isArray(request.orders)) {
+        await cycleRepository.recordStageRequestDigest(context.cycleId, context.stage, preparedRequestDigest);
+      }
+      if (!chainJournal && !resumePlanPurchase) {
         const prepared = createPreparedProviderMutationAttempt({
           cycleId: context.cycleId,
           stage: context.stage,
           requestDigest: preparedRequestDigest,
         });
         await cycleRepository.prepareStageAttempt(context.cycleId, context.stage, prepared);
-      } else {
+      } else if (chainJournal) {
         assertChainJournal(cycleRepository, context.stage);
         // A chain-journal stage records its attempts under per-transaction digests, but the
         // standing-authority guard below resolves against this stage-level digest. Publish it
@@ -1477,7 +1510,7 @@ export function createStageDriver({
       try {
         context.assertLease?.();
       } catch (error) {
-        if (!chainJournal) await cycleRepository.markStageAttemptNotSent(context.cycleId, context.stage);
+        if (!chainJournal && !resumePlanPurchase) await cycleRepository.markStageAttemptNotSent(context.cycleId, context.stage);
         throw error;
       }
       if (usesBuiltInHandlers && integrationPendingFor(currentHandlerConfig, context.stage)) {
@@ -1487,7 +1520,7 @@ export function createStageDriver({
       try {
         guard = await authorizeMutation(context, preparedRequestDigest, preflightAuthority, currentHandlerConfig);
       } catch (error) {
-        if (!chainJournal) await cycleRepository.markStageAttemptNotSent(context.cycleId, context.stage);
+        if (!chainJournal && !resumePlanPurchase) await cycleRepository.markStageAttemptNotSent(context.cycleId, context.stage);
         throw error;
       }
 
@@ -1560,7 +1593,7 @@ export function createStageDriver({
             // transient failure a bare retry could fix: it never reached a signature or broadcast,
             // so the write-ahead attempt stays NOT_SENT, but the whole cycle also holds for an
             // owner decision rather than being automatically re-prepared.
-            await cycleRepository.markStageAttemptNotSent(context.cycleId, context.stage);
+            if (!resumePlanPurchase) await cycleRepository.markStageAttemptNotSent(context.cycleId, context.stage);
             await cycleRepository.holdCycle(context.cycleId, 'HELD_DATA_UNVERIFIED', {
               stage: context.stage,
               reason: 'TRANSACTION_POLICY_REFUSED',
@@ -1569,7 +1602,7 @@ export function createStageDriver({
           } else if (reachedProviderCapability) {
             await cycleRepository.markStageAttemptSentUnknown(context.cycleId, context.stage);
           } else {
-            await cycleRepository.markStageAttemptNotSent(context.cycleId, context.stage);
+            if (!resumePlanPurchase) await cycleRepository.markStageAttemptNotSent(context.cycleId, context.stage);
           }
         }
         throw error;
