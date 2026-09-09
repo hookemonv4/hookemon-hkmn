@@ -6,7 +6,7 @@ The managed bot limits native ETH process claims using authenticated USD valuati
 
 ## Public interface
 
-`CycleRepository.reserveProcessUsdClaim(cycleId, { hook, amountWei, limitMicroUsd })` checks the immutable admission's exact native amount, hook, fresh durable Relay valuation, and upward USD rounding. It atomically reserves against one global chain-and-hook budget before signing and rechecks before broadcasting. `finalizeProcessUsdClaim(cycleId, { hook, proof })` accepts a process-authenticated native claim payment proof or a reverted transaction gas proof bound to the persisted claim attempt and custody ledger. The stage driver exposes finalization through its lease-fenced reconciliation facade.
+`CycleRepository.reserveProcessClaimUsd(cycleId, { hook, amountWei, limitMicroUsd })` checks the immutable admission's exact native amount, hook, fresh durable Relay valuation, and upward USD rounding. It atomically reserves against one global chain-and-hook budget before signing and rechecks before broadcasting. `finalizeProcessClaimUsd(cycleId, { hook, proof })` accepts a process-authenticated native claim payment proof or a reverted transaction gas proof bound to the persisted claim attempt and custody ledger. The stage driver exposes finalization through its lease-fenced reconciliation facade.
 
 ## Invariants
 

@@ -67,41 +67,41 @@ test('owner control defaults to USD25000, migrates absent knob, accepts zero and
 });
 test('claims share durable six-hour USD capacity across cycles and exact expiry, while wei amounts stay unchanged', async t => {
   const f = await fixture(t); await f.open('claim-first');
-  assert.equal((await f.repository.reserveProcessUsdClaim('claim-first', claim)).amountWei, '42');
+  assert.equal((await f.repository.reserveProcessClaimUsd('claim-first', claim)).amountWei, '42');
   const { proof } = await payment('claim-first');
-  await f.repository.finalizeProcessUsdClaim('claim-first', { hook, proof });
-  await f.repository.finalizeProcessUsdClaim('claim-first', { hook, proof });
+  await f.repository.finalizeProcessClaimUsd('claim-first', { hook, proof });
+  await f.repository.finalizeProcessClaimUsd('claim-first', { hook, proof });
   await f.archive('claim-first');
   f.time(epoch + 21_599_000); await f.open('claim-next');
-  await assert.rejects(f.repository.reserveProcessUsdClaim('claim-next', claim), /six-hour limit/);
+  await assert.rejects(f.repository.reserveProcessClaimUsd('claim-next', claim), /six-hour limit/);
   f.time(epoch + 21_600_000);
-  assert.equal((await f.repository.reserveProcessUsdClaim('claim-next', claim)).amountMicroUsd, '15000000000');
+  assert.equal((await f.repository.reserveProcessClaimUsd('claim-next', claim)).amountMicroUsd, '15000000000');
 });
 test('unknown reservations never expire and restart cannot reset used USD or duplicate a cycle debit', async t => {
   const f = await fixture(t); await f.open('claim-unknown');
-  const first = await f.repository.reserveProcessUsdClaim('claim-unknown', claim);
-  const restarted = await f.reopen(); assert.deepEqual(await restarted.reserveProcessUsdClaim('claim-unknown', claim), first);
+  const first = await f.repository.reserveProcessClaimUsd('claim-unknown', claim);
+  const restarted = await f.reopen(); assert.deepEqual(await restarted.reserveProcessClaimUsd('claim-unknown', claim), first);
   // Archival does not represent transaction finality and cannot free the global reservation.
   await f.archive('claim-unknown'); f.time(epoch + 30_000_000); await f.open('claim-after-restart');
-  await assert.rejects((await f.reopen()).reserveProcessUsdClaim('claim-after-restart', claim), /six-hour limit/);
+  await assert.rejects((await f.reopen()).reserveProcessClaimUsd('claim-after-restart', claim), /six-hour limit/);
 });
 test('parallel same-cycle attempts reserve once and configured lowering or zero refuses reuse before broadcast', async t => {
   const f = await fixture(t); await f.open('claim-race', '25000000000');
-  const results = await Promise.allSettled([f.repository.reserveProcessUsdClaim('claim-race', claim), f.repository.reserveProcessUsdClaim('claim-race', claim)]);
+  const results = await Promise.allSettled([f.repository.reserveProcessClaimUsd('claim-race', claim), f.repository.reserveProcessClaimUsd('claim-race', claim)]);
   assert.ok(results.some(result => result.status === 'fulfilled'));
-  assert.equal((await f.repository.reserveProcessUsdClaim('claim-race', claim)).amountMicroUsd, '25000000000');
-  for (const limitMicroUsd of ['0', '24999999999']) await assert.rejects(f.repository.reserveProcessUsdClaim('claim-race', { ...claim, limitMicroUsd }), /six-hour limit/);
+  assert.equal((await f.repository.reserveProcessClaimUsd('claim-race', claim)).amountMicroUsd, '25000000000');
+  for (const limitMicroUsd of ['0', '24999999999']) await assert.rejects(f.repository.reserveProcessClaimUsd('claim-race', { ...claim, limitMicroUsd }), /six-hour limit/);
 });
 test('USD50000 requires explicit configured increase; excess, changed amount, wrong hook and stale prices refuse', async t => {
   const f = await fixture(t); await f.open('claim-large', '50000000000');
-  await assert.rejects(f.repository.reserveProcessUsdClaim('claim-large', claim), /six-hour limit/);
-  for (const patch of [{ limitMicroUsd: '50000000001' }, { amountWei: '43' }, { hook: `0x${'66'.repeat(20)}` }]) await assert.rejects(f.repository.reserveProcessUsdClaim('claim-large', { ...claim, ...patch }));
-  assert.equal((await f.repository.reserveProcessUsdClaim('claim-large', { ...claim, limitMicroUsd: '50000000000' })).amountMicroUsd, '50000000000');
-  f.time(epoch + 60_000); await assert.rejects(f.repository.reserveProcessUsdClaim('claim-large', { ...claim, limitMicroUsd: '50000000000' }), /fresh authenticated/);
+  await assert.rejects(f.repository.reserveProcessClaimUsd('claim-large', claim), /six-hour limit/);
+  for (const patch of [{ limitMicroUsd: '50000000001' }, { amountWei: '43' }, { hook: `0x${'66'.repeat(20)}` }]) await assert.rejects(f.repository.reserveProcessClaimUsd('claim-large', { ...claim, ...patch }));
+  assert.equal((await f.repository.reserveProcessClaimUsd('claim-large', { ...claim, limitMicroUsd: '50000000000' })).amountMicroUsd, '50000000000');
+  f.time(epoch + 60_000); await assert.rejects(f.repository.reserveProcessClaimUsd('claim-large', { ...claim, limitMicroUsd: '50000000000' }), /fresh authenticated/);
 });
 test('copied finality and another cycle proof cannot release reservations; authenticated revert releases exactly once', async t => {
-  const f = await fixture(t); await f.open('claim-revert', '25000000000'); await f.repository.reserveProcessUsdClaim('claim-revert', claim);
-  const other = await payment('claim-other'); await assert.rejects(f.repository.finalizeProcessUsdClaim('claim-revert', { hook, proof: other.proof }), /unverified/);
+  const f = await fixture(t); await f.open('claim-revert', '25000000000'); await f.repository.reserveProcessClaimUsd('claim-revert', claim);
+  const other = await payment('claim-other'); await assert.rejects(f.repository.finalizeProcessClaimUsd('claim-revert', { hook, proof: other.proof }), /unverified/);
   const { proof, signedTransaction, transactionHash } = await payment('claim-revert', { reverted: true });
   const requestDigest = `sha256:${'ab'.repeat(32)}`;
   await f.repository.prepareChainTransactionAttempt('claim-revert', 'claim-process', createPreparedChainTransactionAttempt({ cycleId: 'claim-revert', stage: 'claim-process', requestDigest }));
@@ -109,15 +109,15 @@ test('copied finality and another cycle proof cannot release reservations; authe
   await f.repository.recordCustodyLedger('claim-revert', { schema: 'hookemon.custody-ledger.v3', cycleId: 'claim-revert', ...eth,
     ...Object.fromEntries(CUSTODY_LEDGER_BUCKETS.map(key => [key, '0'])), verifiedCurrentBalance: null, expectedCycleAsset: null,
     gasReserve: { ...eth, amountAtomic: '30000' }, gasSpent: { ...eth, amountAtomic: '0' }, gasPayments: [] });
-  await assert.rejects(f.repository.finalizeProcessUsdClaim('claim-revert', { hook, proof: structuredClone(proof) }), /process native payment proof/);
-  assert.equal((await f.repository.finalizeProcessUsdClaim('claim-revert', { hook, proof })).state, 'REVERTED');
-  assert.equal((await (await f.reopen()).finalizeProcessUsdClaim('claim-revert', { hook, proof })).state, 'REVERTED');
-  await assert.rejects(f.repository.reserveProcessUsdClaim('claim-revert', claim), /already finalized/);
+  await assert.rejects(f.repository.finalizeProcessClaimUsd('claim-revert', { hook, proof: structuredClone(proof) }), /process native payment proof/);
+  assert.equal((await f.repository.finalizeProcessClaimUsd('claim-revert', { hook, proof })).state, 'REVERTED');
+  assert.equal((await (await f.reopen()).finalizeProcessClaimUsd('claim-revert', { hook, proof })).state, 'REVERTED');
+  await assert.rejects(f.repository.reserveProcessClaimUsd('claim-revert', claim), /already finalized/);
 });
 
 for (const reverted of [false, true]) test(`actual stage driver reconciles USD ${reverted ? 'revert' : 'success'} through lease-fenced facade`, async t => {
   const f = await fixture(t), id = `driver-${reverted ? 'revert' : 'success'}`;
-  await f.open(id); await f.repository.reserveProcessUsdClaim(id, claim);
+  await f.open(id); await f.repository.reserveProcessClaimUsd(id, claim);
   await f.repository.prepareStage(id, 'eligibility-snapshot'); await f.repository.completeStage(id, 'eligibility-snapshot', { synthetic: true });
   const p = await payment(id, { reverted }), requestDigest = `sha256:${'cd'.repeat(32)}`;
   await f.repository.prepareChainTransactionAttempt(id, 'claim-process', createPreparedChainTransactionAttempt({ cycleId: id, stage: 'claim-process', requestDigest }));
@@ -140,6 +140,6 @@ for (const reverted of [false, true]) test(`actual stage driver reconciles USD $
   if (reverted) await assert.rejects(run(), /reverted on-chain/);
   else assert.equal((await run()).claimedAmountAtomic, '42');
   assert.ok(leaseChecks > 0);
-  const result = await f.repository.finalizeProcessUsdClaim(id, { hook, proof: p.proof });
+  const result = await f.repository.finalizeProcessClaimUsd(id, { hook, proof: p.proof });
   assert.equal(result.state, reverted ? 'REVERTED' : 'CONFIRMED');
 });

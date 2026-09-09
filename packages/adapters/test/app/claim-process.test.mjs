@@ -138,8 +138,8 @@ function chainRepository() {
   const custodyLedgers = new Map();
   const writes = [];
   const repo = {
-    async reserveProcessUsdClaim() {},
-    async finalizeProcessUsdClaim() {},
+    async reserveProcessClaimUsd() {},
+    async finalizeProcessClaimUsd() {},
     get chainAttempt() { return chainAttempt; },
     set chainAttempt(value) { chainAttempt = value; },
     get custodyLedgers() { return new Map(custodyLedgers); },
@@ -204,7 +204,7 @@ test('mutateClaimProcess persists signed raw bytes and replays those exact bytes
   const account = privateKeyToAccount(`0x${'1'.repeat(64)}`);
   const cycleRepository = chainRepository();
   const usdReservations = [];
-  cycleRepository.reserveProcessUsdClaim = async (cycleId, value) => { usdReservations.push({ cycleId, ...value }); };
+  cycleRepository.reserveProcessClaimUsd = async (cycleId, value) => { usdReservations.push({ cycleId, ...value }); };
   const walletReservations = [];
   let reservationEstablished = false;
   cycleRepository.reserveWalletNonce = async (cycleId, reservation) => {

@@ -1604,8 +1604,8 @@ function writeAheadRepository() {
   const chainKeyFor = (cycleId, stage, requestDigest) => `${cycleId}:${stage}:${requestDigest}`;
   const custodyKeyFor = ledger => `${ledger.chainId}\u0000${ledger.assetId}`;
   return {
-    async reserveProcessUsdClaim() {},
-    async finalizeProcessUsdClaim() {},
+    async reserveProcessClaimUsd() {},
+    async finalizeProcessClaimUsd() {},
     attempts,
     chainAttempts,
     custodyLedgers,

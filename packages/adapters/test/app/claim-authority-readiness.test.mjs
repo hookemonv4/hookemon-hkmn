@@ -137,7 +137,7 @@ function claimAuthorityReadinessRepository() {
     walletNonceReservations: [],
     usdReservations,
     usdReservationCalls,
-    async reserveProcessUsdClaim(cycleId, { hook, amountWei, limitMicroUsd }) {
+    async reserveProcessClaimUsd(cycleId, { hook, amountWei, limitMicroUsd }) {
       const admission = await admissionFor(cycleId);
       const valuation = admission.aggregateFundingUsd;
       assert.equal(hook, `0x${'1'.repeat(40)}`);

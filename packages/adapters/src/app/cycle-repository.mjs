@@ -199,8 +199,8 @@ export const CYCLE_REPOSITORY_INTERFACE = Object.freeze([
   'settleRelayLeg',
   'readStandingAuthorityDecision',
   'recordStandingAuthorityDecision',
-  'reserveProcessUsdClaim',
-  'finalizeProcessUsdClaim',
+  'reserveProcessClaimUsd',
+  'finalizeProcessClaimUsd',
   'reserveWalletNonce',
   'assertWalletNonce',
   'releaseWalletNonce',
@@ -6536,7 +6536,7 @@ export class CycleRepository {
   }
 
   /** Owner-configured USD policy for the managed claim path; the hook itself still enforces wei. */
-  async reserveProcessUsdClaim(cycleId, { hook, amountWei, limitMicroUsd = PROCESS_USD_DEFAULT_MICRO }) {
+  async reserveProcessClaimUsd(cycleId, { hook, amountWei, limitMicroUsd = PROCESS_USD_DEFAULT_MICRO }) {
     if (typeof limitMicroUsd !== 'string' || !/^(0|[1-9][0-9]*)$/.test(limitMicroUsd)
       || BigInt(limitMicroUsd) > PROCESS_USD_HARD_MAX_MICRO) throw new Error('process USD claim limit exceeds the hard maximum or is invalid');
     const state = await this.#replay(cycleId);
@@ -6564,7 +6564,7 @@ export class CycleRepository {
     if (previous) return structuredClone(previous);
     const value = { ...budget, entries: [...budget.entries, reservation] };
     await this.#append(cycleId, 'process-usd-claim-reserved', { hook: hook.toLowerCase(), reservation }, {
-      operation: 'reserveProcessUsdClaim',
+      operation: 'reserveProcessClaimUsd',
       ...(existing === null ? { globalKeyReservations: [{ key, value }] }
         : { globalKeyReplacements: [{ key, expectedValue: existing, value }] }),
     });
@@ -6572,7 +6572,7 @@ export class CycleRepository {
   }
 
   /** Only a live native payment/gas capability can settle a durable reservation. */
-  async finalizeProcessUsdClaim(cycleId, { hook, proof }) {
+  async finalizeProcessClaimUsd(cycleId, { hook, proof }) {
     const key = processUsdBudgetKey(hook);
     const existing = await this.#store.readGlobalKey(key);
     if (existing === null) throw new Error('process USD claim has no durable reservation');

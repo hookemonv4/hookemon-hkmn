@@ -1054,7 +1054,7 @@ function chainReconciliationRepository(cycleRepository, assertLease) {
     'recordBroadcast',
     'recordCustodyLedger',
     'recordFinality',
-    'finalizeProcessUsdClaim',
+    'finalizeProcessClaimUsd',
     'recordRelayLeg',
     'recordRelayLegSource',
     'settleRelayLeg',
