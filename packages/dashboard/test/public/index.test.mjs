@@ -326,3 +326,36 @@ for (const failure of ['stale', 'unreadable', 'mismatch']) test(`recipient save 
   assert.equal(page.element('rewardRecipientLimit').value, '200');
   assert.equal(page.element('saveRewardBtn').disabled, true);
 });
+
+for (const first of ['reward', 'packs']) test(`saving ${first} preserves the other draft and advances its shared CAS revision`, async () => {
+  const html = await readFile(join(process.cwd(), 'packages/dashboard/src/public/index.html'), 'utf8');
+  const script = html.match(/<script>\s*([\s\S]*?)<\/script>/)[1];
+  let version = 7, rewardRecipientLimit = 200, orders = [], allowedPackIds = [];
+  const requests = [];
+  const page = browserHarness({ session: new Map(), requests, nextRequestId: () => `shared-${requests.length}`,
+    get: async path => path.endsWith('bootstrap') ? { state: { version, rewardRecipientLimit, allowedPackIds, packPlan: { orders } }, rewardRecipientLimits: [100,200,300] }
+      : path.endsWith('packs') ? { configured: true, machines: [{ code: 'aa-pack' }] } : {},
+    response: async () => {
+      const request = requests.at(-1);
+      if (request.expectedVersion !== version) return { ok: false, text: async () => JSON.stringify({ commandState: 'REJECTED', code: 'STALE_VERSION' }) };
+      const patch = request.command.configuration;
+      if (patch.rewardRecipientLimit !== undefined) rewardRecipientLimit = patch.rewardRecipientLimit;
+      if (patch.packPlan) { orders = patch.packPlan.orders; allowedPackIds = patch.allowedPackIds; }
+      version++;
+      return { ok: true, text: async () => JSON.stringify({ commandState: 'APPLIED' }) };
+    },
+  });
+  vm.runInNewContext(script, page.context); page.click('loadBtn'); await settlePage();
+  page.element('rewardRecipientLimit').value = '300'; page.element('rewardRecipientLimit').trigger('change');
+  page.click('selectAllPacksBtn');
+  page.click(first === 'reward' ? 'saveRewardBtn' : 'savePacksBtn'); await settlePage();
+  assert.equal(page.element('rewardRecipientLimit').value, '300', 'reward draft is preserved');
+  assert.equal(page.element('packList').children[0].children[1].children[0].children[0].checked, true, 'pack draft is preserved');
+  page.click(first === 'reward' ? 'savePacksBtn' : 'saveRewardBtn'); await settlePage();
+  assert.deepEqual(requests.map(request => request.expectedVersion), [7,8]);
+  assert.equal(version, 9);
+  assert.equal(rewardRecipientLimit, 300);
+  assert.deepEqual(orders, [{ pack: 'aa-pack', quantity: 1 }]);
+  assert.equal(page.element('packMessage').textContent, 'Pack plan saved.');
+  assert.match(page.element('rewardMessage').textContent, /saved and verified/);
+});

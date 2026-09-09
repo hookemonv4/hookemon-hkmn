@@ -241,6 +241,15 @@
       $('packMessage').textContent = !planAvailable ? 'This service does not expose a saved pack plan. Upgrade the service to edit it.' : (packCatalogReady ? '' : 'Selection cannot be saved until the catalog is available.');
       updatePackSelection();
     }
+    function syncEditorRevisions(bootstrap) {
+      var state = bootstrap.state;
+      revision = state.version;
+      // Advance another draft only when its saved baseline still matches authoritative state.
+      // An unrelated operator edit must retain the stale CAS protection.
+      if (state.rewardRecipientLimit === savedRewardLimit) rewardRevision = revision;
+      if (state.packPlan && JSON.stringify(state.packPlan.orders) === JSON.stringify(savedPackOrders)
+          && Array.isArray(state.allowedPackIds) && JSON.stringify(state.allowedPackIds.slice().sort()) === JSON.stringify(allowedPackIds)) packRevision = revision;
+    }
     async function savePacks() {
       if (savingPacks || savingReward || $('savePacksBtn').disabled) return;
       savingPacks = true; updatePackSelection(); updateRewardSelection();
@@ -258,11 +267,11 @@
         if (isReconciledCommandState(response.commandState)) clearRequest(pending.key);
         if (response.commandState !== 'APPLIED') throw new Error(response.code || 'Selection has not been confirmed. Retry to reconcile the same request.');
         var bootstrap = await api('/operator/api/bootstrap');
-        revision = bootstrap.state.version; packRevision = revision;
-        if (!bootstrap.state.packPlan || JSON.stringify(bootstrap.state.packPlan.orders) !== JSON.stringify(orders)) throw new Error('Saved selection differs. Reload to see the current configuration.');
+        if (!Number.isSafeInteger(bootstrap.state.version) || !bootstrap.state.packPlan || JSON.stringify(bootstrap.state.packPlan.orders) !== JSON.stringify(orders)) throw new Error('Saved selection differs. Reload to see the current configuration.');
         savedPackOrders = bootstrap.state.packPlan.orders;
         savedPackIds = savedPackOrders.map(function (order) { return order.pack; });
         allowedPackIds = bootstrap.state.allowedPackIds.slice().sort();
+        syncEditorRevisions(bootstrap);
         $('packMessage').textContent = 'Pack plan saved.';
       } catch (error) {
         if (typeof pending !== 'undefined' && isReconciledCommandState(error.responseBody && error.responseBody.commandState)) clearRequest(pending.key);
@@ -298,7 +307,7 @@
         if (response.commandState !== 'APPLIED') throw new Error(response.code || 'Recipient limit has not been confirmed. Retry to reconcile the same request.');
         var bootstrap = await api('/operator/api/bootstrap');
         if (!bootstrap.state || bootstrap.state.rewardRecipientLimit !== selected || !Number.isSafeInteger(bootstrap.state.version) || !Array.isArray(bootstrap.rewardRecipientLimits) || !bootstrap.rewardRecipientLimits.includes(selected)) throw new Error('Recipient readback differs or is unavailable. Reload before saving again.');
-        renderReward(bootstrap); revision = bootstrap.state.version;
+        renderReward(bootstrap); syncEditorRevisions(bootstrap);
         $('rewardMessage').textContent = 'Recipient limit saved and verified. Applies to the next cycle.';
       } catch (error) {
         if (typeof pending !== 'undefined' && isReconciledCommandState(error.responseBody && error.responseBody.commandState)) clearRequest(pending.key);
