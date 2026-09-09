@@ -187,3 +187,5 @@ snapshot. A missing historic snapshot yields null and an all-holder label; the c
 never supplies an active or historical cycle limit. The website's active-cycle decoder accepts this
 null representation. `operator/control.mjs` validates the snapshot digest and cycle identity before
 projecting repository data.
+
+The disconnected local selection wrapper uses `assertLocalSelectionCommand` to accept only pack-plan and reward-recipient updates while paused, execution-paused and non-live. Reward-only edits do not depend on catalog availability. Pack edits retain catalog membership and the existing allowlist protections. The wrapper grants no execution operation.
