@@ -5,15 +5,16 @@ import { envelope, sha256 } from './native-issuance-commitments.mjs';
 import { buildNativeSourceBundle } from './native-source-bundle.mjs';
 import { assertObservedNativeRuntime } from './native-runtime-observer.mjs';
 
-const REQUIREMENTS_SHA256 = '0xb0f2f2a0a6dcce44a08940d70be107988800c58b950ae1dcc660d32de62329c3';
+const REQUIREMENTS_SHA256 = '0xc89397d3ece140e601f2bb494f8f13a86996faca5f5b43d013abc770abfadf5c';
 // Official solc 0.8.26 macosx-amd64 distribution, independently captured by the coordinator.
 // https://binaries.soliditylang.org/macosx-amd64/list.json
 const COMPILER_SHA256 = '0x0ff016aef2396b12d1fc65429d8ea6cf53c2ee4b041bb8925644615ee1c30ab9';
 const KEYS = new Set(['root', 'compilerPath', 'standardInputPath', 'sourceRoot', 'sourceBundleManifest', 'excludedOutputPaths', 'observedRuntime']);
 
-function requirementsBytes(root) {
-  // The collector has already checked every root component; this fixed file is separate from
-  // the provider bundle. Its actual bytes must match the independently frozen revision 73.
+/** Reads the frozen revision-74 bytes; this check supplies no runtime or launch authority. */
+export function readNativeRequirementsBytes(root) {
+  // Production calls follow the collector, which checks every root component. This fixed
+  // file is separate from the provider bundle and must match frozen revision 74.
   const directory = resolve(root, 'specs');
   const path = resolve(directory, 'requirements.json');
   const parent = lstatSync(directory), file = lstatSync(path);
@@ -25,7 +26,7 @@ function requirementsBytes(root) {
     const opened = fstatSync(fd);
     if (!opened.isFile() || opened.dev !== file.dev || opened.ino !== file.ino) throw new TypeError('native commitment inputs: requirements file rebound');
     const bytes = readFileSync(fd);
-    if (sha256(bytes) !== REQUIREMENTS_SHA256) throw new TypeError('native commitment inputs: frozen revision-73 requirements mismatch');
+    if (sha256(bytes) !== REQUIREMENTS_SHA256) throw new TypeError('native commitment inputs: frozen revision-74 requirements mismatch');
     return bytes;
   } finally { closeSync(fd); }
 }
@@ -59,7 +60,7 @@ export function prepareNativeCommitmentInputs(options) {
     standardInputPath: options.standardInputPath, sourceRoot: options.sourceRoot === undefined ? '.' : options.sourceRoot,
     sourceBundleManifest, excludedOutputPaths,
   });
-  const requirements = requirementsBytes(options.root);
+  const requirements = readNativeRequirementsBytes(options.root);
   // Recheck the private observation after the filesystem work; no caller-supplied digest replaces it.
   assertObservedNativeRuntime(observedRuntime);
   const runtimeAuthorityDigest = envelope('HOOKEMON_NATIVE_ISSUANCE_RUNTIME_AUTHORITY_V1', observedRuntime.runtime);
