@@ -1029,10 +1029,10 @@
       "sha256": "e7b070413282d5f6716c5345eae330f30b4105bc7971e123aafa479e219ef3bf"
     },
     {
-      "bytes": 5617,
+      "bytes": 5615,
       "kind": "capability-evidence:phase-three-launch-graph",
       "path": "release/phase3/launch-inputs.example.json",
-      "sha256": "6f500b6b290c32fe827dfcfc56b08051e5c354ca66986910e4d83c768fbd4ff1"
+      "sha256": "68d1ec551980a4773b75e6c8f3f98147a9f584ba9803848ad35b3b64271798a1"
     },
     {
       "bytes": 6316,
@@ -2388,7 +2388,7 @@
     }
   ],
   "javascriptImportResolutions": [],
-  "reviewTargetHash": "sha256:40f984e75d612fa0331034d7f21a2ccbda48d373b0399468b3f2eeae86391f5c",
+  "reviewTargetHash": "sha256:e1e37886fe94e9ae8e509940767357cb9988284bab8e4dab2f3b6053a1f28ada",
   "schemaVersion": 1,
   "standardVersion": "1.5.0",
   "submissionHash": "sha256:2050a999d23af7df709e8454621feed76eb76c74168d32b9330eea4485168c75"

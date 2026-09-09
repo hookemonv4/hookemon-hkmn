@@ -23,6 +23,43 @@ const HEX_BYTES = /^0x(?:[0-9a-fA-F]{2})*$/;
 const ZERO_BYTES32 = `0x${'0'.repeat(64)}`;
 const UINT256_MODULUS = 1n << 256n;
 const LAUNCH_SOLC = '0.8.26+commit.8a97fa7a';
+const LAUNCH_METADATA = Object.freeze({ appendCBOR: false, bytecodeHash: 'none', useLiteralContent: false });
+
+// The historical (v1, USDG quote) and native (v2, ETH quote) launch profiles differ only in
+// optimizer runs and viaIR. A profile is selected from the ConstructorConfig field identity
+// (isNativeConstructorConfig), never from a caller flag.
+export const HISTORICAL_LAUNCH_PROFILE = Object.freeze({
+  solc: LAUNCH_SOLC,
+  optimizer: Object.freeze({ enabled: true, runs: 1000 }),
+  viaIR: false,
+  evmVersion: 'cancun',
+  metadata: LAUNCH_METADATA,
+});
+export const NATIVE_LAUNCH_PROFILE = Object.freeze({
+  solc: LAUNCH_SOLC,
+  optimizer: Object.freeze({ enabled: true, runs: 200 }),
+  viaIR: true,
+  evmVersion: 'cancun',
+  metadata: LAUNCH_METADATA,
+});
+
+// Repository identity of the hook target, as recorded by release/phase3/deployment-manifest.json
+// (packages/contracts/src/HookemonHook.sol) relative to the Foundry root.
+const HOOK_SOURCE_PATH = 'src/HookemonHook.sol';
+const HOOK_CONTRACT_NAME = 'HookemonHook';
+const HOOK_CONSTRUCTOR_FIELDS = Object.freeze([
+  'manager', 'positionManager', 'permit2', 'usdg', 'hkmn', 'tickSpacing', 'programmable', 'treasury', 'operations',
+  'launchAuthority', 'issuanceAuthority', 'expectedDecimals', 'bindingDigest', 'runtimeDigest', 'processClaimLimit6h',
+  'processClaimLimitMax', 'processClaimMaxCount', 'operationsRotationDelay',
+]);
+const NATIVE_CONSTRUCTOR_FIELD_NAMES = Object.freeze({
+  usdg: 'quoteCurrency',
+  processClaimLimit6h: 'processClaimLimit6hWei',
+  processClaimLimitMax: 'processClaimLimitMaxWei',
+});
+const NATIVE_HOOK_CONSTRUCTOR_FIELDS = Object.freeze(
+  HOOK_CONSTRUCTOR_FIELDS.map((field) => NATIVE_CONSTRUCTOR_FIELD_NAMES[field] ?? field),
+);
 
 // Mirrored from packages/contracts/src/HookemonHook.sol -- see the file-level comment above.
 export const ALL_HOOK_PERMISSION_MASK = 0x3fffn; // (1 << 14) - 1
@@ -204,6 +241,19 @@ export function encodeNativeConstructorConfig(config) {
     processClaimLimit6h: processClaimLimit6hWei, processClaimLimitMax: processClaimLimitMaxWei });
 }
 
+// A native ConstructorConfig is identified by the complete native field set (quoteCurrency,
+// processClaimLimit6hWei, processClaimLimitMaxWei); a historical config carries none of them.
+export function isNativeConstructorConfig(config) {
+  invariant(config !== null && typeof config === 'object' && !Array.isArray(config), 'constructor config is required');
+  const nativeFields = Object.values(NATIVE_CONSTRUCTOR_FIELD_NAMES).filter((field) => Object.hasOwn(config, field)).length;
+  const historicalFields = Object.keys(NATIVE_CONSTRUCTOR_FIELD_NAMES).filter((field) => Object.hasOwn(config, field)).length;
+  invariant(
+    nativeFields === 0 || (nativeFields === 3 && historicalFields === 0),
+    'constructor config must use either the historical or the complete native field set',
+  );
+  return nativeFields === 3;
+}
+
 export function readHookCreationBytecode({
   contractsRoot,
   forgeBinary = 'forge',
@@ -237,8 +287,42 @@ function parseArtifactMetadata(artifact, label) {
   return metadata;
 }
 
-function validateLaunchArtifactProfile(artifact, label) {
-  const metadata = parseArtifactMetadata(artifact, label);
+// solc 0.8.26 writes settings.metadata.useLiteralContent into the metadata JSON only when the
+// Standard JSON input enabled it; the omitted key is the documented false default
+// (https://docs.soliditylang.org/en/v0.8.26/metadata.html,
+// https://docs.soliditylang.org/en/v0.8.26/using-the-compiler.html). Only the omitted key is
+// normalized; an explicit value of any type is compared as written, and bytecodeHash and
+// appendCBOR have no default.
+export function artifactUseLiteralContent(settingsMetadata) {
+  if (settingsMetadata === null || typeof settingsMetadata !== 'object' || Array.isArray(settingsMetadata)) return undefined;
+  return Object.hasOwn(settingsMetadata, 'useLiteralContent') ? settingsMetadata.useLiteralContent : false;
+}
+
+// Compiler exports carry no top-level contractName; metadata.settings.compilationTarget is the
+// required identity (https://docs.soliditylang.org/en/v0.8.26/metadata.html). A present
+// contractName must agree with it.
+function validateHookArtifactIdentity(artifact, metadata, label) {
+  const settings = metadata.settings;
+  invariant(settings !== null && typeof settings === 'object' && !Array.isArray(settings), `${label}.metadata.settings is required`);
+  const compilationTarget = settings.compilationTarget;
+  invariant(
+    compilationTarget !== null && typeof compilationTarget === 'object' && !Array.isArray(compilationTarget),
+    `${label}.metadata.settings.compilationTarget is required`,
+  );
+  const entries = Object.entries(compilationTarget);
+  invariant(entries.length === 1, `${label}.metadata.settings.compilationTarget must identify exactly one contract`);
+  const [sourcePath, contractName] = entries[0];
+  invariant(
+    sourcePath === HOOK_SOURCE_PATH && contractName === HOOK_CONTRACT_NAME,
+    `${label} must compile ${HOOK_SOURCE_PATH}:${HOOK_CONTRACT_NAME}`,
+  );
+  invariant(
+    artifact.contractName === undefined || artifact.contractName === contractName,
+    `${label}.contractName conflicts with metadata.settings.compilationTarget`,
+  );
+}
+
+function validateLaunchArtifactProfile(artifact, metadata, label, profile) {
   const artifactVersion = artifact.compiler?.version;
   const metadataVersion = metadata.compiler?.version;
   invariant(
@@ -246,29 +330,50 @@ function validateLaunchArtifactProfile(artifact, label) {
     `${label} compiler version conflicts with metadata`,
   );
   const version = artifactVersion ?? metadataVersion;
-  invariant(version === LAUNCH_SOLC, `${label} compiler must be ${LAUNCH_SOLC}`);
+  invariant(version === profile.solc, `${label} compiler must be ${profile.solc}`);
   const settings = metadata.settings;
   invariant(settings !== null && typeof settings === 'object' && !Array.isArray(settings), `${label}.metadata.settings is required`);
-  invariant(settings.optimizer?.enabled === true && settings.optimizer?.runs === 1000, `${label} optimizer must use 1000 enabled runs`);
-  invariant(settings.viaIR === false, `${label} viaIR must be false`);
-  invariant(settings.evmVersion === 'cancun', `${label} evmVersion must be cancun`);
   invariant(
-    settings.metadata?.appendCBOR === false
-      && settings.metadata?.bytecodeHash === 'none'
-      && settings.metadata?.useLiteralContent === false,
+    settings.optimizer?.enabled === true && settings.optimizer?.runs === profile.optimizer.runs,
+    `${label} optimizer must use ${profile.optimizer.runs} enabled runs`,
+  );
+  invariant(settings.viaIR === profile.viaIR, `${label} viaIR must be ${profile.viaIR}`);
+  invariant(settings.evmVersion === profile.evmVersion, `${label} evmVersion must be ${profile.evmVersion}`);
+  invariant(
+    settings.metadata?.appendCBOR === profile.metadata.appendCBOR
+      && settings.metadata?.bytecodeHash === profile.metadata.bytecodeHash
+      && artifactUseLiteralContent(settings.metadata) === profile.metadata.useLiteralContent,
     `${label} metadata is not launch-compatible`,
   );
 }
 
-export function readHookLaunchArtifactBytecode(artifactPath) {
+function validateHookConstructorAbi(artifact, label, native) {
+  const expected = native ? NATIVE_HOOK_CONSTRUCTOR_FIELDS : HOOK_CONSTRUCTOR_FIELDS;
+  const constructor = Array.isArray(artifact.abi) ? artifact.abi.find((entry) => entry?.type === 'constructor') : undefined;
+  const components = constructor?.inputs?.length === 1 && constructor.inputs[0]?.type === 'tuple'
+    ? constructor.inputs[0].components
+    : undefined;
+  invariant(
+    Array.isArray(components)
+      && components.length === expected.length
+      && components.every((component, index) => component?.name === expected[index]),
+    `${label} constructor ABI does not match the ${native ? 'native' : 'historical'} ConstructorConfig`,
+  );
+}
+
+// The historical profile is the default; native callers select it through the config identity.
+export function readHookLaunchArtifactBytecode(artifactPath, { native = false } = {}) {
   let artifact;
   try {
     artifact = JSON.parse(readFileSync(artifactPath, 'utf8'));
   } catch (error) {
     throw new Error(`hook artifact could not be parsed: ${error.message}`);
   }
-  invariant(artifact?.contractName === 'HookemonHook', 'hook artifact must name HookemonHook');
-  validateLaunchArtifactProfile(artifact, 'hook artifact');
+  invariant(artifact !== null && typeof artifact === 'object' && !Array.isArray(artifact), 'hook artifact must be an object');
+  const metadata = parseArtifactMetadata(artifact, 'hook artifact');
+  validateHookArtifactIdentity(artifact, metadata, 'hook artifact');
+  validateLaunchArtifactProfile(artifact, metadata, 'hook artifact', native ? NATIVE_LAUNCH_PROFILE : HISTORICAL_LAUNCH_PROFILE);
+  validateHookConstructorAbi(artifact, 'hook artifact', native);
   return artifactBytecode(artifact.bytecode, 'hook artifact.bytecode');
 }
 
@@ -446,17 +551,18 @@ export function parseArgs(argv) {
 
 export function mineHookAddress(options) {
   const { config, source } = loadConfig(options.configPath);
+  const native = isNativeConstructorConfig(config);
 
   if (options.providerSalt && !options.hookArtifactPath) {
     throw new Error('provider mining requires --hook-artifact compiled with the frozen launch profile');
   }
   const creationBytecode = options.providerSalt
-    ? readHookLaunchArtifactBytecode(options.hookArtifactPath)
+    ? readHookLaunchArtifactBytecode(options.hookArtifactPath, { native })
     : readHookCreationBytecode({
       contractsRoot: options.contractsRoot,
       forgeBinary: options.forgeBinary,
     });
-  const constructorConfigHex = encodeConstructorConfig(config);
+  const constructorConfigHex = (native ? encodeNativeConstructorConfig : encodeConstructorConfig)(config);
   const initCodeHash = computeInitCodeHash(creationBytecode, constructorConfigHex);
 
   const mined = options.providerSalt

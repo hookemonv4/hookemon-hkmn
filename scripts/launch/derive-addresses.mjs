@@ -15,9 +15,12 @@ import { canonicalJson, sha256CanonicalJson, sha256Bytes } from '../programmable
 import { requireEip55Address, toEip55Address } from '../programmable/lib/eip55.mjs';
 import {
   ALL_HOOK_PERMISSION_MASK,
+  HISTORICAL_LAUNCH_PROFILE,
+  NATIVE_LAUNCH_PROFILE,
   PROGRAMMABLE_GRAPH_FACTORY,
   PROGRAMMABLE_LAUNCH_STAMP_ROUTER,
   REQUIRED_HOOK_PERMISSION_MASK,
+  artifactUseLiteralContent,
   computeCreate2Address,
   encodeConstructorConfig,
   encodeNativeConstructorConfig,
@@ -637,12 +640,17 @@ function resolveReferences(value, context) {
   return value;
 }
 
-function validateCompilerProfile(value) {
+// The launch-inputs schemaVersion selects the profile: v1 keeps the historical 1000-run non-IR
+// profile, v2 requires the native 200-run viaIR profile.
+function validateCompilerProfile(value, native) {
+  const expected = native ? NATIVE_LAUNCH_PROFILE : HISTORICAL_LAUNCH_PROFILE;
   expectExactKeys(value, ['solc', 'optimizer', 'viaIR', 'evmVersion', 'metadata'], 'compilerProfile');
   if (value.solc !== LAUNCH_SOLC) fail(`compilerProfile.solc must be ${LAUNCH_SOLC}`);
   expectExactKeys(value.optimizer, ['enabled', 'runs'], 'compilerProfile.optimizer');
-  if (value.optimizer.enabled !== true || value.optimizer.runs !== 1000) fail('compilerProfile.optimizer must use 1000 enabled runs');
-  if (value.viaIR !== false || value.evmVersion !== 'cancun') fail('compilerProfile uses an unsupported setting');
+  if (value.optimizer.enabled !== true || value.optimizer.runs !== expected.optimizer.runs) {
+    fail(`compilerProfile.optimizer must use ${expected.optimizer.runs} enabled runs`);
+  }
+  if (value.viaIR !== expected.viaIR || value.evmVersion !== 'cancun') fail('compilerProfile uses an unsupported setting');
   expectExactKeys(value.metadata, ['appendCBOR', 'bytecodeHash', 'useLiteralContent'], 'compilerProfile.metadata');
   if (
     value.metadata.appendCBOR !== false
@@ -793,7 +801,7 @@ function validateLaunchInputs(value) {
     topologyHash: normalizeBytes32(value.graphAuthorization.topologyHash, 'graphAuthorization.topologyHash', { nonzero: true }),
     totalValue: normalizeNativeValue(value.graphAuthorization.totalValue, 'graphAuthorization.totalValue'),
   };
-  validateCompilerProfile(value.compilerProfile);
+  validateCompilerProfile(value.compilerProfile, native);
   const quoteKey = native ? 'quoteCurrency' : 'usdg';
   const quote = normalizeAddress(value[quoteKey], quoteKey);
   if (quote !== (native ? '0x0000000000000000000000000000000000000000' : USDG)) fail(`${quoteKey} does not match the versioned chain-4663 asset`);
@@ -1232,10 +1240,13 @@ function verifyArtifactCompiler(targetName, artifact, inputs) {
   if (settings.evmVersion !== inputs.compilerProfile.evmVersion) {
     fail(`${targetName} artifact evmVersion does not match the launch profile`);
   }
+  // Compiler exports omit settings.metadata.useLiteralContent when it is false
+  // (https://docs.soliditylang.org/en/v0.8.26/metadata.html); artifactUseLiteralContent normalizes
+  // only the omitted key. bytecodeHash and appendCBOR stay strict.
   if (
     settings.metadata?.appendCBOR !== inputs.compilerProfile.metadata.appendCBOR
     || settings.metadata?.bytecodeHash !== inputs.compilerProfile.metadata.bytecodeHash
-    || settings.metadata?.useLiteralContent !== inputs.compilerProfile.metadata.useLiteralContent
+    || artifactUseLiteralContent(settings.metadata) !== inputs.compilerProfile.metadata.useLiteralContent
   ) {
     fail(`${targetName} artifact metadata does not match the launch profile`);
   }

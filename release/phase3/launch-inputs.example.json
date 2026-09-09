@@ -21,9 +21,9 @@
     "solc": "0.8.26+commit.8a97fa7a",
     "optimizer": {
       "enabled": true,
-      "runs": 1000
+      "runs": 200
     },
-    "viaIR": false,
+    "viaIR": true,
     "evmVersion": "cancun",
     "metadata": {
       "appendCBOR": false,
