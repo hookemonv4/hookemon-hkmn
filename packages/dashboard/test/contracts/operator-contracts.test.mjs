@@ -115,3 +115,14 @@ test('audit responses expose the persisted request receipt fields', () => {
   });
   assert.equal(response.decisions[0].requestId, 'request-1');
 });
+
+
+test('configuration accepts only orders in a pack plan patch and rejects client revisions', () => {
+  const read = packPlan => readDecisionRequest({ requestId: 'plan-change', expectedVersion: 1, command: { type: 'update-configuration', configuration: { packPlan } } });
+  assert.deepEqual(read({ orders: [{ pack: 'base-pack', quantity: 2 }] }).command.configuration.packPlan, { orders: [{ pack: 'base-pack', quantity: 2 }] });
+  for (const value of [
+    { schema: 'hookemon.pack-plan.v1', orders: [] }, { revision: 9, orders: [] },
+    { orders: [{ pack: 'base-pack', quantity: 65 }] },
+    { orders: [{ pack: 'base-pack', quantity: 1 }, { pack: 'base-pack', quantity: 1 }] },
+  ]) assert.throws(() => read(value), ContractValidationError);
+});

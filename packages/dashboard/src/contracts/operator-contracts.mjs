@@ -1,3 +1,4 @@
+import { assertPackPlan, PACK_PLAN_SCHEMA } from '../../../runner/src/config/pack-plan.mjs';
 import { nativeValidationSkeleton, requireNativeRound } from './native-accounting.mjs';
 // Clean-room re-implementation of the private /operator/api/* contracts (readSet:
 // apps/web/app/operator/OperatorControlPanel.tsx, operator-types.ts and the coordinator's own
@@ -42,7 +43,7 @@ const UPDATE_CONFIGURATION_KEYS = new Set([
   'intervalMinutes', 'allowedPackIds', 'requestedOrders', 'maxBoostersPerCycle',
   'maxUnitPriceMicroUsd', 'maxCycleBudgetMicroUsd', 'max24HourBudgetMicroUsd', 'liveMode',
   'maxCyclesPerDay', 'perCycleCapMicroUsd', 'lossCapMicroUsd', 'maxOutstandingCustodyMicroUsd',
-  'manualApprovalCycles',
+  'manualApprovalCycles', 'packPlan',
 ]);
 const runnerCycleIdPattern = /^[A-Za-z0-9][A-Za-z0-9:._-]{0,127}$/;
 const packCodePattern = /^[a-z0-9][a-z0-9_-]{1,63}$/;
@@ -127,6 +128,14 @@ function readConfigurationPatch(value) {
     }
     patch.allowedPackIds = [...ids];
   }
+  if (Object.hasOwn(source, 'packPlan')) {
+    const plan = requiredRecord(source.packPlan, invalid);
+    exactKeys(plan, new Set(['orders']), invalid);
+    requiredKeys(plan, ['orders'], invalid);
+    try {
+      patch.packPlan = { orders: assertPackPlan({ schema: PACK_PLAN_SCHEMA, revision: 0, orders: plan.orders }).orders };
+    } catch { invalid(); }
+  }
   if (Object.hasOwn(source, 'requestedOrders')) {
     if (!Number.isInteger(source.requestedOrders) || source.requestedOrders < 0) invalid();
     patch.requestedOrders = source.requestedOrders;
@@ -186,7 +195,11 @@ export function assertBootstrap(value) {
   requiredKeys(identity, IDENTITY_KEYS, invalid);
   if (identity.role !== 'viewer' && identity.role !== 'operator') invalid();
   const state = requiredRecord(source.state, invalid);
-  exactKeys(state, OPERATOR_STATE_KEYS, invalid);
+  // Older bootstrap payloads omit packPlan; when present its versioned contract is strict.
+  exactKeys(state, Object.hasOwn(state, 'packPlan') ? new Set([...OPERATOR_STATE_KEYS, 'packPlan']) : OPERATOR_STATE_KEYS, invalid);
+  if (Object.hasOwn(state, 'packPlan')) {
+    try { assertPackPlan(state.packPlan); } catch { invalid(); }
+  }
   requiredKeys(state, OPERATOR_STATE_KEYS, invalid);
   if (typeof state.liveMode !== 'boolean') invalid();
   const hardCaps = requiredRecord(source.hardCaps, invalid);
