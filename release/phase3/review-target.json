@@ -933,10 +933,10 @@
       "sha256": "439d1c0d61a58b34a0ed3e4c8fd0d9e7030f4d9ec7552985ae0901c865dbee5b"
     },
     {
-      "bytes": 42352,
+      "bytes": 42350,
       "kind": "capability-evidence:phase-three-launch-graph",
       "path": "release/phase3/address-manifest-draft.schema.json",
-      "sha256": "1b4d6620a88e8d874ba215b0e0d231e95757c146dbc948a9b5ee034d19ac138a"
+      "sha256": "1f815a172ae5d3c2c946a42e9f8eb2a009903cf471f06fde040340c6f0c02da1"
     },
     {
       "bytes": 9911,
@@ -945,10 +945,10 @@
       "sha256": "cbfef74257ec3f697267accb69d613531990304a30a2048eb18d8555271ca8bf"
     },
     {
-      "bytes": 71953,
+      "bytes": 75807,
       "kind": "capability-evidence:phase-three-launch-graph",
       "path": "release/phase3/address-manifest.schema.json",
-      "sha256": "e36803d13d84ad0f3664e7047cc0b2c7dad8a9bb66c9fe8ba8a6f86a483860cd"
+      "sha256": "d5d845da9fd4f2dede7f865a8e7e670616ceef3dcdd5e88c8c1a355fb720ce16"
     },
     {
       "bytes": 4387,
@@ -2388,7 +2388,7 @@
     }
   ],
   "javascriptImportResolutions": [],
-  "reviewTargetHash": "sha256:5b8729e70be82b2266d7d9cdeb7d008e4953649940cd08c0e311fadd2a2957ab",
+  "reviewTargetHash": "sha256:40f984e75d612fa0331034d7f21a2ccbda48d373b0399468b3f2eeae86391f5c",
   "schemaVersion": 1,
   "standardVersion": "1.5.0",
   "submissionHash": "sha256:2050a999d23af7df709e8454621feed76eb76c74168d32b9330eea4485168c75"
