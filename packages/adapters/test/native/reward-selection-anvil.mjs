@@ -72,8 +72,12 @@ async function diskStore(path) {
 for (const count of (process.env.REWARD_SELECTION_TEST_COUNTS ?? '100,200,300,400,500,600').split(',').map(Number)) {
   test(`local native selected payout N=${count}: mined transfers, accounting and restart`, { timeout: 900_000 }, async t => {
     const directory = await mkdtemp(join(tmpdir(), 'reward-selection-anvil-'));
-    const child = spawn(process.env.REWARD_SELECTION_ANVIL ?? '/Users/kerim/.foundry/bin/anvil',
-      ['--host', '127.0.0.1', '--port', String(await port()), '--chain-id', '4663', '--accounts', '0', '--silent'], { stdio: 'ignore' });
+    const child = spawn(process.env.REWARD_SELECTION_ANVIL ?? 'anvil',
+      ['--host', '127.0.0.1', '--port', String(await port()), '--chain-id', '4663', '--accounts', '0', '--prune-history', '128', '--silent'], { stdio: ['ignore', 'ignore', 'pipe'] });
+    let anvilExit = null, anvilStderr = '';
+    child.on('exit', (code, signal) => { anvilExit = { code, signal }; });
+    child.stderr.on('data', chunk => { anvilStderr = (anvilStderr + chunk.toString()).slice(-4096); });
+    t.after(() => { if (anvilExit) t.diagnostic(JSON.stringify({ anvilExit, anvilStderr })); });
     const childPort = child.spawnargs[child.spawnargs.indexOf('--port') + 1];
     t.after(async () => { child.kill(); await rm(directory, { recursive: true, force: true }); });
     const client = createPublicClient({ transport: http(`http://127.0.0.1:${childPort}`, { retryCount: 0 }), cacheTime: 0 });

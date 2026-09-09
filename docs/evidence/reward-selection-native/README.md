@@ -2,7 +2,7 @@
 
 Run `node --test packages/adapters/test/native/reward-selection-anvil.mjs` with Node 24.19.0 and Anvil 1.7.1 available. Set `REWARD_SELECTION_ANVIL` to the local Anvil binary path when needed. `REWARD_SELECTION_TEST_COUNTS` can restrict a diagnostic run; full acceptance requires all six default counts, 100 through 600.
 
-The harness starts its own unforked Anvil process on a dynamically allocated loopback port with chain ID 4663 and no prefunded accounts. It funds one public deterministic test account locally. It accepts no RPC URL or wallet key. No external chain transaction or production authorization is involved.
+The harness starts its own unforked Anvil process on a dynamically allocated loopback port with chain ID 4663 and no prefunded accounts. It funds one public deterministic test account locally. Anvil retains the most recent 128 historical states to bound local memory use; block headers, transactions and receipt assertions remain unchanged. It accepts no RPC URL or wallet key. No external chain transaction or production authorization is involved.
 
 Each case reconstructs a fixture HKMN holder snapshot with N+17 eligible equal-weight holders and an excluded Operations balance, freezes N through the production selection helper, builds the v2 eligibility manifest and v3 native payout plan, then drives the production `advanceDirectPayout` state machine through signing, broadcast and finalization. The HKMN replay and return attribution are fixtures; native transactions, block inclusion, receipt finality, gas and balances come from the local EVM. This is payout-state-machine acceptance, not a complete production cycle or custody-admission proof.
 
