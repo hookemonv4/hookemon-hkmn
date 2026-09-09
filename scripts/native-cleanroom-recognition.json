@@ -8213,6 +8213,51 @@
           "basis": "official-router-closed-source-standards-references-and-signature-domain"
         }
       ]
+    },
+    "scripts/check-commit-identity.mjs": {
+      "sha256": "6c2fe1989a16b7a0f1594a4c79b3ef7450c2d17b4d465ccf0b74fd738a1e703a",
+      "matches": [
+        {
+          "rule": "private-email",
+          "offset": 4688,
+          "length": 18,
+          "sha256": "3c205d8fc749f72977b9331e3179773c315bb1f4860c366de2abe9ec9337730b",
+          "tokenStart": 4688,
+          "tokenLength": 18,
+          "tokenSha256": "3c205d8fc749f72977b9331e3179773c315bb1f4860c366de2abe9ec9337730b",
+          "basis": "public-github-web-flow-committer-identity-exact-reviewed-file"
+        }
+      ]
+    },
+    "scripts/tests/commit-identity.test.mjs": {
+      "sha256": "2503418614764b3bb7e55440de6eab8748206f0665ce458f49ccdf3308fe700c",
+      "matches": [
+        {
+          "rule": "private-email",
+          "offset": 8124,
+          "length": 18,
+          "sha256": "3c205d8fc749f72977b9331e3179773c315bb1f4860c366de2abe9ec9337730b",
+          "tokenStart": 8124,
+          "tokenLength": 18,
+          "tokenSha256": "3c205d8fc749f72977b9331e3179773c315bb1f4860c366de2abe9ec9337730b",
+          "basis": "public-github-web-flow-committer-identity-exact-reviewed-file"
+        }
+      ]
+    },
+    "docs/modules/control-supply-chain.md": {
+      "sha256": "1d5cac0ebaefa637fe80eb67612a99915b2196d11693b41ebba8fd2d2087a4ac",
+      "matches": [
+        {
+          "rule": "private-email",
+          "offset": 5087,
+          "length": 18,
+          "sha256": "3c205d8fc749f72977b9331e3179773c315bb1f4860c366de2abe9ec9337730b",
+          "tokenStart": 5087,
+          "tokenLength": 18,
+          "tokenSha256": "3c205d8fc749f72977b9331e3179773c315bb1f4860c366de2abe9ec9337730b",
+          "basis": "public-github-web-flow-committer-identity-exact-reviewed-file"
+        }
+      ]
     }
   },
   "refresh": {

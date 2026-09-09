@@ -53,6 +53,7 @@ function readCommit(root, sha) {
   if (fields.length < 5) throw new Error(`could not read commit metadata for ${sha}`);
   return {
     sha,
+    parents: git(root, ['show', '--no-patch', '--format=%P', sha]).trim().split(/\s+/).filter(Boolean),
     authorName: fields[0],
     authorEmail: fields[1],
     committerName: fields[2],
@@ -72,10 +73,16 @@ export function scanCommitRange(root, base, head) {
   }
 
   for (const commit of hashes.map(sha => readCommit(root, sha))) {
-    if (commit.authorName !== PROJECT_NAME || commit.authorEmail !== PROJECT_EMAIL) {
+    const githubProjectMerge = commit.parents.length === 2
+      && /^Merge pull request #[1-9][0-9]* from hookemonv4\/codex\/[A-Za-z0-9._/-]+$/.test(commit.message.split(/\r?\n/)[0])
+      && [PROJECT_NAME, 'hookemon'].includes(commit.authorName)
+      && commit.authorEmail === PROJECT_EMAIL
+      && commit.committerName === 'GitHub'
+      && commit.committerEmail === 'noreply@github.com';
+    if (!githubProjectMerge && (commit.authorName !== PROJECT_NAME || commit.authorEmail !== PROJECT_EMAIL)) {
       recordFinding(commit.sha, 'author-identity');
     }
-    if (commit.committerName !== PROJECT_NAME || commit.committerEmail !== PROJECT_EMAIL) {
+    if (!githubProjectMerge && (commit.committerName !== PROJECT_NAME || commit.committerEmail !== PROJECT_EMAIL)) {
       recordFinding(commit.sha, 'committer-identity');
     }
     for (const line of commit.message.split(/\r?\n/)) {
