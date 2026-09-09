@@ -33,10 +33,12 @@ test('native draft binds real compiler artifacts without inventing seed or claim
     const draft = JSON.parse(readFileSync(resolve(value.directory, 'package/graph-draft.json')));
     assert.equal(draft.schemaVersion, 'hookemon.phase3.graph-draft.v2');
     assert.equal(value.inputs.pool.quoteAsset.assetId, 'native');
-    assert.equal(value.inputs.pool.quoteAsset.amountAtomic, null);
+    assert.equal(value.inputs.pool.quoteAsset.amountAtomic, '0');
+    assert.deepEqual(value.inputs.pool.fullRange, { minimumTick: null, maximumTick: null });
+    assert.equal(value.inputs.pool.priceCandidates.nativeCurrency0, null);
     assert.equal(value.manifest.targets[2].constructor.processClaimLimit6hWei, null);
     assert.equal(value.manifest.targets[2].constructor.processClaimLimitMaxWei, null);
-    assert.equal(draft.seed.nativeFunding.amountWei, null);
+    assert.equal(draft.seed.nativeFunding.amountWei, '0');
     assert.equal('permit2Allowance' in draft.seed, false);
     for (const name of ['address-manifest.schema.json', 'address-manifest-draft.schema.json']) {
       assert.deepEqual(validateJsonSchema(read(`release/phase3/${name}`), value.manifest), []);
@@ -47,7 +49,7 @@ test('native draft binds real compiler artifacts without inventing seed or claim
 test('native draft rejects mixed historical assets and one-sided or zero claim limits', () => {
   for (const change of [
     inputs => { inputs.pool.quoteAsset.decimals = 6; },
-    inputs => { inputs.pool.quoteAsset.amountAtomic = '0'; },
+    inputs => { inputs.pool.quoteAsset.amountAtomic = '1'; },
     inputs => { inputs.roles.usdg = '0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168'; },
     (inputs, manifest) => { manifest.targets[2].constructor.processClaimLimit6hWei = '0'; manifest.targets[2].constructor.processClaimLimitMaxWei = '1'; },
     (inputs, manifest) => { manifest.targets[2].constructor.processClaimLimit6hWei = '1'; },
