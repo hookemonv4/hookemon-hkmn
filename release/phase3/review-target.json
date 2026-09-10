@@ -1087,7 +1087,7 @@
       "bytes": 126888,
       "kind": "specification",
       "path": "specs/requirements.json",
-      "sha256": "fe0c8cbd409bb1aa9c921e015cb64e1ccc7b6debd7ec9d619c4cb06758da09b0"
+      "sha256": "b4dc4b10fbe4ce1f39d0959e34f777f0b9524bf88342ceec8f7edbe96331bc72"
     }
   ],
   "importResolutions": [
@@ -2421,7 +2421,7 @@
     }
   ],
   "javascriptImportResolutions": [],
-  "reviewTargetHash": "sha256:1f0363b45c8ca7c8862aefa39be863933c08d8762fe71323d49d39a0846a1266",
+  "reviewTargetHash": "sha256:65404ce17e7d430a62751ed9766cd9cf1defa117d13833e3ee0aff6196af4950",
   "schemaVersion": 1,
   "standardVersion": "1.5.0",
   "submissionHash": "sha256:89a6dc4ae10f0ade25b5049db510c1378d5b9cb604207fd5d2f193e3185f904e"
