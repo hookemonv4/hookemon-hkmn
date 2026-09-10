@@ -192,3 +192,25 @@ test('saved recipient setting never replaces an active cycle frozen or historic 
   assert.equal(historic.activeCycle.rewardRecipientLimit, null);
   assert.equal(historic.activeCycle.configurationRevision, null);
 });
+
+test('the first active native cycle is visible before terminal accounting exists', () => {
+  const dashboard = buildDashboardReadModel({
+    authorityStatus: {
+      revision: 3, configuration: null, activeCycleId: 'first-native-cycle',
+      cycles: [{ cycleId: 'first-native-cycle', terminalState: null,
+        stages: [{ stage: 'purchase', status: 'PREPARED' }], payout: null }],
+      cap: { offChain24Hour: null, onChainRemainingCapacity: null },
+      custody: { buckets: [] }, alerts: [],
+    },
+    cardHistory: { cards: [], complete: true },
+    now: () => Date.UTC(2026, 0, 1),
+  });
+  dashboard.completeness.cyclesScanned = 1;
+  assert.equal(dashboard.latestCycle, null);
+  assert.equal(dashboard.schemaVersion, 8);
+  assert.equal(assertDashboardResponse(dashboard).activeCycle.cycleId, 'first-native-cycle');
+  assert.ok(Object.hasOwn(dashboard.activeCycle, 'maxCycleBudgetMicroUsd'));
+  const mixed = structuredClone(dashboard);
+  mixed.activeCycle.maxCycleBudgetMicroUsdg = '5';
+  assert.throws(() => assertDashboardResponse(mixed), /OPERATOR_CONTRACT_INVALID/);
+});

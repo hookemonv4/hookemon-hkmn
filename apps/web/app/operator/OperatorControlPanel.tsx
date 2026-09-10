@@ -542,9 +542,9 @@ export default function OperatorControlPanel() {
                 value={String(dashboard.activeCycle.requestedOrders)}
               />
               <CurrentValue label="Maximale Booster" value={nullableInteger(dashboard.activeCycle.maxBoostersPerCycle)} />
-              <CurrentValue label="Maximaler Packpreis" value={dashboard.schemaVersion === 7 ? nullableUsd((dashboard.activeCycle as unknown as Record<string, string | null>).maxUnitPriceMicroUsd) : nullableMoney(dashboard.activeCycle.maxUnitPriceMicroUsdg)} />
-              <CurrentValue label="Zyklusbudget" value={dashboard.schemaVersion === 7 ? nullableUsd((dashboard.activeCycle as unknown as Record<string, string | null>).maxCycleBudgetMicroUsd) : nullableMoney(dashboard.activeCycle.maxCycleBudgetMicroUsdg)} />
-              <CurrentValue label="24-Stunden-Budget" value={dashboard.schemaVersion === 7 ? nullableUsd((dashboard.activeCycle as unknown as Record<string, string | null>).max24HourBudgetMicroUsd) : nullableMoney(dashboard.activeCycle.max24HourBudgetMicroUsdg)} />
+              <CurrentValue label="Maximaler Packpreis" value={Object.hasOwn(dashboard.activeCycle, "maxUnitPriceMicroUsd") ? nullableUsd((dashboard.activeCycle as unknown as Record<string, string | null>).maxUnitPriceMicroUsd) : nullableMoney(dashboard.activeCycle.maxUnitPriceMicroUsdg)} />
+              <CurrentValue label="Zyklusbudget" value={Object.hasOwn(dashboard.activeCycle, "maxUnitPriceMicroUsd") ? nullableUsd((dashboard.activeCycle as unknown as Record<string, string | null>).maxCycleBudgetMicroUsd) : nullableMoney(dashboard.activeCycle.maxCycleBudgetMicroUsdg)} />
+              <CurrentValue label="24-Stunden-Budget" value={Object.hasOwn(dashboard.activeCycle, "maxUnitPriceMicroUsd") ? nullableUsd((dashboard.activeCycle as unknown as Record<string, string | null>).max24HourBudgetMicroUsd) : nullableMoney(dashboard.activeCycle.max24HourBudgetMicroUsdg)} />
               <CurrentValue label="Bestätigte Karten" value={String(dashboard.activeCycle.revealedCards)} />
             </dl>
             <details className={styles.technicalDetails}>
@@ -1362,6 +1362,7 @@ function decodeDashboard(value: unknown): Dashboard {
     return {
       ...decoded,
       schemaVersion: 8,
+      activeCycle: raw.activeCycle === null ? null : decodeActiveCycle(raw.activeCycle),
       metrics: { ...decoded.metrics, ...nativeMetrics } as Dashboard["metrics"],
       latestCycle: decoded.latestCycle
         ? {
@@ -1469,7 +1470,11 @@ function decodeDashboard(value: unknown): Dashboard {
 
 function decodeActiveCycle(value: unknown): ActiveCycle {
   const raw = dashboardRecord(value);
-  dashboardExactKeys(raw, ACTIVE_CYCLE_KEYS);
+  const native = Object.hasOwn(raw, "maxUnitPriceMicroUsd");
+  const keys = native
+    ? new Set([...ACTIVE_CYCLE_KEYS].map(key => key.endsWith("MicroUsdg") ? key.slice(0, -1) : key))
+    : ACTIVE_CYCLE_KEYS;
+  dashboardExactKeys(raw, keys);
   const allowedPackIds = dashboardArray(raw.allowedPackIds, 10_000).map(dashboardText);
   const allowed = new Set(allowedPackIds);
   if (allowed.size !== allowedPackIds.length) throw new Error(DASHBOARD_RESPONSE_INVALID);
@@ -1491,9 +1496,14 @@ function decodeActiveCycle(value: unknown): ActiveCycle {
     allowedPackIds,
     requestedOrders,
     maxBoostersPerCycle,
-    maxUnitPriceMicroUsdg: dashboardOptionalMoney(raw.maxUnitPriceMicroUsdg),
-    maxCycleBudgetMicroUsdg: dashboardOptionalMoney(raw.maxCycleBudgetMicroUsdg),
-    max24HourBudgetMicroUsdg: dashboardOptionalMoney(raw.max24HourBudgetMicroUsdg),
+    maxUnitPriceMicroUsdg: native ? null : dashboardOptionalMoney(raw.maxUnitPriceMicroUsdg),
+    maxCycleBudgetMicroUsdg: native ? null : dashboardOptionalMoney(raw.maxCycleBudgetMicroUsdg),
+    max24HourBudgetMicroUsdg: native ? null : dashboardOptionalMoney(raw.max24HourBudgetMicroUsdg),
+    ...(native ? {
+      maxUnitPriceMicroUsd: dashboardOptionalMoney(raw.maxUnitPriceMicroUsd),
+      maxCycleBudgetMicroUsd: dashboardOptionalMoney(raw.maxCycleBudgetMicroUsd),
+      max24HourBudgetMicroUsd: dashboardOptionalMoney(raw.max24HourBudgetMicroUsd),
+    } : {}),
     revealedCards: raw.revealedCards === null ? null : dashboardInteger(raw.revealedCards, 0, 10_000),
     rewardRecipientLimit: raw.rewardRecipientLimit === undefined
       ? undefined

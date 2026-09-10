@@ -215,3 +215,5 @@ null representation. `operator/control.mjs` validates the snapshot digest and cy
 projecting repository data.
 
 The disconnected local selection wrapper uses `assertLocalSelectionCommand` to accept only pack-plan and reward-recipient updates while paused, execution-paused and non-live. Reward-only edits do not depend on catalog availability. Pack edits retain catalog membership and the existing allowlist protections. The wrapper grants no execution operation.
+
+Native active-cycle budget fields are validated independently from the latest completed round. The first running cycle remains visible before terminal accounting exists; the panel retains its USD budget fields and does not relabel them as historical settlement amounts.

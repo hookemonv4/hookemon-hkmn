@@ -414,8 +414,12 @@ export function assertDashboardResponse(value) {
   boundedArray(source.cards, 60, invalid);
   if (source.activeCycle !== null) {
     const activeCycle = requiredRecord(source.activeCycle, invalid);
-    exactKeys(activeCycle, ACTIVE_CYCLE_KEYS, invalid);
-    requiredKeys(activeCycle, ACTIVE_CYCLE_KEYS, invalid);
+    const nativeActiveCycle = Object.hasOwn(activeCycle, 'maxUnitPriceMicroUsd');
+    const activeCycleKeys = nativeActiveCycle
+      ? new Set([...ACTIVE_CYCLE_KEYS].map(key => key.endsWith('MicroUsdg') ? key.slice(0, -1) : key))
+      : ACTIVE_CYCLE_KEYS;
+    exactKeys(activeCycle, activeCycleKeys, invalid);
+    requiredKeys(activeCycle, activeCycleKeys, invalid);
     boundedText(activeCycle.cycleId, invalid);
     boundedText(activeCycle.status, invalid);
   }
