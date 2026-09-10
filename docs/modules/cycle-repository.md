@@ -91,6 +91,17 @@ dashboard, CLI, and runner callers receive a frozen read client rather than a se
   is a writer-only transition for `HELD_OWNER_DECISION`. `choice` is `sell` or `keep-holding`;
   the method is deliberately outside the read facade until a separately authorized control path
   consumes it.
+- `recordHeldPositionIdentity(positionId, { mint, provenance, evidence })` records a verified
+  identity for an unresolved null-mint held position. Replay and retries preserve the original
+  position identity and revision, including after the original cycle terminates or completes.
+  Recovery leaves the original terminal state and timestamp unchanged; the enrichment is accepted only when the open signature source
+  (`held-evidence`, `open-evidence`, or `collector-finalized-send`), Collector pack-status mint,
+  transaction-derived mint and asset kind (`spl` or `mpl-core`), and finalized custody provenance
+  agree. Historical identity events without the two newer provenance fields remain readable as
+  legacy records.
+- `readHeldPositionEvidence(positionId)` returns the original held-position evidence retained by
+  the journal projection, including signature or candidate-mint evidence when present; it is
+  read-only and returns `null` for an unknown position.
 - `persistSignOnlyPreSignBinding(cycleId, stage, requestDigest, binding)` and
   `readSignOnlyPreSignBinding(cycleId, stage, requestDigest)` manage the ADR-0025
   `hookemon.sign-only-pre-sign-binding.v1` record `signer-client.mjs`'s recovery-aware policy-sign

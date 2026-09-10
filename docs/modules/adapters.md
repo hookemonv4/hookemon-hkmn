@@ -273,5 +273,10 @@ node --test packages/adapters/test/app/cycle-repository.test.mjs packages/adapte
 - A pending operational attempt is not a retry signal. Inspect its request digest and reconcile it
   from provider status or finality evidence; retain the cycle in a held state when the evidence is
   unavailable or unverifiable.
+- Held-card identity recovery resolves its signature in durable precedence order: held-position
+  evidence, original open-stage evidence, then a finalized Collector send. The final source must
+  match the durable purchase player address, finalized successful status, Collector mint, derived
+  mint and candidate-mint evidence. Provenance records the source and transaction-derived asset
+  kind; custody verification never defaults that kind.
 - Reuse the injected repository client inside a composed process. Composition hands the dashboard
   and CLI only the frozen client facade; WP10b owns standalone dashboard adoption.

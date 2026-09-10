@@ -132,7 +132,7 @@ function memoBoundSend(packStatus) {
   };
 }
 
-async function deriveCardAssetFromOpenTransaction({ adapters, playerAddress, signature }) {
+export async function deriveCardAssetFromOpenTransaction({ adapters, playerAddress, signature }) {
   if (!adapters.solana?.client) throw new Error('open reconciliation requires a configured Solana RPC client');
   const balanceChanges = await getTransactionTokenBalanceChanges(adapters.solana.client, signature, { commitment: 'finalized' });
   const candidates = balanceChanges.filter(
