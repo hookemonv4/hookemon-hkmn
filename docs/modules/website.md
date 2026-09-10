@@ -162,3 +162,7 @@ byte. Existing comic layout, artwork and audio stay on their current paths.
 The React dashboard exposes the same native round through `NativeAccounting.tsx`; USD valuations
 and Collector settlement assets retain distinct labels. Native executable operator controls use
 micro-USD limits, and unavailable or historical bootstrap data clears the command authority state.
+
+## Inclusive swap fee
+
+The active homepage, transparency page and React fallback describe the same inclusive 3% fee on buys and sells: 0.20% Programmable, 0.40% Hookemon Treasury and 2.40% Hookemon process (the pack engine). Fee bars show these allocations as 2:4:24 shares of the total fee. The platform share is included in 3%; it is not an additional surcharge. On chain 4663, Programmable receives `0xD88539d3c4C460136a733A3Fd60cf6BF269079da`, and the fixed Treasury receives `0xfc82B0da6d487B97d7eA1AA0d51E00AfF4F3a729`. Updating the source does not establish that the public site has been published; deployment and live verification remain separate operations.

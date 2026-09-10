@@ -1831,7 +1831,7 @@ summary:focus-visible {
 }
 .fee-bar span {
   background: var(--pink);
-  width: calc(100% / 30);
+  width: calc(100% * 2 / 30);
   min-width: 8px;
   border-right: 1px solid var(--navy);
 }
