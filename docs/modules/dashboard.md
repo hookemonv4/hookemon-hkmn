@@ -19,6 +19,13 @@ or moving custody.
   `alertSources`.
 - `GET /operator/api/network` returns the configured `mainnet` or `testnet` profile.
   `GET /operator/api/identities` returns only public identities injected by the composed runner.
+
+`GET /operator/api/bootstrap` reports the composed Collector catalog and start readiness when the
+runner supplies `readCatalog` and `readReadiness` seams. Catalog status is one of `LOADED`,
+`STALE`, `UNAVAILABLE`, or `NOT_CONFIGURED`; catalog state is informational and never makes a
+service ready. Readiness is the result of `assertStartReadiness` with bounded `start-readiness:`
+reasons on rejection. A standalone listener without those seams retains the legacy
+`catalog-not-loaded` fallback.
 - `GET /public/api/cycle-status` and `GET /public/api/community-dashboard` derive their read-only
   responses from the same authority snapshot.
 - `GET /public/api/cycle-history` returns a schema version 1, paginated, read-only page of terminal

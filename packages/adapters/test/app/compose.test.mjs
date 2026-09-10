@@ -2586,7 +2586,13 @@ test('compose(config) exposes config.standingAuthority unchanged, and null when 
  * dashboard HTTP server bound to an ephemeral port. Mirrors packages/dashboard/test/routes/
  * server.test.mjs's own `buildTestServer` helper, but drives it through the real, composed
  * `compose()` rather than a hand-built ctx. */
-async function buildComposedDashboard(t, { statePath, stateDir, configurationPatch = {}, cycleSeed = null } = {}) {
+async function buildComposedDashboard(t, {
+  statePath,
+  stateDir,
+  configurationPatch = {},
+  cycleSeed = null,
+  adapters = undefined,
+} = {}) {
   await writeOperatorState(statePath, configurationPatch);
   const seededCycle = cycleSeed === null ? null : await seedCycle(stateDir, cycleSeed);
   const composition = await compose({
@@ -2606,6 +2612,7 @@ async function buildComposedDashboard(t, { statePath, stateDir, configurationPat
       auditLogPath: join(stateDir, 'dashboard-audit.log'),
     },
     now: () => 1_000,
+    ...(adapters === undefined ? {} : { adapters }),
   });
   assert.notEqual(composition.dashboard, null, 'compose() must build a dashboard when config.dashboard is present');
 
@@ -2638,6 +2645,42 @@ async function buildComposedDashboard(t, { statePath, stateDir, configurationPat
     },
   };
 }
+
+test('dashboard bootstrap exposes the Collector catalog and actual start readiness result', async t => {
+  const stateDir = await tempStateDir(t);
+  const statePath = join(stateDir, 'operator-state.json');
+  const adapters = throwingAdapters();
+  adapters.collectorCrypt.getMachines = async () => ({
+    machines: [{ code: 'base-pack', name: 'Base pack', price: '12.5', public: true }],
+  });
+  const server = await buildComposedDashboard(t, { statePath, stateDir, adapters });
+  const bootstrap = await server.get('/operator/api/bootstrap', {
+    'x-hookemon-proxy-credential': DASHBOARD_CREDENTIAL,
+  });
+  assert.equal(bootstrap.status, 200);
+  assert.equal(bootstrap.body.catalog.status, 'LOADED');
+  assert.deepEqual(bootstrap.body.catalog.packs, [{
+    id: 'base-pack',
+    name: 'Base pack',
+    priceMicroStablecoin: '12500000',
+    available: null,
+  }]);
+  assert.deepEqual(bootstrap.body.readiness, { ready: true, reasons: [] });
+});
+
+test('dashboard bootstrap reports the configured RPC chain mismatch as not ready', async t => {
+  const stateDir = await tempStateDir(t);
+  const statePath = join(stateDir, 'operator-state.json');
+  const adapters = throwingAdapters();
+  adapters.robinhood.client.getChainId = async () => 1;
+  const server = await buildComposedDashboard(t, { statePath, stateDir, adapters });
+  const bootstrap = await server.get('/operator/api/bootstrap', {
+    'x-hookemon-proxy-credential': DASHBOARD_CREDENTIAL,
+  });
+  assert.equal(bootstrap.status, 200);
+  assert.equal(bootstrap.body.readiness.ready, false);
+  assert.match(bootstrap.body.readiness.reasons[0], /^start-readiness: .*4663/);
+});
 
 test('dashboard composed in-process: run-cycle-now over HTTP actually drives the real scheduler through a complete dry-run cycle', async t => {
   const stateDir = await tempStateDir(t);

@@ -287,3 +287,11 @@ node --test packages/adapters/test/app/cycle-repository.test.mjs packages/adapte
   kind; custody verification never defaults that kind.
 - Reuse the injected repository client inside a composed process. Composition hands the dashboard
   and CLI only the frozen client facade; WP10b owns standalone dashboard adoption.
+
+## Dashboard activation seam
+
+The production composition builds the dashboard activation-readiness seam from the configured
+Collector client and the same `assertStartReadiness` checks used before worker startup. The seam
+exposes independently cached `readCatalog()` and `readReadiness()` functions to the dashboard;
+catalog failures are represented as `UNAVAILABLE` or `STALE`, while readiness is decided only by
+repository integrity, network identity, policy configuration, and the configured preflight.

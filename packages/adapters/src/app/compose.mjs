@@ -55,6 +55,7 @@ import { createObservability } from './observability.mjs';
 import { createStageDriver } from './stage-driver.mjs';
 import { projectCycleAccounting, projectPolicyCustody } from './accounting-projection.mjs';
 import { projectLifetimeTotals } from './lifetime-projection.mjs';
+import { createActivationReadiness } from './activation-readiness.mjs';
 import { MoneyConfigurationRejected, validateMoneyConfiguration } from './environment.mjs';
 import { createSupplementaryBuybackHandler } from './stages/supplementary-buyback.mjs';
 import {
@@ -243,7 +244,21 @@ function buildDashboardIdentities(config) {
   });
 }
 
-async function composeDashboard({ dashboardConfig, chainId, operationsAddress, cycleRepository, operatorControl, readLastTick, adapters, identities, getSchedulerView, listRecentWinners, now }) {
+async function composeDashboard({
+  dashboardConfig,
+  chainId,
+  operationsAddress,
+  cycleRepository,
+  operatorControl,
+  readLastTick,
+  adapters,
+  identities,
+  getSchedulerView,
+  listRecentWinners,
+  readCatalog,
+  readReadiness,
+  now,
+}) {
   const auditVerification = await verifyAuditChain(dashboardConfig.auditLogPath);
   if (!auditVerification.valid) {
     throw new Error(`compose dashboard audit chain is invalid at sequence ${auditVerification.brokenAtSequence}: ${auditVerification.reason}`);
@@ -273,6 +288,8 @@ async function composeDashboard({ dashboardConfig, chainId, operationsAddress, c
     listPacks: adapters.collectorCrypt
       ? async () => adapters.collectorCrypt.getMachines()
       : null,
+    readCatalog,
+    readReadiness,
     identities,
     // Real per-cycle accounting (routes/public.mjs's `ctx.readAccounting` seam, threaded through
     // status-projection.mjs's own `readAccounting` parameter) — see accounting-projection.mjs's own
@@ -1943,6 +1960,27 @@ export async function compose(config) {
     return collector.list({ limit });
   }
 
+  const activationLiveMode = resolved.execution.profile === 'production'
+    ? !resolved.execution.dryRun
+    : resolved.execution.profile === 'rehearsal'
+      ? resolved.execution.providerMode === 'live'
+      : false;
+  const activationMode = resolved.execution.profile === 'production'
+    ? 'production'
+    : resolved.execution.profile === 'rehearsal'
+      ? 'rehearsal'
+      : resolved.execution.dryRun ? 'production' : 'rehearsal';
+  const activationReadiness = createActivationReadiness({
+    collectorClient: adapters.collectorCrypt ?? null,
+    assertStartReadiness: options => assertStartReadiness(options),
+    readinessOptions: {
+      liveMode: activationLiveMode,
+      mode: activationMode,
+      requirePolicyConfiguration: true,
+      requireCanaryPreflight: activationLiveMode,
+    },
+  });
+
   const dashboard = dashboardConfig
     ? await composeDashboard({
       dashboardConfig,
@@ -1956,6 +1994,8 @@ export async function compose(config) {
       identities: buildDashboardIdentities(resolved),
       operationsAddress: resolved.accounts.evm,
       now,
+      readCatalog: activationReadiness.readCatalog,
+      readReadiness: activationReadiness.readReadiness,
     })
     : null;
 

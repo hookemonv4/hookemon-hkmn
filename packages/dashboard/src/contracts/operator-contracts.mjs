@@ -208,6 +208,8 @@ const OPERATOR_STATE_KEYS = new Set([
 ]);
 const HARD_CAPS_KEYS = new Set(['maxBoostersPerCycle', 'maxUnitPriceMicroUsd', 'maxCycleBudgetMicroUsd', 'max24HourBudgetMicroUsd']);
 const READINESS_KEYS = new Set(['ready', 'reasons']);
+const CATALOG_STATUSES = new Set(['LOADED', 'STALE', 'UNAVAILABLE', 'NOT_CONFIGURED']);
+const CATALOG_PACK_KEYS = new Set(['id', 'name', 'priceMicroStablecoin', 'available']);
 
 export function assertBootstrap(value) {
   const source = requiredRecord(value, invalid);
@@ -242,8 +244,18 @@ export function assertBootstrap(value) {
     exactKeys(catalog, new Set(['status', 'fetchedAtMs', 'packs']), invalid);
     requiredKeys(catalog, ['status', 'fetchedAtMs', 'packs'], invalid);
     boundedText(catalog.status, invalid);
+    if (!CATALOG_STATUSES.has(catalog.status)) invalid();
     if (!Number.isSafeInteger(catalog.fetchedAtMs) || catalog.fetchedAtMs < 0) invalid();
-    boundedArray(catalog.packs, 10_000, invalid);
+    boundedArray(catalog.packs, 10_000, invalid).forEach(pack => {
+      const record = requiredRecord(pack, invalid);
+      exactKeys(record, CATALOG_PACK_KEYS, invalid);
+      requiredKeys(record, CATALOG_PACK_KEYS, invalid);
+      boundedText(record.id, invalid);
+      boundedText(record.name, invalid);
+      if (typeof record.priceMicroStablecoin !== 'string' || !microUsdPattern.test(record.priceMicroStablecoin)) invalid();
+      if (record.available !== null
+        && (!Number.isSafeInteger(record.available) || record.available < 0)) invalid();
+    });
   }
   return source;
 }

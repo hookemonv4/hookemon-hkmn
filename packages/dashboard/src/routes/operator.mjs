@@ -121,11 +121,23 @@ export function createBootstrapHandler(ctx) {
     if (req.method !== 'GET') return sendJson(res, 405, { code: 'METHOD_NOT_ALLOWED' });
     try {
       const authorityStatus = await loadAuthorityStatus(ctx);
+      const catalog = typeof ctx.readCatalog === 'function'
+        ? await ctx.readCatalog()
+        : (ctx.catalog ?? null);
+      let readiness;
+      try {
+        readiness = typeof ctx.readReadiness === 'function'
+          ? await ctx.readReadiness()
+          : (ctx.readiness ?? { ready: false, reasons: ['catalog-not-loaded'] });
+      } catch (error) {
+        ctx.onError?.('operator-bootstrap-readiness', error);
+        readiness = { ready: false, reasons: ['start-readiness: unavailable'] };
+      }
       const body = buildBootstrap({
         authorityStatus,
         identity: identityFor(identity.email),
-        catalog: ctx.catalog ?? null,
-        readiness: ctx.readiness ?? { ready: false, reasons: ['catalog-not-loaded'] },
+        catalog,
+        readiness,
         now: ctx.now,
         lastTick: ctx.lastTick ? ctx.lastTick() : null,
       });

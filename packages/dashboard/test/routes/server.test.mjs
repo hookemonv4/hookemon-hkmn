@@ -183,6 +183,8 @@ test('bootstrap accepts the proxy credential and an optional valid Access assert
   assert.equal(result.status, 200, result.diagnostics);
   assert.equal(result.body.identity.email, 'operator-console');
   assert.equal(result.body.state.desiredStatus, 'active');
+  assert.deepEqual(result.body.catalog, null);
+  assert.deepEqual(result.body.readiness, { ready: false, reasons: ['catalog-not-loaded'] });
 });
 
 test('bootstrap projects only its published hard caps when runner custody caps are present', async t => {
@@ -192,6 +194,19 @@ test('bootstrap projects only its published hard caps when runner custody caps a
   assert.equal(result.status, 200, result.diagnostics);
   const fields = ['maxBoostersPerCycle', 'maxUnitPriceMicroUsd', 'maxCycleBudgetMicroUsd', 'max24HourBudgetMicroUsd'];
   assert.deepEqual(result.body.hardCaps, Object.fromEntries(fields.map(field => [field, OPERATOR_HARD_CAPS[field]])));
+});
+
+test('bootstrap degrades a throwing readiness seam to a bounded 200 response', async t => {
+  const server = await buildTestServer(t, {
+    readReadiness: async () => { throw new Error('readiness dependency unavailable'); },
+  });
+  const result = await server.get('/operator/api/bootstrap', AUTH);
+  assert.equal(result.status, 200);
+  assert.deepEqual(result.body.readiness, { ready: false, reasons: ['start-readiness: unavailable'] });
+  assert.deepEqual(server.calls.errors, [{
+    operation: 'operator-bootstrap-readiness',
+    message: 'readiness dependency unavailable',
+  }]);
 });
 
 test('authority mutations appear in the next bootstrap view and its durable audit projection', async (t) => {
