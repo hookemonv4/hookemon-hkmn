@@ -1698,7 +1698,7 @@ test('compose exposes one repository-backed cycle client instead of a bare runne
 
   assert.deepEqual(CYCLE_REPOSITORY_CLIENT_INTERFACE, [
     'readActiveCycle', 'peekActiveCycle', 'readStage', 'describeCycle', 'readOperationalStageAttempt',
-    'readChainTransactionAttempt', 'readClaimPreconditions', 'readHeldPosition', 'listHeldPositions',
+    'readChainTransactionAttempt', 'readClaimPreconditions', 'readHeldPosition', 'readHeldPositionEvidence', 'listHeldPositions',
     'readSupplementarySettlement', 'listKnownCycleIds', 'readOutboundQuoteRefresh', 'readFinalizedClaimCustodyEvidence',
   ]);
   assert.equal(assertCycleRepositoryClientInterface(composition.cycleRepository), composition.cycleRepository);
