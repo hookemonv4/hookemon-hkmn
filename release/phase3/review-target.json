@@ -865,7 +865,7 @@
       "bytes": 114677,
       "kind": "capability-test:phase-three-launch-graph",
       "path": "packages/contracts/test/integration/RobinhoodV4ArchiveFork.t.sol",
-      "sha256": "8fa65b1674bb4bc7d241934fcf731ba7174aa255e79a6359311a461f38e4c3e7"
+      "sha256": "64303ee5323f72c4b77f29283cdf237cfe299d99398f75ae8a1c8908cb6fc1ad"
     },
     {
       "bytes": 31790,
@@ -907,31 +907,31 @@
       "bytes": 11654,
       "kind": "dependency-lock",
       "path": "product/dependency-pins.json",
-      "sha256": "750c827d5c6292ca27b774f91376eb718a80a0ceaf6901198da6b4a00571b9b5"
+      "sha256": "7fdf431591e414c0fc1fed2e734edff1c59ffb41b762dd5912832ec3f9cc445e"
     },
     {
-      "bytes": 2673,
+      "bytes": 3588,
       "kind": "package:EVIDENCE.md",
       "path": "release/phase3/EVIDENCE.md",
-      "sha256": "8ed5208603d9a8444bf78f7d158cacc085f7c6171d48a0c5fa02f970dd398b9b"
+      "sha256": "7a17ca1f1ef58657ad330a5ff4492008485a98b1fafabe515486027c92d5ea69"
     },
     {
-      "bytes": 1780,
+      "bytes": 3119,
       "kind": "package:PROPOSAL.md",
       "path": "release/phase3/PROPOSAL.md",
-      "sha256": "773a32e1656142cc5767b59f0f1f836ce455f51b32fdf011d8d17a78b6a35187"
+      "sha256": "1e738a17769ebc162b383d2674f9d51c91dcc55c39ecd49d5ad4f1d42ea20643"
     },
     {
-      "bytes": 2066,
+      "bytes": 3033,
       "kind": "package:TEST_PLAN.md",
       "path": "release/phase3/TEST_PLAN.md",
-      "sha256": "25ac425e184e524f58700801216d525d7de9553580b70c796c7c14681f1d7dcd"
+      "sha256": "56a40cb07b5698de6289f68c7e6bc87908ecf32a3531cf5f51d72f8c4b0b28f3"
     },
     {
-      "bytes": 2111,
+      "bytes": 3083,
       "kind": "package:THREAT_MODEL.md",
       "path": "release/phase3/THREAT_MODEL.md",
-      "sha256": "3e8fe5511595db691614554f900f75a8ff5d4ea81da23aeb67717540db121daa"
+      "sha256": "79cbf9de20b3b0b2a29e438b73a275acd3631d6f90522bab187adb64c4eee60e"
     },
     {
       "bytes": 42350,
@@ -1042,10 +1042,10 @@
       "sha256": "ab1762485500a7e17b8ba270c8523fca96d4d8880a11706d742ba27a304552b8"
     },
     {
-      "bytes": 7666,
+      "bytes": 7223,
       "kind": "project-surface-evidence:canonical-pool-hook",
       "path": "release/phase3/launch-plan.md",
-      "sha256": "26d4f071cb48db28abac672b0b85724998bf6b82c6ad8106f920f0f3b505dee9"
+      "sha256": "b12d8f76b9fbd0ed8a55859e0779092583a7e5b65cd462f5249d4d3bc881501d"
     },
     {
       "bytes": 410613,
@@ -2421,7 +2421,7 @@
     }
   ],
   "javascriptImportResolutions": [],
-  "reviewTargetHash": "sha256:3d92a7fe90e7c119246ac9351b28d06a2c65876698cd5ced368ac77bc4b857c9",
+  "reviewTargetHash": "sha256:9245d64fe213d1b46a0b04a77c0c818a56311d6d439efa315842e5f50d7c4438",
   "schemaVersion": 1,
   "standardVersion": "1.5.0",
   "submissionHash": "sha256:d351fec9108344f18d9ad17bf3a190a19dcff0ccccff97c42c31847dfacd7e77"

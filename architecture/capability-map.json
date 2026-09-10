@@ -293,11 +293,11 @@
   "projection": {
     "capabilityMapMarkdown": {
       "path": "architecture/capability-map.md",
-      "sha256": "4e5384d698c01d8e8df82de856136dbe64259ce400dd46670b116de1beba8470"
+      "sha256": "c1cca3c9ba6000809ebff92aea816125d2b939da29a357e41bb8bb29632f20cb"
     },
     "executionTopologyMarkdown": {
       "path": "architecture/execution-topology.md",
-      "sha256": "7b7a17db7f6ea183f496ef70444bbab4a3a344f67e3451ce36b7f8f8e3e1f248"
+      "sha256": "a696e49aae8dbcfcfbd087462ad4c8d8645c2dc64c8be04ca1f6e09d4c67247b"
     }
   }
 }
