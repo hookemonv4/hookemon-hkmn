@@ -14,7 +14,9 @@ import { ERC20_TRANSFER_TOPIC } from '../../src/robinhood-rpc.mjs';
 import { TOKEN_PROGRAM_ID, createSolanaRpcClient, signedSolanaTransactionSignature } from '../../src/solana-rpc.mjs';
 import { DIRECTIONS, RELAY_CONSTANTS } from '../../src/relay-client.mjs';
 import { wrapSignerClient } from '../../src/signing/signer-client.mjs';
-import { isDirectPayoutComplete } from '../../src/app/stages/payout.mjs';
+import { buildHolderSnapshot, selectEligibilityRecipients } from '../../../runner/src/distribution/snapshot-indexer.mjs';
+import { createRewardSelectionSnapshot } from '../../../runner/src/automation/reward-selection-snapshot.mjs';
+import { createDirectPayoutState, isDirectPayoutComplete } from '../../src/app/stages/payout.mjs';
 import {
   mutateSupplementaryReturn,
   mutateSupplementaryPayout,
@@ -23,7 +25,7 @@ import {
   SupplementaryMoneyError,
   supplementaryReturnStageId,
 } from '../../src/app/stages/supplementary-money.mjs';
-import { supplementaryPayoutStageId } from '../../src/app/stages/supplementary-payout.mjs';
+import { createSupplementaryPayoutStore, prepareSupplementaryPayoutRequest, supplementaryPayoutStageId } from '../../src/app/stages/supplementary-payout.mjs';
 import { digest } from '../../../runner/src/cycle/journal.mjs';
 
 const signedFixtures = new Map();
@@ -592,17 +594,33 @@ function payoutLifecycleConfig() {
   };
 }
 
-test('production supplementary payout preserves the return boundary and resumes after the durable broadcast checkpoint', async () => {
+for (const legacyV3 of [false, true]) {
+test(`production supplementary payout resumes after broadcast with ${legacyV3 ? 'persisted v3' : 'current'} plan`, async () => {
   const cycleId = 'cycle-supplementary-money-payout';
   const identity = settlementIdentity(cycleId);
-  let sourceSettlement = payoutSettlement(cycleId, 'RETURN_BROADCAST');
+  const eligibility = payoutEligibilityManifest(cycleId);
+  if (legacyV3) {
+    const holderSnapshot = buildHolderSnapshot({
+      chainId: '4663', tokenAddress: TOKEN, blockNumber: eligibility.snapshotBlock,
+      blockHash: eligibility.snapshotHash, finalized: true, totalSupply: '3', excludedAddresses: [],
+      transferLogs: [RECIPIENT_A, RECIPIENT_B].map((to, index) => ({
+        blockNumber: '1', logIndex: String(index), from: `0x${'0'.repeat(40)}`, to, value: index === 0 ? '2' : '1',
+      })),
+    });
+    const selected = selectEligibilityRecipients({ holderSnapshot, supply: eligibility.supply,
+      rewardSelection: createRewardSelectionSnapshot({ cycleId, configurationRevision: 1, rewardRecipientLimit: 100 }),
+    });
+    Object.assign(eligibility, { schema: 'hookemon.eligibility-payout-manifest.v2',
+      entries: selected.entries, selection: selected.selection, holderSnapshotDigest: holderSnapshot.holderSnapshotDigest });
+  }
+  let sourceSettlement = { ...payoutSettlement(cycleId, 'RETURN_BROADCAST'), eligibilitySnapshotEvidenceDigest: digest(eligibility) };
   const durableBoundary = payoutReturnBoundary(identity);
   let storedBoundary = durableBoundary;
   let interruptCompletion = true;
   const records = new Map();
   const advances = [];
   const cycleRepository = {
-    async readStage(id, stage) { assert.equal(id, cycleId); assert.equal(stage, 'eligibility-snapshot'); return { status: 'COMPLETE', evidence: payoutEligibilityManifest(cycleId) }; },
+    async readStage(id, stage) { assert.equal(id, cycleId); assert.equal(stage, 'eligibility-snapshot'); return { status: 'COMPLETE', evidence: eligibility }; },
     async readSupplementarySettlement(positionId) { assert.equal(positionId, identity.positionId); return sourceSettlement; },
     async readPagedPayoutState(id, stage) { return structuredClone(records.get(`${id} ${stage}`) ?? null); },
     async persistPagedPayoutState(id, stage, value) { records.set(`${id} ${stage}`, structuredClone(value)); },
@@ -615,6 +633,13 @@ test('production supplementary payout preserves the return boundary and resumes 
       return sourceSettlement;
     },
   };
+  if (legacyV3) {
+    const request = prepareSupplementaryPayoutRequest({ settlement: sourceSettlement, eligibilityManifest: eligibility, returnBoundary: durableBoundary },
+      { legacyPlanSchema: 'hookemon.direct-payout-plan.v3' });
+    await createSupplementaryPayoutStore({ cycleRepository, settlement: sourceSettlement }).persist(request, createDirectPayoutState({
+      plan: request.plan.payoutPlan, operations: PAYOUT_OPERATIONS, assetId: 'native', firstNonce: '0',
+    }));
+  }
   const client = payoutLifecycleRpc();
   const balanceChecks = [];
   client.getBalance = async () => {
@@ -633,6 +658,15 @@ test('production supplementary payout preserves the return boundary and resumes 
   });
   let state = await reconcile();
   assert.equal(state.recipients.find(entry => entry.recipient === RECIPIENT_A).state, 'BROADCAST');
+  if (legacyV3) {
+    const frozen = structuredClone(state);
+    const signCount = counter.sign;
+    state = await reconcile();
+    assert.equal(state.plan.schema, 'hookemon.direct-payout-plan.v3');
+    assert.equal(state.planDigest, frozen.planDigest);
+    assert.deepEqual(state.recipients, frozen.recipients);
+    assert.equal(counter.sign, signCount, 'restart preserves the broadcast bytes and nonce without signing again');
+  }
 
   client.finalize(state.recipients[0].txHash, {
     transactionHash: state.recipients[0].txHash, blockNumber: 100n, blockHash: `0x${'9'.repeat(64)}`, status: 'success',
@@ -683,6 +717,8 @@ test('production supplementary payout preserves the return boundary and resumes 
   assert.equal(advances[1].nextState, 'COMPLETE');
 });
 
+
+}
 
 test('supplementary return accepts native sale namespace and refuses aliases or invalid proceeds', () => {
   const operator = Keypair.generate().publicKey.toBase58();

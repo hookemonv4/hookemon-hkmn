@@ -307,7 +307,11 @@ function assertRequest(value) {
     payoutSourceDigest: value.payoutSourceDigest,
   });
   if (!value.plan || typeof value.plan !== 'object' || Array.isArray(value.plan)
-    || !['hookemon.supplementary-direct-payout-plan.v2', 'hookemon.supplementary-direct-payout-plan.v3'].includes(value.plan.schema)
+    || ![
+      'hookemon.supplementary-direct-payout-plan.v2',
+      'hookemon.supplementary-direct-payout-plan.v3',
+      'hookemon.supplementary-direct-payout-plan.v4',
+    ].includes(value.plan.schema)
     || value.plan.cycleId !== settlement.cycleId
     || value.plan.manifestId !== settlement.manifestId
     || value.plan.supplementaryIndex !== settlement.supplementaryIndex
@@ -430,7 +434,10 @@ export function supplementaryPayoutStageId(positionId) {
  * and the zero-value dust carry used until a position-aware atomic reservation exists. Callers
  * cannot supply alternate payout inputs.
  */
-export function prepareSupplementaryPayoutRequest(value) {
+export function prepareSupplementaryPayoutRequest(value, { legacyPlanSchema = null } = {}) {
+  if (legacyPlanSchema !== null && legacyPlanSchema !== 'hookemon.direct-payout-plan.v3') {
+    fail('supplementary payout legacy plan schema is invalid');
+  }
   exactObject(value, ['settlement', 'eligibilityManifest', 'returnBoundary'], 'supplementary payout preparation');
   const { settlement, eligibilityManifest, returnBoundary } = value;
   const normalizedSettlement = assertSettlement(settlement);
@@ -449,6 +456,7 @@ export function prepareSupplementaryPayoutRequest(value) {
     previousDust: normalizedReturnBoundary.payoutSource.previousDust,
     previousDustSource: normalizedReturnBoundary.payoutSource.previousDustSource,
     returnBinding: normalizedReturnBoundary.payoutSource.returnBinding,
+    legacyPlanSchema,
   });
   if (plan.manifestId !== normalizedSettlement.manifestId) {
     fail('supplementary payout plan manifestId does not match its settlement');

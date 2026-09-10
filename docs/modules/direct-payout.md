@@ -6,7 +6,7 @@ Distribute finalized native ETH returned to Operations among the frozen pre-clai
 
 ## Public interface
 
-`compileDirectPayoutPlan` creates `hookemon.direct-payout-plan.v2` for historical all-holder cycles and v3 for cycles with frozen recipient selection; `createNativePayoutAmount` requires chain 4663, asset `native`, and eighteen decimals. Return bindings contain Operations, `assetId: native`, and the finalized evidence digest. `preparePayoutRequest`, `initializeDirectPayout`, `advanceDirectPayout`, `mutatePayout`, and `reconcileLivePayout` use the same frozen plan. Supplementary plans use v2 for historical cycles and v3 for selected cycles, preserving the original held-position eligibility and complete selection evidence. Source, return boundary, and payout state retain their native contracts.
+`compileDirectPayoutPlan` creates `hookemon.direct-payout-plan.v2` for historical all-holder cycles, v3 remains the legacy selected-cycle plan with full selection evidence, and v4 is the current selected-cycle plan with a validated `hookemon.reward-selection-summary.v1` instead of the 250,000-entry holder snapshot. `createNativePayoutAmount` requires chain 4663, asset `native`, and eighteen decimals. Return bindings contain Operations, `assetId: native`, and the finalized evidence digest. `preparePayoutRequest`, `initializeDirectPayout`, `advanceDirectPayout`, `mutatePayout`, and `reconcileLivePayout` use the same frozen plan. Supplementary plans use v2, legacy v3, or current v4 in parallel. Source, return boundary, and payout state retain their native contracts.
 
 `createCycleAttributableFinalizedAvailableReader` reloads the completed native return and its exact durable Relay leg association, native custody v3 row, and predecessor dust provenance. It returns only the attributed return plus dust, after a finalized public/archive/public native balance check. Unrelated wallet funds never increase the payout allocation. Zero attributed proceeds require no balance read.
 
@@ -20,7 +20,7 @@ Admission requires current native balance covering the distributable principal, 
 
 Native custody keeps principal separate from `gasReserve`, `gasSpent`, and an append-only `gasPayments` transaction list. A freshly authenticated finalized transaction records gas before terminal recipient state. Replaying its hash preserves the total, including after a crash between those writes. A gas-only reverted-transaction capability cannot authorize a paid principal.
 
-Historical USDG plans and money configuration never enter native execution. HKMN remains the eligibility token. USD purchase cost is not added to native principal or payout dust.
+Historical USDG plans and money configuration never enter native execution. HKMN remains the eligibility token. USD purchase cost is not added to native principal or payout dust. For v4, payout request preparation recompiles the plan from the full durable eligibility-stage evidence and requires the resulting plan and selection-summary digests to match the persisted plan; the compact summary is not an authority replacement.
 
 ## State transitions
 
@@ -45,3 +45,5 @@ Supplementary payout initialization requires an independently read canonical nat
 The focused scale matrix covers 100, 200, 300, 400, 500 and 600 recipients. It checks complete allocation, unique recipients, principal-plus-dust conservation, prepared and synthetic finalized payout states through the actual paged store, and rejection of insufficient recipient, transaction or fee envelopes. Synthetic finality validates state shape and persistence; it is not evidence of on-chain payments or live throughput.
 
 Run `node --test --test-name-pattern='(?:100|200|300|400|500|600) recipients' packages/adapters/test/app/payout-resume-scale.test.mjs` with the locked adapter dependencies installed. The recipient count is derived from the full eligible snapshot. A configured maximum does not choose a fixed number of recipients, and the owner dashboard does not expose this maximum as a setting.
+
+Supplementary payout recovery rebuilds a persisted v3 plan from the original frozen eligibility and return boundary using its original schema. Envelope and plan commitments must still match before any recipient advances; signed bytes, nonces and completed payments survive restart without signing again. New selection-based plans use v4.

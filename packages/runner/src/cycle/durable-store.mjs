@@ -56,6 +56,8 @@ import {
   assertReceiptRecord,
 } from './cycle-store.mjs';
 import { assertBoundedCanonicalValue, canonicalJson, digest, RECOVERY_LIMITS } from './journal.mjs';
+import { HOLDER_SNAPSHOT_LIMITS } from '../distribution/snapshot-indexer.mjs';
+import { MAXIMUM_REWARD_RECIPIENT_LIMIT } from '../config/reward-recipient-selection.mjs';
 
 const indexSchema = 'hookemon.durable-cycle-store.index.v1';
 const activeCycleSchema = 'hookemon.durable-cycle-store.active-cycle.v1';
@@ -77,25 +79,17 @@ const pagedPayoutPageItems = RECOVERY_LIMITS.payloadArrayItems;
 // and reusing them here by coincidence meant raising or lowering either for an unrelated reason would
 // silently change payout/stage-evidence paging capacity too.
 //
-// maximumPagedPages justification (D-storage-requirements.md, 2026-09-06): a 10,000-recipient
-// payout state pages two arrays against one shared budget -- `recipients` and `plan.allocations`,
-// 10,000 items each -- needing 2 * ceil(10,000 / 64) = 314 pages. 1,024 pages (65,536 item slots)
-// is roughly 3x that, enough headroom for a third comparably-sized paged array (e.g. a stage's own
-// large `entries` list) without claiming to support an unbounded or 50,000-recipient target.
-const maximumPagedPages = 1_024;
-// A single array's own page-reference list is a further, tighter ceiling than the shared
-// maximumPagedPages budget above: serializePagedManifest/serializePagedStageEvidenceManifest still
-// serialize the whole manifest (including every array's page-reference list) through journal.mjs's
-// exported, bound-checked canonicalJson(), which enforces its own fixed default canonicalArrayItems
-// (512) regardless of this module's wider, explicitly justified maximumPagedPages override -- durable-
-// store.mjs cannot widen that check itself (journal.mjs is C-owned and exports no unbounded variant of
-// it). An independent review found that a value inside the (then-)advertised 64*1,024=65,536-item
-// ceiling could still be rejected deep inside manifest serialization once its own array needed more
-// than 512 pages (32,768+ items), rather than up front with a clear diagnosis -- the declared ceiling
-// must never promise more than every layer (validate, encode, serialize, decode, hash) actually
-// delivers. 64*512=32,768 items per array is the real ceiling every layer supports; this leaves ample
-// headroom over the justified 10,000-recipient/10,000-entry acceptance target this module commits to.
-const maximumPagedArrayItems = pagedPayoutPageItems * RECOVERY_LIMITS.canonicalArrayItems;
+// maximumPagedPages justification (D-storage-requirements.md, 2026-09-06): the shared ceiling
+// budgets the 250,000-entry holder snapshot, two 1,000-entry reward-selection arrays
+// (`entries` and exclusions/excludedAddresses), and 256 pages of structural headroom:
+// ceil(250,000 / 64) + 2 * ceil(1,000 / 64) + 256.
+const maximumPagedPages = Math.ceil(HOLDER_SNAPSHOT_LIMITS.directBalances / pagedPayoutPageItems)
+  + 2 * Math.ceil(MAXIMUM_REWARD_RECIPIENT_LIMIT / pagedPayoutPageItems)
+  + 256;
+// Paged manifests use the store's validated unbounded canonical serializer so their page-reference
+// arrays can represent the holder-snapshot bound without changing journal.mjs's generic defaults.
+const maximumPagedPayoutArrayItems = pagedPayoutPageItems * RECOVERY_LIMITS.canonicalArrayItems;
+const maximumPagedArrayItems = HOLDER_SNAPSHOT_LIMITS.directBalances;
 // maximumPagedStateObjects justification (D-storage-requirements.md, 2026-09-06): measured against
 // the unmodified store, a fully-FINALIZED payout state (the worst case -- every recipient adds an
 // approvalContext object and a finalizedTransfer object, itself nested) costs ~7 canonical objects
@@ -109,12 +103,14 @@ const maximumPagedStateObjects = 90_000;
 // `plan.allocations` arrays -- one extra array per recipient. 25,000 covers 10,000 recipients each
 // contributing up to two such small arrays, with headroom, without being unbounded.
 const maximumPagedStateArrays = 25_000;
+const maximumPagedStageEvidenceStateObjects = HOLDER_SNAPSHOT_LIMITS.canonical.objects;
+const maximumPagedStageEvidenceStateArrays = HOLDER_SNAPSHOT_LIMITS.canonical.arrays;
 const pagedPayoutManifestSchema = 'hookemon.durable-cycle-store.paged-payout-manifest.v1';
 const pagedPayoutPageSchema = 'hookemon.durable-cycle-store.paged-payout-page.v1';
 const pagedPayoutReferenceSchema = 'hookemon.durable-cycle-store.paged-payout-reference.v1';
 const pagedPayoutSchemas = { manifest: pagedPayoutManifestSchema, page: pagedPayoutPageSchema, reference: pagedPayoutReferenceSchema };
 const maximumPagedStageEvidencePageBytes = 8_388_608;
-const maximumPagedStageEvidenceStateBytes = 67_108_864;
+const maximumPagedStageEvidenceStateBytes = HOLDER_SNAPSHOT_LIMITS.canonical.aggregateBytes;
 const pagedStageEvidenceManifestSchema = 'hookemon.durable-cycle-store.paged-stage-evidence-manifest.v1';
 const pagedStageEvidencePageSchema = 'hookemon.durable-cycle-store.paged-stage-evidence-page.v1';
 const pagedStageEvidenceReferenceSchema = 'hookemon.durable-cycle-store.paged-stage-evidence-reference.v1';
@@ -153,8 +149,8 @@ export class StateDirectoryLossError extends Error {
   }
 }
 
-function exactObject(value, fields, label) {
-  canonicalJson(value);
+function exactObject(value, fields, label, { skipCanonical = false } = {}) {
+  if (!skipCanonical) canonicalJson(value);
   if (
     !value
     || typeof value !== 'object'
@@ -1285,7 +1281,7 @@ function assertPagedPayoutState(cycleId, value) {
   assertBoundedCanonicalValue(value, 'paged payout state', {
     objects: maximumPagedStateObjects,
     arrays: maximumPagedStateArrays,
-    arrayItems: maximumPagedArrayItems,
+    arrayItems: maximumPagedPayoutArrayItems,
     aggregateBytes: maximumPagedPayoutStateBytes,
   });
   if (!value || typeof value !== 'object' || Array.isArray(value) || Object.getPrototypeOf(value) !== Object.prototype) {
@@ -1311,8 +1307,8 @@ function assertPagedStageEvidence(cycleId, value) {
   assertCycleId(cycleId);
   assertCanonicalPayoutValue(value, 'paged stage evidence');
   assertBoundedCanonicalValue(value, 'paged stage evidence', {
-    objects: maximumPagedStateObjects,
-    arrays: maximumPagedStateArrays,
+    objects: maximumPagedStageEvidenceStateObjects,
+    arrays: maximumPagedStageEvidenceStateArrays,
     arrayItems: maximumPagedArrayItems,
     aggregateBytes: maximumPagedStageEvidenceStateBytes,
   });
@@ -1506,7 +1502,7 @@ function serializePagedStageEvidenceManifest({ cycleId, stage, generation, pages
     evidenceDigest,
     state,
   };
-  return `${canonicalJson(manifest)}\n`;
+  return `${unboundedCanonicalJson(manifest)}\n`;
 }
 
 function parsePagedStageEvidenceManifest(text, label) {
@@ -1516,8 +1512,8 @@ function parsePagedStageEvidenceManifest(text, label) {
   } catch {
     throw new Error(`${label} contains corrupt JSON`);
   }
-  if (`${canonicalJson(value)}\n` !== text) throw new Error(`${label} bytes are not canonical JSON plus one newline`);
-  exactObject(value, ['schema', 'cycleId', 'stage', 'generation', 'pageCount', 'evidenceDigest', 'state'], label);
+  if (`${unboundedCanonicalJson(value)}\n` !== text) throw new Error(`${label} bytes are not canonical JSON plus one newline`);
+  exactObject(value, ['schema', 'cycleId', 'stage', 'generation', 'pageCount', 'evidenceDigest', 'state'], label, { skipCanonical: true });
   if (value.schema !== pagedStageEvidenceManifestSchema) throw new Error(`${label} schema is invalid`);
   assertCycleId(value.cycleId);
   assertStageIdentifier(value.stage);
@@ -1574,15 +1570,17 @@ function parsePagedPage(schemas, text, label) {
 }
 
 function assertPagedReference(schemas, value, label) {
-  exactObject(value, ['schema', 'kind', 'length', 'pages'], label);
+  const isStageEvidence = schemas === pagedStageEvidenceSchemas;
+  exactObject(value, ['schema', 'kind', 'length', 'pages'], label, { skipCanonical: isStageEvidence });
   if (value.schema !== schemas.reference) throw new Error(`${label} schema is invalid`);
   if (!['sequence', 'recipient-map'].includes(value.kind)) throw new Error(`${label} kind is invalid`);
-  if (!Number.isInteger(value.length) || value.length < 0 || value.length > maximumPagedArrayItems) {
+  if (!Number.isInteger(value.length) || value.length < 0 || value.length > (isStageEvidence ? maximumPagedArrayItems : maximumPagedPayoutArrayItems)) {
     throw new Error(`${label} length is invalid`);
   }
   if (!Array.isArray(value.pages) || value.pages.length !== Math.ceil(value.length / pagedPayoutPageItems)) {
     throw new Error(`${label} pages are invalid`);
   }
+  if (value.pages.length > maximumPagedPages) throw new Error(`${label} page count is invalid`);
   return value.pages.map((page, index) => {
     exactObject(page, ['id', 'digest'], `${label} page ${index}`);
     pageFileName(page.id);

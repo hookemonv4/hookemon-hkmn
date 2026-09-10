@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { FixtureCycleStore } from '../../src/cycle/cycle-store.mjs';
 import * as durableStore from '../../src/cycle/durable-store.mjs';
 import { CycleJournal, RECOVERY_LIMITS, canonicalJson, digest } from '../../src/cycle/journal.mjs';
+import { HOLDER_SNAPSHOT_LIMITS } from '../../src/distribution/snapshot-indexer.mjs';
 
 const { DurableCycleStore, StateDirectoryLossError, readStateDirectoryRecovery } = durableStore;
 const lockRaceChildPath = fileURLToPath(new URL('./durable-store-lock-race-child.mjs', import.meta.url));
@@ -1140,14 +1141,18 @@ test('a same-payload retry over a generation with a deleted page fails closed in
   );
 });
 
-test('a single array beyond the real per-array page-reference ceiling is refused up front, and exactly at the ceiling round-trips', async t => {
+test('a single array beyond the holder-snapshot page-reference ceiling is refused up front, and exactly at the ceiling round-trips', async t => {
   const stage = 'eligibility-snapshot';
 
   {
     const directory = await temporaryDirectory(t);
     const store = await DurableCycleStore.open(directory);
     const cycleId = 'cycle-hidden-digest-cap';
-    const evidence = { schema: 'evidence.v1', cycleId, entries: Array.from({ length: 32_769 }, (_, index) => `e${index}`) };
+    const evidence = {
+      schema: 'evidence.v1',
+      cycleId,
+      entries: Array.from({ length: HOLDER_SNAPSHOT_LIMITS.directBalances + 1 }, (_, index) => `e${index}`),
+    };
     await assert.rejects(
       store.persistPagedStageEvidence(cycleId, stage, evidence),
       /array item limit exceeded/,
@@ -1158,7 +1163,11 @@ test('a single array beyond the real per-array page-reference ceiling is refused
     const directory = await temporaryDirectory(t);
     const store = await DurableCycleStore.open(directory);
     const cycleId = 'cycle-at-array-item-cap';
-    const evidence = { schema: 'evidence.v1', cycleId, entries: Array.from({ length: 32_768 }, (_, index) => `e${index}`) };
+    const evidence = {
+      schema: 'evidence.v1',
+      cycleId,
+      entries: Array.from({ length: HOLDER_SNAPSHOT_LIMITS.directBalances }, (_, index) => `e${index}`),
+    };
     const handle = await store.persistPagedStageEvidence(cycleId, stage, evidence);
     assert.deepEqual(await store.readPagedStageEvidence(cycleId, stage, handle), evidence);
   }

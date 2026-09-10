@@ -17,7 +17,7 @@ The holder-snapshot-indexer is a pure HKMN `Transfer` replay and holder-set mate
 - Transfer tuples must be canonical, strictly ordered by `(blockNumber, logIndex)`, and never debit more than their folded balance.
 - The snapshot block hash, immutable total supply, exclusion list, and complete log sequence are explicit inputs. The module does not replace any of them with a local or live state read.
 - Zero address exclusion evidence is retained, while only positive non-excluded balances become holder entries.
-- Holder and exclusion arrays have no indexer-defined cardinality limit. A large holder set is retained intact for the caller's feasibility decision.
+- Complete holder snapshots retain up to 250,000 positive direct balances before top-recipient selection; a large holder set is retained intact for the caller's feasibility decision. `summarizeEligibilitySelection` projects authenticated selection evidence to a bounded `hookemon.reward-selection-summary.v1` for direct payout v4 plans without copying `holderSnapshot`.
 - The indexer receives and folds a complete in-memory log array. The adapter and durable stage integration must impose an approved aggregate resource envelope and persist a large manifest outside the bounded journal.
 
 ## State transitions
@@ -32,6 +32,7 @@ The holder-snapshot-indexer is a pure HKMN `Transfer` replay and holder-set mate
 - Give the indexer logs only after the adapter has pinned the target block and applied an approved aggregate resource envelope.
 - Compare `digestTransferLogReplay` from independent sources before accepting the primary holder set.
 - Send the full holder set to the feasibility envelope; use `toSnapshotCandidate` only after a later payout path has deliberately chunked entries.
+- `assertEligibilitySelection` is authoritative when full evidence is available. `assertEligibilitySelectionSummary` validates the summary against the frozen manifest, including policy, selected entries, holder-snapshot digest, and supply conservation.
 
 ## Recovery pointers
 

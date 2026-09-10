@@ -2,6 +2,10 @@ import { createHash } from 'node:crypto';
 
 import { assertBoundedCanonicalValue } from '../cycle/journal.mjs';
 import { createEligibilityPayoutManifest } from './pro-rata.mjs';
+import {
+  assertEligibilitySelectionSummary,
+  summarizeEligibilitySelection,
+} from './snapshot-indexer.mjs';
 
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 const DECIMAL = /^(?:0|[1-9][0-9]*)$/;
@@ -215,10 +219,26 @@ function normalizeEligibilityManifest(value, cycleId) {
   if (!['hookemon.eligibility-payout-manifest.v1', 'hookemon.eligibility-payout-manifest.v2'].includes(suppliedManifest.schema)) {
     throw new Error('eligibility manifest schema is invalid');
   }
+  const suppliedSelection = suppliedManifest.selection;
+  if ((suppliedManifest.schema === 'hookemon.eligibility-payout-manifest.v2') !== (suppliedSelection !== undefined)) {
+    throw new Error('eligibility manifest schema does not match selection evidence');
+  }
   const manifestInput = { ...suppliedManifest };
   delete manifestInput.schema;
-  const manifest = createEligibilityPayoutManifest(manifestInput);
-  if (manifest.schema !== suppliedManifest.schema) throw new Error('eligibility manifest schema does not match selection evidence');
+  delete manifestInput.selection;
+  let manifest;
+  let selection = null;
+  let fullSelection = null;
+  if (suppliedSelection?.schema === 'hookemon.reward-selection-summary.v1') {
+    manifest = createEligibilityPayoutManifest(manifestInput);
+    selection = assertEligibilitySelectionSummary(suppliedSelection, manifest);
+  } else if (suppliedSelection !== undefined) {
+    manifest = createEligibilityPayoutManifest({ ...manifestInput, selection: suppliedSelection });
+    fullSelection = manifest.selection;
+    selection = summarizeEligibilitySelection(fullSelection);
+  } else {
+    manifest = createEligibilityPayoutManifest(manifestInput);
+  }
   if (manifest.cycleId !== cycleId) throw new Error('eligibility manifest cycleId does not match payout cycleId');
   const supply = copyHkmnAmount(manifest.supply, 'eligibility manifest supply');
   const entries = normalizeEntries(manifest.entries, supply);
@@ -269,7 +289,8 @@ function normalizeEligibilityManifest(value, cycleId) {
     throw new Error('eligibility manifest native-balance feasibility envelope is inconsistent');
   }
   return Object.freeze({
-    ...(manifest.selection ? { selection: manifest.selection } : {}),
+    ...(selection ? { selection } : {}),
+    ...(fullSelection ? { fullSelection } : {}),
     snapshotBlock: manifest.snapshotBlock,
     snapshotHash: manifest.snapshotHash.toLowerCase(),
     finality: Object.freeze({ ...manifest.finality }),
@@ -429,6 +450,7 @@ export function compileDirectPayoutPlan({
   previousDust,
   previousDustSource = null,
   returnBinding,
+  legacyPlanSchema = null,
 }) {
   if (typeof cycleId !== 'string' || cycleId.length === 0) throw new Error('payout plan cycleId is invalid');
   const eligibility = normalizeEligibilityManifest(eligibilityManifest, cycleId);
@@ -474,11 +496,14 @@ export function compileDirectPayoutPlan({
     assetId: returnEvidence.assetId,
     amountAtomic: dustAtomic.toString(),
   });
+  const selection = legacyPlanSchema === 'hookemon.direct-payout-plan.v3'
+    ? eligibility.fullSelection
+    : eligibility.selection;
   const unsigned = {
-    schema: eligibility.selection ? 'hookemon.direct-payout-plan.v3' : 'hookemon.direct-payout-plan.v2',
+    schema: legacyPlanSchema ?? (eligibility.selection ? 'hookemon.direct-payout-plan.v4' : 'hookemon.direct-payout-plan.v2'),
     cycleId,
     eligibility: {
-      ...(eligibility.selection ? { selection: eligibility.selection } : {}),
+      ...(selection ? { selection } : {}),
       snapshotBlock: eligibility.snapshotBlock,
       snapshotHash: eligibility.snapshotHash,
       finality: eligibility.finality,
@@ -532,6 +557,7 @@ export function compileSupplementaryDirectPayoutPlan({
   previousDust,
   previousDustSource = null,
   returnBinding,
+  legacyPlanSchema = null,
 }) {
   const index = assertSupplementaryIndex(supplementaryIndex);
   const payoutPlan = compileDirectPayoutPlan({
@@ -541,9 +567,14 @@ export function compileSupplementaryDirectPayoutPlan({
     previousDust,
     previousDustSource,
     returnBinding,
+    legacyPlanSchema,
   });
   const unsigned = {
-    schema: payoutPlan.schema === 'hookemon.direct-payout-plan.v3' ? 'hookemon.supplementary-direct-payout-plan.v3' : 'hookemon.supplementary-direct-payout-plan.v2',
+    schema: payoutPlan.schema === 'hookemon.direct-payout-plan.v4'
+      ? 'hookemon.supplementary-direct-payout-plan.v4'
+      : payoutPlan.schema === 'hookemon.direct-payout-plan.v3'
+        ? 'hookemon.supplementary-direct-payout-plan.v3'
+        : 'hookemon.supplementary-direct-payout-plan.v2',
     cycleId,
     manifestId: `${cycleId}:supplementary:${index}`,
     supplementaryIndex: index,

@@ -21,6 +21,7 @@ import {
   assertSettlement,
   createSupplementaryPayoutStore,
   prepareSupplementaryPayoutRequest,
+  supplementaryPayoutStageId,
   SUPPLEMENTARY_FINALIZED_RETURN_SCHEMA,
   SUPPLEMENTARY_RETURN_BOUNDARY_SCHEMA,
 } from './supplementary-payout.mjs';
@@ -484,11 +485,19 @@ export async function mutateSupplementaryPayout({
   if (!['RETURN_BROADCAST', 'PAYOUT_BROADCAST'].includes(settlement.state)) {
     fail('supplementary payout mutation requires a return-broadcast settlement');
   }
+  const persisted = await cycleRepository.readPagedPayoutState(
+    settlement.cycleId, supplementaryPayoutStageId(settlement.positionId),
+  );
+  // Rebuild against frozen evidence using the durable schema, preserving signed request identity.
+  // Store loading below still verifies every envelope commitment and the complete payout state.
+  const legacyPlanSchema = persisted?.payoutState?.plan?.schema === 'hookemon.direct-payout-plan.v3'
+    ? 'hookemon.direct-payout-plan.v3'
+    : null;
   const request = prepareSupplementaryPayoutRequest({
     settlement: rawSettlement,
     eligibilityManifest: context.eligibilityManifest,
     returnBoundary: context.returnBoundary,
-  });
+  }, { legacyPlanSchema });
   const supplementaryStore = createSupplementaryPayoutStore({ cycleRepository, settlement: rawSettlement });
   const payoutStore = directPayoutStoreAdapter(supplementaryStore, request);
   let state = await payoutStore.load();
