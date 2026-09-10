@@ -132,9 +132,21 @@ test('the committed launch package retains only the current owner and provider i
 test('the unsigned revision 65 baseline retains its historical approval subjects', () => {
   const baseline = readJson('decisions/owner-approvals/revision-65-baseline.json');
   assert.equal(baseline.approvalToken, 'DRAFT_UNSIGNED_NOT_YET_APPROVED');
+  // These active files evolve; the unsigned approval retains their exact historical blobs
+  // from protected baseline 23dd4116. Other historical subjects remain bound by the freeze.
+  const historicalSubjects = {
+    'architecture/capability-map.json': '914675d3322b5bda90f06fd8ffe44bb3098324db',
+    'decisions/owner-inputs/launch-inputs-owner.json': '47ac47cc1bae2fd4ef4613ba5ca56bf6a61e9e96',
+  };
   for (const [path, digest] of Object.entries(baseline.subjectHashes)) {
     const historical = readJson('feasibility/interface-freeze.json').inputHashes[path];
-    assert.equal(digest, historical ? historical.slice('sha256:'.length) : sha256(path), `${path} drifted from the unsigned baseline`);
+    let expected = historical ? historical.slice('sha256:'.length) : sha256(path);
+    if (historicalSubjects[path]) {
+      const fixture = spawnSync('git', ['cat-file', 'blob', historicalSubjects[path]], { cwd: root });
+      assert.equal(fixture.status, 0, fixture.stderr.toString());
+      expected = createHash('sha256').update(fixture.stdout).digest('hex');
+    }
+    assert.equal(digest, expected, `${path} drifted from the unsigned baseline`);
   }
 });
 
@@ -153,7 +165,7 @@ test('the release draft keeps provider target order and source-bound artifact ev
   assert.equal(PROGRAMMABLE_GRAPH_FACTORY, '0x0B6b3F40f84Df25D3bd69238f937096177DD09Bd');
 });
 
-test('native seed binds zero while its range remains unselected and preserves the complete stock', () => {
+test('native seed preserves the fixed inventory curve with zero ETH and unresolved deployment identities', () => {
   const inputs = readJson('release/phase3/launch-inputs.json');
   assert.equal(inputs.token.allocation.canonicalPoolBps, 10_000);
   assert.equal(inputs.token.allocation.remainderCustodyBps, 0);
@@ -161,8 +173,16 @@ test('native seed binds zero while its range remains unselected and preserves th
   assert.equal(inputs.pool.quoteAsset.assetId, 'native');
   assert.equal(inputs.pool.quoteAsset.decimals, 18);
   assert.equal(inputs.pool.quoteAsset.amountAtomic, '0');
-  assert.deepEqual(inputs.pool.fullRange, { minimumTick: null, maximumTick: null });
-  assert.equal(inputs.pool.priceCandidates.nativeCurrency0, null);
+  assert.deepEqual(inputs.pool.fullRange, { minimumTick: 133500, maximumTick: 161220 });
+  const reference = inputs.pool.priceCandidates.nativeCurrency0;
+  assert.equal(reference.sqrtPriceX96, '250929875796514805540091219040452');
+  assert.equal(reference.liquidity, '421035394154913054639875');
+  assert.equal(reference.consumedAmount0, '0');
+  assert.equal(reference.lockedHkmnDust, '115');
+  assert.equal(BigInt(reference.consumedHkmn) + BigInt(reference.lockedHkmnDust), BigInt(inputs.pool.baseAsset.amountAtomic));
+  assert.equal(inputs.pool.priceCandidates.selection.selectedSqrtPriceX96, null);
+  assert.equal(inputs.pool.priceCandidates.selection.poolKey, null);
+  assert.equal(inputs.pool.priceCandidates.selection.poolId, null);
   assert.equal(inputs.pool.priceCandidates.selection.status, 'OPEN_FACT');
   assert.equal(inputs.pool.priceCandidates.selection.selectedOrdering, 'nativeCurrency0');
   assert.deepEqual(Object.keys(inputs.pool.priceCandidates), ['nativeCurrency0', 'selection']);

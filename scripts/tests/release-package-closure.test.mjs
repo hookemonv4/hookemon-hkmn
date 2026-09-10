@@ -282,8 +282,11 @@ test('the release closure verifier rejects closure metadata and resolution mutat
 });
 
 test('fee-ordering closure accepts only a fully unselected zero-native draft', () => {
+  // Exercise the fully unselected legacy draft, separately from the fixed reference curve.
   const inputs = JSON.parse(readFileSync(resolve(root, 'release/phase3/launch-inputs.json')));
   const submission = JSON.parse(readFileSync(resolve(root, 'release/phase3/submission.json')));
+  inputs.pool.fullRange = { minimumTick: null, maximumTick: null };
+  inputs.pool.priceCandidates.nativeCurrency0 = null;
   assert.doesNotThrow(() => validateSubmissionFeeOrdering(inputs, submission));
   for (const mutate of [
     value => { value.pool.fullRange.minimumTick = -887220; },
@@ -298,4 +301,16 @@ test('fee-ordering closure accepts only a fully unselected zero-native draft', (
     const changed = structuredClone(inputs); mutate(changed);
     assert.throws(() => validateSubmissionFeeOrdering(changed, submission));
   }
+});
+
+test('fee-ordering closure retains the fixed zero-native reference without selecting live pool identities', () => {
+  const inputs = JSON.parse(readFileSync(resolve(root, 'release/phase3/launch-inputs.json')));
+  const submission = JSON.parse(readFileSync(resolve(root, 'release/phase3/submission.json')));
+  assert.deepEqual(inputs.pool.fullRange, { minimumTick: 133500, maximumTick: 161220 });
+  assert.equal(inputs.pool.priceCandidates.nativeCurrency0.sqrtPriceX96, '250929875796514805540091219040452');
+  assert.equal(inputs.pool.priceCandidates.selection.selectedSqrtPriceX96, null);
+  assert.equal(inputs.pool.priceCandidates.selection.poolKey, null);
+  assert.equal(inputs.pool.priceCandidates.selection.poolId, null);
+  assert.equal(inputs.seed.nativeFunding.amountWei, '0');
+  assert.doesNotThrow(() => validateSubmissionFeeOrdering(inputs, submission));
 });
