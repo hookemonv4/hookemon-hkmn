@@ -1288,6 +1288,13 @@ test('reconstructs an interrupted dust-consumption plan before initializing payo
 });
 
 test('reuses a carried-dust plan after a broadcast instead of rebuilding it from consumed dust', async () => {
+  const snapshot = payoutManifest();
+  const returnEvidence = {
+    finalized: true,
+    destinationAccount: OPERATIONS,
+    destinationAsset: 'native',
+    destinationCreditAmount: '9',
+  };
   const plan = compileDirectPayoutPlan({
     cycleId: 'cycle-direct-payout-1',
     eligibilityManifest: payoutManifest(),
@@ -1298,7 +1305,15 @@ test('reuses a carried-dust plan after a broadcast instead of rebuilding it from
       digest: `sha256:${'7'.repeat(64)}`,
       planDigest: `sha256:${'8'.repeat(64)}`,
     },
-    returnBinding: RETURN_BINDING,
+    returnBinding: {
+      operations: OPERATIONS,
+      assetId: 'native',
+      evidenceDigest: canonicalDigest({
+        schema: 'hookemon.direct-payout-finalized-return.v2',
+        cycleId: snapshot.cycleId,
+        returnEvidence,
+      }),
+    },
   });
   const { store } = await initialized({ plan });
   const client = rpc();
@@ -1308,13 +1323,6 @@ test('reuses a carried-dust plan after a broadcast instead of rebuilding it from
   await advanceDirectPayout({ payoutStore: store, recipient: RECIPIENT_A, adapters: { robinhood: { client } }, signerClient: signer(counter), config: config() });
   const persisted = await store.load();
   assert.equal(persisted.manifestFrozen, true);
-  const snapshot = payoutManifest();
-  const returnEvidence = {
-    finalized: true,
-    destinationAccount: OPERATIONS,
-    destinationAsset: 'native',
-    destinationCreditAmount: '9',
-  };
   const cycleRepository = {
     async readStage(_cycleId, stage) {
       if (stage === 'eligibility-snapshot') return { status: 'COMPLETE', evidence: snapshot };
