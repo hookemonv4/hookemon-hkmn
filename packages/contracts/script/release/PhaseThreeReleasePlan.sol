@@ -20,7 +20,7 @@ contract PhaseThreeReleasePlan {
     address public constant POOL_MANAGER = 0x8366a39CC670B4001A1121B8F6A443A643e40951;
     address public constant POSITION_MANAGER = 0x58daec3116aae6D93017bAAea7749052E8a04fA7;
     address public constant PERMIT2 = 0x000000000022D473030F116dDEE9F6B43aC78BA3;
-    address public constant PROGRAMMABLE_PLATFORM = 0x4957f49620AFf3Adbbe8195a4f633E49cc93376c;
+    address public constant PROGRAMMABLE_PLATFORM = 0xD88539d3c4C460136a733A3Fd60cf6BF269079da;
 
     bytes32 public constant TOKEN_CREATION_CODE_HASH =
         0x07c73a86681594f0605efd4caa948a53aaf05db1ca9abf2779364b3d2618c374;
@@ -48,9 +48,9 @@ contract PhaseThreeReleasePlan {
     int24 public constant TICK_UPPER = 887220;
     uint24 public constant POOL_FEE = 0;
     int24 public constant TICK_SPACING = 60;
-    uint16 public constant PROGRAMMABLE_FEE_BPS = 10;
+    uint16 public constant PROGRAMMABLE_FEE_BPS = 20;
     uint16 public constant TREASURY_FEE_BPS = 40;
-    uint16 public constant PROCESS_FEE_BPS = 250;
+    uint16 public constant PROCESS_FEE_BPS = 240;
 
     struct Draft {
         uint256 chainId;

@@ -15,7 +15,7 @@ contract PhaseThreeDeploymentLimitsTest is Test {
     uint160 private constant REQUIRED_HOOK_PERMISSION_MASK = 0x20CC;
     address private constant NATIVE_QUOTE = address(0);
     address private constant HKMN = address(0x1003);
-    address private constant PROGRAMMABLE = 0x4957f49620AFf3Adbbe8195a4f633E49cc93376c;
+    address private constant PROGRAMMABLE = 0xD88539d3c4C460136a733A3Fd60cf6BF269079da;
 
     // Component measurements are intentionally distinct from an exact provider-route gas proof.
     function testMeasuredReleaseTargetComponentsStayBelowPinnedBlockGasLimit() external {

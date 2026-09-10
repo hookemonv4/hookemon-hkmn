@@ -356,7 +356,7 @@ contract ClaimsAdversarialBlindTest is Test {
         vm.expectRevert(FeeAccounting.TokenTransferFailed.selector);
         actor.claimProcess(hook, CYCLE_A, 1);
 
-        assertEq(hook.processLiability(), 2_500, "process liability must roll back");
+        assertEq(hook.processLiability(), 2_400, "process liability must roll back");
         assertFalse(hook.processClaimCycleUsed(CYCLE_A));
         assertFalse(hook.processClaimCycleUsed(CYCLE_B));
         assertEq(token.balanceOf(address(actor)), 0);
@@ -391,7 +391,7 @@ contract ClaimsAdversarialBlindTest is Test {
         ClaimActor(payable(PROGRAMMABLE)).claimProgrammable(hook, 1);
 
         (uint256 programmableLiability,,) = hook.readFeeLiabilities(TREASURY);
-        assertEq(programmableLiability, 100, "programmable liability must roll back");
+        assertEq(programmableLiability, 200, "programmable liability must roll back");
         assertEq(token.balanceOf(PROGRAMMABLE), 0);
     }
 
@@ -410,7 +410,7 @@ contract ClaimsAdversarialBlindTest is Test {
         vm.expectRevert(FeeAccounting.TokenTransferFailed.selector);
         operationsActor.claimProcess(hook, CYCLE_A, 1);
 
-        assertEq(hook.processLiability(), 2_500);
+        assertEq(hook.processLiability(), 2_400);
         (, uint256 treasuryLiability,) = hook.readFeeLiabilities(address(operationsActor));
         assertEq(
             treasuryLiability, 400, "cross-reentrant treasury claim must not have drained anything"
@@ -438,7 +438,7 @@ contract ClaimsAdversarialBlindTest is Test {
         (uint256 programmableLiability,,) = hook.readFeeLiabilities(address(treasuryActor));
         assertEq(
             programmableLiability,
-            100,
+            200,
             "cross-reentrant programmable claim must not have drained anything"
         );
     }

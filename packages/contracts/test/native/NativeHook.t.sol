@@ -232,9 +232,9 @@ contract NativeHookTest is Test, DeployPermit2 {
         assertEq(buyerBefore - address(this).balance, 100000);
         assertEq(address(manager).balance, 97000);
         (uint256 p, uint256 t, uint256 process) = hook.readFeeLiabilities(TREASURY);
-        assertEq(p, 100);
+        assertEq(p, 200);
         assertEq(t, 400);
-        assertEq(process, 2500);
+        assertEq(process, 2400);
         uint256 received = token.balanceOf(address(this));
         _swap(false, -int256(received));
         assertEq(token.balanceOf(address(this)), 0);
@@ -441,9 +441,9 @@ contract NativeHookTest is Test, DeployPermit2 {
         assertEq(hook.totalLiability(), 0);
         _swap(true, -1000);
         (uint256 p, uint256 t, uint256 process) = hook.readFeeLiabilities(TREASURY);
-        assertEq(p, 1);
+        assertEq(p, 2);
         assertEq(t, 4);
-        assertEq(process, 25);
+        assertEq(process, 24);
     }
 
     function testProcessForwardingRecipientAndPostPaymentProof() external {
@@ -452,8 +452,8 @@ contract NativeHookTest is Test, DeployPermit2 {
         operations.configure(false, SINK, address(0), "");
         uint256 before = SINK.balance;
         vm.recordLogs();
-        operations.claim(hook, bytes32(uint256(1)), 2500);
-        assertEq(SINK.balance, before + 2500);
+        operations.claim(hook, bytes32(uint256(1)), 2400);
+        assertEq(SINK.balance, before + 2400);
         assertEq(address(operations).balance, 0);
         assertEq(hook.processLiability(), 0);
         assertTrue(hook.processClaimCycleUsed(bytes32(uint256(1))));
@@ -466,8 +466,8 @@ contract NativeHookTest is Test, DeployPermit2 {
         _swap(true, -100000);
         operations.configure(true, address(0), address(0), "");
         vm.expectRevert(FeeAccounting.TokenTransferFailed.selector);
-        operations.claim(hook, bytes32(uint256(2)), 2500);
-        assertEq(hook.processLiability(), 2500);
+        operations.claim(hook, bytes32(uint256(2)), 2400);
+        assertEq(hook.processLiability(), 2400);
         assertEq(hook.remainingProcessClaimCapacity(), 1000000);
         assertFalse(hook.processClaimCycleUsed(bytes32(uint256(2))));
         assertEq(address(hook).balance, 3000);
@@ -487,7 +487,7 @@ contract NativeHookTest is Test, DeployPermit2 {
         operations.claim(hook, bytes32(uint256(3)), 1000);
         assertFalse(operations.reentrySucceeded());
         assertFalse(hook.processClaimCycleUsed(bytes32(uint256(4))));
-        assertEq(hook.processLiability(), 1500);
+        assertEq(hook.processLiability(), 1400);
         assertEq(hook.remainingProcessClaimCapacity(), 999000);
     }
 
@@ -568,7 +568,7 @@ contract NativeHookTest is Test, DeployPermit2 {
         );
         vm.expectRevert(FeeAccounting.InsolventAccounting.selector);
         operations.claim(hook, bytes32(uint256(88)), 1000);
-        assertEq(hook.processLiability(), 2500);
+        assertEq(hook.processLiability(), 2400);
         assertEq(hook.totalLiability(), 3000);
         // vm.deal bypasses EVM journaling; only the reverted payment is restored.
         assertEq(address(hook).balance, 1000);

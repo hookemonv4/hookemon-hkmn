@@ -7,7 +7,7 @@ pragma solidity 0.8.26;
 abstract contract FeeAccounting {
     uint256 internal constant BPS_DENOMINATOR = 10_000;
     uint256 internal constant TOTAL_FEE_BPS = 300;
-    uint256 internal constant PROGRAMMABLE_FEE_BPS = 10;
+    uint256 internal constant PROGRAMMABLE_FEE_BPS = 20;
     uint256 internal constant TREASURY_FEE_BPS = 40;
     uint256 internal constant PROCESS_FEE_BPS =
         TOTAL_FEE_BPS - PROGRAMMABLE_FEE_BPS - TREASURY_FEE_BPS;

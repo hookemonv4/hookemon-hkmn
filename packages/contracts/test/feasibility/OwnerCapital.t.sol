@@ -108,7 +108,7 @@ contract OwnerCapitalFeasibilityTest is Test {
                     + usdg.balanceOf(address(hook)),
                 150_000_000
             );
-            assertEq(hook.processLiability(), gross * 250 / 10_000);
+            assertEq(hook.processLiability(), gross * 240 / 10_000);
         }
         assertGe(hook.processLiability(), 25_298_644);
         emit log_named_uint("initialOwnerUsdgAtomic", 150_000_000);

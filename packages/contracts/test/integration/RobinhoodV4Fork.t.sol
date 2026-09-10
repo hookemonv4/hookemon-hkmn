@@ -99,9 +99,9 @@ contract RobinhoodV4ForkTest is Test {
     uint160 private constant ALL_HOOK_MASK = (1 << 14) - 1;
     uint160 private constant REQUIRED_HOOK_MASK = 0x20CC;
     uint256 private constant BPS_DENOMINATOR = 10_000;
-    uint256 private constant PROGRAMMABLE_FEE_BPS = 10;
+    uint256 private constant PROGRAMMABLE_FEE_BPS = 20;
     uint256 private constant TREASURY_FEE_BPS = 40;
-    uint256 private constant PROCESS_FEE_BPS = 250;
+    uint256 private constant PROCESS_FEE_BPS = 240;
     bytes32 private constant POOL_SWAP_EVENT =
         keccak256("Swap(bytes32,address,int128,int128,uint160,uint128,int24,uint24)");
 
@@ -258,7 +258,7 @@ contract RobinhoodV4ForkTest is Test {
     /// @notice WP-02 fee-conformance against the real forked PoolManager: all four native swap
     ///         quadrants (native currency0, both directions, both exact-input/exact-output),
     ///         every swap carrying valid hookData, must conserve the pinned 3% inclusive USDG
-    ///         fee split (10bps Programmable / 40bps treasury / 250bps process) under the
+    ///         fee split (20bps Programmable / 40bps treasury / 240bps process) under the
     ///         cumulative-remainder accrual, independently re-derived here rather than merely
     ///         checked for self-consistency with the hook's own accounting.
     function testSwapPathFourNativeQuadrantsWithHookDataConservesPinnedFeeSplit() external {

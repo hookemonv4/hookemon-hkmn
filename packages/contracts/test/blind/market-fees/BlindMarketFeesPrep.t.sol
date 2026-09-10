@@ -144,9 +144,9 @@ contract BlindMarketFeesPrepTest {
     function test_roundingCatalogConservesEveryBoundaryUnit() external pure {
         uint256[9] memory quantities = [uint256(1), 33, 34, 249, 250, 999, 1_000, 3_333, 3_334];
         uint256[9] memory totals = [uint256(0), 0, 1, 7, 7, 29, 30, 99, 100];
-        uint256[9] memory programmable = [uint256(0), 0, 0, 0, 0, 0, 1, 3, 3];
+        uint256[9] memory programmable = [uint256(0), 0, 0, 0, 0, 1, 2, 6, 6];
         uint256[9] memory treasury = [uint256(0), 0, 0, 0, 1, 3, 4, 13, 13];
-        uint256[9] memory process = [uint256(0), 0, 1, 7, 6, 26, 25, 83, 84];
+        uint256[9] memory process = [uint256(0), 0, 1, 7, 6, 25, 24, 80, 81];
 
         for (uint256 index; index < quantities.length; ++index) {
             BlindFeeSplit memory split = _split(quantities[index]);
@@ -225,7 +225,7 @@ contract BlindMarketFeesPrepTest {
 
     function _split(uint256 executedUsdg) internal pure returns (BlindFeeSplit memory split) {
         split.total = executedUsdg * 300 / 10_000;
-        split.programmable = executedUsdg * 10 / 10_000;
+        split.programmable = executedUsdg * 20 / 10_000;
         split.treasury = executedUsdg * 40 / 10_000;
         split.process = split.total - split.programmable - split.treasury;
     }

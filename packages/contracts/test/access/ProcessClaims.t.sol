@@ -168,7 +168,7 @@ contract ProcessClaimsTest is Test {
         _claimAs(OPERATIONS_ONE, hook, CYCLE_ONE, 40);
 
         assertEq(token.balanceOf(OPERATIONS_ONE), 40);
-        assertEq(hook.processLiability(), 210);
+        assertEq(hook.processLiability(), 200);
         assertEq(hook.totalLiability(), 260);
         assertEq(hook.remainingProcessClaimCapacity(), 60);
         assertTrue(hook.processClaimCycleUsed(CYCLE_ONE));
@@ -281,7 +281,7 @@ contract ProcessClaimsTest is Test {
         vm.expectRevert(FeeAccounting.InvalidLiabilityAmount.selector);
         _claimAs(OPERATIONS_ONE, hook, CYCLE_ONE, 251);
 
-        assertEq(hook.processLiability(), 250);
+        assertEq(hook.processLiability(), 240);
         assertEq(hook.totalLiability(), 300);
         assertEq(hook.remainingProcessClaimCapacity(), 500);
         assertFalse(hook.processClaimCycleUsed(CYCLE_ONE));
@@ -468,7 +468,7 @@ contract ProcessClaimsTest is Test {
         vm.expectRevert(FeeAccounting.TokenTransferFailed.selector);
         operations.claim(hook, CYCLE_ONE, 1, address(operations));
 
-        assertEq(hook.processLiability(), 250);
+        assertEq(hook.processLiability(), 240);
         assertEq(hook.totalLiability(), 300);
         assertEq(hook.hookEthBalance(), 300);
         assertEq(hook.remainingProcessClaimCapacity(), 100);
@@ -485,7 +485,7 @@ contract ProcessClaimsTest is Test {
         vm.expectRevert(FeeAccounting.TokenTransferFailed.selector);
         _claimAs(OPERATIONS_ONE, hook, CYCLE_ONE, 1);
 
-        assertEq(hook.processLiability(), 250);
+        assertEq(hook.processLiability(), 240);
         assertEq(hook.totalLiability(), 300);
         assertEq(hook.hookEthBalance(), 300);
         assertEq(hook.remainingProcessClaimCapacity(), 100);
@@ -498,12 +498,12 @@ contract ProcessClaimsTest is Test {
         ProcessClaimsHookHarness hook = _deploy(OPERATIONS_ONE, 500, 500, 2);
         _accrue(hook);
 
-        _claimAs(OPERATIONS_ONE, hook, CYCLE_ONE, 250);
+        _claimAs(OPERATIONS_ONE, hook, CYCLE_ONE, 240);
 
-        assertEq(token.balanceOf(OPERATIONS_ONE), 250);
+        assertEq(token.balanceOf(OPERATIONS_ONE), 240);
         assertEq(hook.processLiability(), 0);
-        assertEq(hook.totalLiability(), 50);
-        assertEq(hook.remainingProcessClaimCapacity(), 250);
+        assertEq(hook.totalLiability(), 60);
+        assertEq(hook.remainingProcessClaimCapacity(), 260);
         assertTrue(hook.isSolvent());
     }
 
@@ -515,7 +515,7 @@ contract ProcessClaimsTest is Test {
         vm.expectRevert(FeeAccounting.InsolventAccounting.selector);
         _claimAs(OPERATIONS_ONE, hook, CYCLE_ONE, 1);
 
-        assertEq(hook.processLiability(), 250);
+        assertEq(hook.processLiability(), 240);
         assertEq(hook.totalLiability(), 300);
         assertEq(hook.hookEthBalance(), 299);
         assertEq(hook.remainingProcessClaimCapacity(), 100);
@@ -627,7 +627,7 @@ contract ProcessClaimsTest is Test {
 
     function _accrue(ProcessClaimsHookHarness hook) private {
         hook.accrueForTest(10_000);
-        assertEq(hook.processLiability(), 250);
+        assertEq(hook.processLiability(), 240);
         assertEq(hook.totalLiability(), 300);
         assertEq(hook.hookEthBalance(), 300);
     }

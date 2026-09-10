@@ -634,9 +634,9 @@ contract RobinhoodV4ArchiveForkTest is Test {
         assertEq(route.fee, expectedFee, "router-derived USDG fee mismatch");
         assertEq(address(hook).balance - hookBalanceBefore, expectedFee);
         assertEq(hook.totalLiability() - liabilityBefore, expectedFee);
-        assertEq(programmable, uint256(USDG_ROUTER_TRADE_AMOUNT) * 10 / 10_000);
+        assertEq(programmable, uint256(USDG_ROUTER_TRADE_AMOUNT) * 20 / 10_000);
         assertEq(treasury, uint256(USDG_ROUTER_TRADE_AMOUNT) * 40 / 10_000);
-        assertEq(process, uint256(USDG_ROUTER_TRADE_AMOUNT) * 250 / 10_000);
+        assertEq(process, uint256(USDG_ROUTER_TRADE_AMOUNT) * 240 / 10_000);
         _assertSolvent();
     }
 
@@ -724,7 +724,7 @@ contract RobinhoodV4ArchiveForkTest is Test {
 
         (uint256 programmableLiability, uint256 treasuryLiability, uint256 processLiability) =
             hook.readFeeLiabilities(TREASURY);
-        assertEq(processLiability, 250_000, "process fee did not fill the six-hour cap");
+        assertEq(processLiability, 240_000, "process fee allocation mismatch");
         _assertClaimAuthorizationGuards(programmable, operations);
 
         _claimProgrammableAndAssert(programmableLiability / 2, programmable);
@@ -752,7 +752,9 @@ contract RobinhoodV4ArchiveForkTest is Test {
         }
         uint256 secondProcessLiability = hook.processLiability();
         assertEq(
-            secondProcessLiability, 1_000_000, "process liability did not reach graph capacity"
+            secondProcessLiability,
+            960_000,
+            "four trades did not accrue the revised process allocation"
         );
         vm.warp(claimTimestamp + 21_599);
         FeeSnapshot memory beforeEarlyProcessClaim = _feeSnapshot(hook);
@@ -1551,14 +1553,14 @@ contract RobinhoodV4ArchiveForkTest is Test {
 
     function _feeAccrualForGross(uint256 gross) private pure returns (FeeAccrual memory accrual) {
         accrual.gross = gross;
-        accrual.programmable = _floorFee(gross, 10);
+        accrual.programmable = _floorFee(gross, 20);
         accrual.treasury = _floorFee(gross, 40);
-        accrual.process = _floorFee(gross, 250);
+        accrual.process = _floorFee(gross, 240);
         accrual.total = accrual.programmable + accrual.treasury + accrual.process;
         accrual.remainders = FeeRemainders({
-            programmable: _feeRemainder(gross, 10),
+            programmable: _feeRemainder(gross, 20),
             treasury: _feeRemainder(gross, 40),
-            process: _feeRemainder(gross, 250)
+            process: _feeRemainder(gross, 240)
         });
     }
 
