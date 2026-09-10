@@ -24,3 +24,5 @@ Buyer routing retains actual native presettlement: explicit native `SETTLE`, `SW
 No new customer economic choice is needed for this preparation. Exact platform integration and later wallet review remain before any transaction. Deployment, funding, live launch requests and signatures are outside this revision.
 
 The owner-requested allocation tests change the pinned archive-fork fixture. Its hash, the two workflow hash assertions, and the checker's supported workflow digest are regenerated together. The control pin-bump record binds those exact changes to the protected base; test execution, RPC pin validation, secret isolation and required checks remain enforced. No gate condition or platform packaging validator is weakened.
+
+Archive-fork run 34482157223 on source 3883e47bd04fa0b0e66d085ac39db34816c3acf8 passed 14 of 15 cases. Its graph test emitted new custody/hook runtime and graph hashes before rejecting the old fixture pins. The updated test pins reproduce those observed, source-bound fork values. They are fixture expectations, not production binding/runtime commitments or deployment records. The final commit must rerun the same protected fork proof.
