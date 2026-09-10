@@ -256,6 +256,36 @@ export class AutomatedCycleService {
     return null;
   }
 
+  async #runPayoutRetries({ signal, lease, assertLease }) {
+    if (typeof this.#stageDriver.runPayoutRetry !== 'function'
+      || typeof this.#cycleRepository.listOpenPayoutRetries !== 'function') return [];
+    const retries = await this.#cycleRepository.listOpenPayoutRetries();
+    if (!Array.isArray(retries)) throw new Error('payout retry list is invalid');
+    const results = [];
+    for (const retry of retries) {
+      assertNotAborted(signal);
+      try {
+        assertLease();
+        results.push(await this.#stageDriver.runPayoutRetry({
+          ...retry,
+          nowMs: this.#now(),
+          lease,
+          fencingToken: lease.fencingToken,
+          assertLease,
+        }));
+      } catch (error) {
+        results.push({
+          status: 'ERROR',
+          cycleId: retry.cycleId,
+          recipient: retry.recipient,
+          retryId: retry.retryId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+    return results;
+  }
+
   /**
    * ADR-0025 `refresh-after-readmission`'s bounded service-tick half: attempts, at most once per
    * tick, to fetch an independently normalized replacement and atomically select it. Returns
@@ -352,12 +382,16 @@ export class AutomatedCycleService {
       };
       scheduleHeartbeat();
       const supplementary = await this.#runOneSupplementarySettlement({ signal, lease, assertLease });
+      const payoutRetries = await this.#runPayoutRetries({ signal, lease, assertLease });
       let cycle = await this.#cycleRepository.readActiveCycle();
       let createdCycle = false;
       if (cycle === null) {
         if (requireActive) {
           if (supplementary !== null) {
             return { status: 'SUPPLEMENTARY_SETTLEMENT', ...supplementary };
+          }
+          if (payoutRetries.length > 0) {
+            return { status: 'PAYOUT_RETRY', cycleId: payoutRetries[0].cycleId, stage: 'payout' };
           }
           return { status: 'NO_ACTIVE_CYCLE', cycleId: null, stage: null };
         }

@@ -8,6 +8,28 @@ Distribute finalized native ETH returned to Operations among the frozen pre-clai
 
 `compileDirectPayoutPlan` creates `hookemon.direct-payout-plan.v2` for historical all-holder cycles, v3 remains the legacy selected-cycle plan with full selection evidence, and v4 is the current selected-cycle plan with a validated `hookemon.reward-selection-summary.v1` instead of the 250,000-entry holder snapshot. `createNativePayoutAmount` requires chain 4663, asset `native`, and eighteen decimals. Return bindings contain Operations, `assetId: native`, and the finalized evidence digest. `preparePayoutRequest`, `initializeDirectPayout`, `advanceDirectPayout`, `mutatePayout`, and `reconcileLivePayout` use the same frozen plan. Supplementary plans use v2, legacy v3, or current v4 in parallel. Source, return boundary, and payout state retain their native contracts.
 
+Definitively refused native recipients remain quarantined until a later authenticated payment is
+observed. The payout state keeps retry records under the original recipient attempt and accepts
+one unresolved retry at a time. New recipient records include an empty `retries` list and null
+`settlement`; legacy records normalize missing fields to those same defaults. `retryRefusedPayoutRecipient` advances one durable retry step per
+invocation: it reconciles the original refusal before requesting a retry, persists prepared,
+signed, broadcast, finality, and refusal transitions, settles repository liability before marking
+a retry paid, and removes the recipient from `state.quarantine` only after settlement. An
+operator's `retry-refused-payout` command records the request only; the lease-fenced automated
+tick performs signing and broadcast.
+
+Retry execution reports `PENDING` while its durable retry is unresolved, `SETTLED` after a
+finalized retry has released the liability, and `REFUSED` after the retry itself is finalized
+reverted. A later request may open a new retry only after `REFUSED`. When the wallet's observed
+pending nonce is ahead of the persisted `nextNonce`, the retry reserves that observed nonce; a
+nonce below `nextNonce`, or a duplicate nonce already held by another retry, is interference.
+A supplied retry identity must exist in the durable quarantine reservation before recovery; an
+unknown retry is rejected before any chain read, state write, signing, or broadcast.
+Retry settlement and refusal journals retain the finalized payment or refusal proof needed to
+repair payout-state projections after a process crash. Recovery replays gas attribution and the
+final retry state without reading the chain or broadcasting again; settlement removes the
+quarantine, while refusal retains the quarantine liability.
+
 `createCycleAttributableFinalizedAvailableReader` reloads the completed native return and its exact durable Relay leg association, native custody v3 row, and predecessor dust provenance. It returns only the attributed return plus dust, after a finalized public/archive/public native balance check. Unrelated wallet funds never increase the payout allocation. Zero attributed proceeds require no balance read.
 
 `assertFinalizedPayoutTransferEvidence` validates persisted native payment facts and their digest for projections. `assertHistoricalFinalizedPayoutTransferEvidence` decodes historical USDG evidence without granting execution authority. Native execution requires a fresh process capability from the RPC payment producer; parsed JSON is insufficient.

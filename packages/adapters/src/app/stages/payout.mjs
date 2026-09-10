@@ -1,4 +1,4 @@
-import { applyNativeCustodyGasPayment, createNativeTransactionGasProof, createNativePaymentProof, isProcessNativePaymentProof } from '../../native-payment-proof.mjs';
+import { applyNativeCustodyGasPayment, applyNativeCustodyGasPaymentFromDurableProof, createNativeTransactionGasProof, createNativePaymentProof, isProcessNativePaymentProof } from '../../native-payment-proof.mjs';
 import { createHash } from 'node:crypto';
 import {
   getAddress,
@@ -701,6 +701,8 @@ function normalizeAttempt(value, index, recipients, { operations, maxGasPriceWei
     refusalEvidence: null,
     nonceInterference: null,
     approvalContext: null,
+    retries: [],
+    settlement: null,
   };
   attempt.replacementHistory = normalizeReplacementHistory(value.replacementHistory, index, attempt, { maxGasPriceWei });
   if (attempt.replacementOf !== null && (!TRANSACTION_HASH.test(attempt.replacementOf)
@@ -738,7 +740,103 @@ function normalizeAttempt(value, index, recipients, { operations, maxGasPriceWei
   } else if (!signed && value.approvalContext !== null) {
     fail(`direct payout recipient attempt ${index} has approval context before signing`);
   }
+  attempt.retries = normalizeRetries(value.retries ?? [], index, attempt, { operations, maxGasPriceWei });
+  attempt.settlement = value.settlement === undefined || value.settlement === null
+    ? null
+    : normalizeAttemptSettlement(value.settlement, index, attempt, operations);
   return attempt;
+}
+
+function normalizeRetry(value, index, attempt, { operations, maxGasPriceWei }) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    fail(`direct payout recipient attempt ${index} retry is invalid`);
+  }
+  const fields = [
+    'retryId', 'requestId', 'state', 'nonce', 'gasPriceWei', 'rawSignedBytes',
+    'rawSignedBytesHash', 'txHash', 'finalizedTransfer', 'refusalEvidence', 'approvalContext',
+  ];
+  if (Object.keys(value).length !== fields.length || !fields.every(field => Object.hasOwn(value, field))) {
+    fail(`direct payout recipient attempt ${index} retry must use the exact schema`);
+  }
+  if (!DIGEST.test(value.retryId) || typeof value.requestId !== 'string' || value.requestId.length === 0) {
+    fail(`direct payout recipient attempt ${index} retry identity is invalid`);
+  }
+  const normalized = normalizeAttempt({
+    recipient: attempt.recipient,
+    amount: attempt.amount,
+    state: value.state,
+    nonce: value.nonce,
+    chainId: 4663,
+    gasPriceWei: value.gasPriceWei,
+    calldata: attempt.calldata,
+    calldataDigest: attempt.calldataDigest,
+    rawSignedBytes: value.rawSignedBytes,
+    rawSignedBytesHash: value.rawSignedBytesHash,
+    txHash: value.txHash,
+    finalizedTransfer: value.finalizedTransfer,
+    refusalEvidence: value.refusalEvidence,
+    replacementOf: null,
+    replacementHistory: [],
+    nonceInterference: null,
+    approvalContext: value.approvalContext,
+  }, index, new Set(), { operations, maxGasPriceWei });
+  return {
+    retryId: value.retryId,
+    requestId: value.requestId,
+    state: normalized.state,
+    nonce: normalized.nonce,
+    gasPriceWei: normalized.gasPriceWei,
+    rawSignedBytes: normalized.rawSignedBytes,
+    rawSignedBytesHash: normalized.rawSignedBytesHash,
+    txHash: normalized.txHash,
+    finalizedTransfer: normalized.finalizedTransfer,
+    refusalEvidence: normalized.refusalEvidence,
+    approvalContext: normalized.approvalContext,
+  };
+}
+
+function normalizeRetries(value, index, attempt, { operations, maxGasPriceWei }) {
+  if (!Array.isArray(value)) fail(`direct payout recipient attempt ${index} retries are invalid`);
+  const ids = new Set();
+  let open = 0;
+  let finalized = 0;
+  return value.map((retry, retryIndex) => {
+    const normalized = normalizeRetry(retry, index, attempt, { operations, maxGasPriceWei });
+    if (ids.has(normalized.retryId)) fail(`direct payout recipient attempt ${index} retry ids are not unique`);
+    ids.add(normalized.retryId);
+    if (!['REFUSED'].includes(attempt.state)) fail(`direct payout recipient attempt ${index} retries require a REFUSED attempt`);
+    if (!['FINALIZED', 'REFUSED'].includes(normalized.state)) open += 1;
+    if (normalized.state === 'FINALIZED') finalized += 1;
+    if (open > 1 || finalized > 1) fail(`direct payout recipient attempt ${index} has too many active or finalized retries`);
+    return normalized;
+  });
+}
+
+function normalizeAttemptSettlement(value, index, attempt, operations) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+    || Object.keys(value).length !== 2
+    || !Object.hasOwn(value, 'retryId') || !Object.hasOwn(value, 'finalizedTransfer')) {
+    fail(`direct payout recipient attempt ${index} settlement is invalid`);
+  }
+  if (value.retryId === null
+    && (typeof value.finalizedTransfer?.transactionHash !== 'string'
+      || ![attempt.txHash, ...attempt.replacementHistory.map(entry => entry.txHash)]
+        .filter(Boolean)
+        .some(transactionHash => transactionHash.toLowerCase() === value.finalizedTransfer.transactionHash.toLowerCase()))) {
+    fail(`direct payout recipient attempt ${index} settlement transaction does not match the original attempt`);
+  }
+  if (value.retryId !== null && !DIGEST.test(value.retryId)) fail(`direct payout recipient attempt ${index} settlement retryId is invalid`);
+  const transfer = value.finalizedTransfer;
+  const synthetic = {
+    ...attempt,
+    rawSignedBytes: null,
+    txHash: transfer?.transactionHash ?? null,
+    nonce: transfer?.nonce ?? attempt.nonce,
+  };
+  return {
+    retryId: value.retryId,
+    finalizedTransfer: normalizeFinalizedTransfer(transfer, index, synthetic, operations),
+  };
 }
 
 function normalizeRefusalEvidence(value, index, attempt) {
@@ -789,6 +887,8 @@ function assertStateMatchesPlan(state, planInfo) {
     fail('direct payout state recipients do not match its immutable payable allocations');
   }
   const assignedNonces = new Set();
+  const assignedOriginalNonces = [];
+  let highestRetryNonce = null;
   for (const [index, attempt] of state.recipients.entries()) {
     const allocation = payableAllocations[index];
     if (!allocation || attempt.recipient !== allocation.recipient || !sameAmount(attempt.amount, allocation.amount)) {
@@ -797,12 +897,27 @@ function assertStateMatchesPlan(state, planInfo) {
     if (attempt.nonce !== null) {
       if (assignedNonces.has(attempt.nonce)) fail('direct payout state recipient nonces must be unique');
       assignedNonces.add(attempt.nonce);
+      assignedOriginalNonces.push(BigInt(attempt.nonce));
       if (BigInt(attempt.nonce) >= BigInt(state.nextNonce)) {
         fail('direct payout state nextNonce does not follow its persisted recipient attempts');
       }
     }
+    for (const retry of attempt.retries) {
+      if (retry.nonce === null) continue;
+      if (assignedNonces.has(retry.nonce)) fail('direct payout state recipient nonces must be unique');
+      assignedNonces.add(retry.nonce);
+      const retryNonce = BigInt(retry.nonce);
+      if (highestRetryNonce === null || retryNonce > highestRetryNonce) highestRetryNonce = retryNonce;
+      if (BigInt(retry.nonce) >= BigInt(state.nextNonce)) {
+        fail('direct payout state nextNonce does not follow its persisted recipient attempts');
+      }
+    }
   }
-  if (BigInt(state.nextNonce) !== BigInt(state.firstNonce) + BigInt(assignedNonces.size)) {
+  const originalCursor = BigInt(state.firstNonce) + BigInt(assignedOriginalNonces.length);
+  const expectedNextNonce = highestRetryNonce === null || highestRetryNonce + 1n < originalCursor
+    ? originalCursor
+    : highestRetryNonce + 1n;
+  if (BigInt(state.nextNonce) !== expectedNextNonce) {
     fail('direct payout state nonce cursor is inconsistent with its persisted recipient attempts');
   }
   const terminalBroadcast = state.recipients.some(attempt => ['BROADCAST', 'FINALIZED', 'REFUSED', 'NONCE_INTERFERENCE'].includes(attempt.state) && attempt.nonce !== null);
@@ -811,7 +926,8 @@ function assertStateMatchesPlan(state, planInfo) {
     || (attempt.state === 'REFUSED' && attempt.nonce !== null)) && !state.feasibilityChecked) {
     fail('direct payout state signed a transaction before recording its feasibility gate');
   }
-  const quarantined = state.recipients.filter(attempt => ['REFUSED', 'NONCE_INTERFERENCE'].includes(attempt.state));
+  const quarantined = state.recipients.filter(attempt => ['REFUSED', 'NONCE_INTERFERENCE'].includes(attempt.state)
+    && !isRecipientPaid(attempt));
   if (state.quarantine.length !== quarantined.length) fail('direct payout quarantine liabilities must match quarantined recipients exactly once');
   const liabilities = new Map();
   for (const liability of state.quarantine) {
@@ -1124,6 +1240,8 @@ export function createDirectPayoutState({
       approvalContext: null,
       replacementOf: null,
       replacementHistory: [],
+      retries: [],
+      settlement: null,
     });
   }
   return {
@@ -1328,7 +1446,7 @@ function finalizingAttempt(attempt, candidate, finalizedTransfer) {
   };
 }
 
-async function persistPayoutGas(cycleRepository, state, proof) {
+async function persistPayoutGas(cycleRepository, state, proof, { durable = false } = {}) {
   if (typeof cycleRepository?.describeCycle !== 'function') return;
   const cycle = await cycleRepository.describeCycle(state.cycleId);
   if (cycle.terminalState === 'COMPLETED' || typeof cycleRepository.recordCustodyLedger !== 'function') {
@@ -1338,7 +1456,60 @@ async function persistPayoutGas(cycleRepository, state, proof) {
   }
   const ledger = cycle.custodyLedgers.get('4663' + String.fromCharCode(0) + 'native');
   if (!ledger) fail('native payout gas requires its existing custody ledger');
-  await cycleRepository.recordCustodyLedger(state.cycleId, { ...ledger, ...applyNativeCustodyGasPayment(ledger, proof) });
+  const applyGas = durable ? applyNativeCustodyGasPaymentFromDurableProof : applyNativeCustodyGasPayment;
+  await cycleRepository.recordCustodyLedger(state.cycleId, { ...ledger, ...applyGas(ledger, proof) });
+}
+
+async function repairDurableRetryProjection({
+  payoutStore,
+  cycleRepository,
+  state,
+  index,
+  attempt,
+  retryIndex,
+  openRetry,
+}) {
+  if (typeof cycleRepository?.readPayoutQuarantine !== 'function') return null;
+  const reservation = await cycleRepository.readPayoutQuarantine(
+    state.cycleId,
+    state.planDigest,
+    attempt.recipient,
+  );
+  if (!reservation) return null;
+  const durableRetry = reservation.retries?.find(retry => retry.retryId === openRetry.retryId);
+  const settlement = reservation.settlement?.retryId === openRetry.retryId
+    ? reservation.settlement
+    : null;
+  const refusal = durableRetry?.resolution?.state === 'REFUSED' ? durableRetry : null;
+  if (!settlement && !refusal) return null;
+  const proof = settlement?.finalizedTransfer ?? refusal?.processProof;
+  if (!proof) fail(`direct payout retry ${openRetry.retryId} lacks durable projection proof`);
+  await persistPayoutGas(cycleRepository, state, proof, { durable: true });
+  const next = copy(state);
+  const existingRetry = retryIndex >= 0 ? openRetry : null;
+  const retry = settlement
+    ? {
+      ...(settlement.payoutRetry ?? existingRetry),
+      state: 'FINALIZED',
+      finalizedTransfer: settlement.finalizedTransfer,
+      refusalEvidence: null,
+    }
+    : {
+      ...(durableRetry.payoutRetry ?? existingRetry),
+      state: 'REFUSED',
+      finalizedTransfer: null,
+      refusalEvidence: durableRetry.refusalEvidence,
+    };
+  if (!retry.retryId) fail(`direct payout retry ${openRetry.retryId} lacks durable retry projection`);
+  next.recipients[index] = {
+    ...attempt,
+    retries: retryIndex >= 0
+      ? attempt.retries.map((item, cursor) => cursor === retryIndex ? retry : item)
+      : [...attempt.retries, retry],
+  };
+  if (settlement) next.quarantine = next.quarantine.filter(item => item.recipient !== attempt.recipient);
+  await persist(payoutStore, next);
+  return next;
 }
 
 async function reconcileRecipientAttempt(client, evidenceClient, state, attempt) {
@@ -1428,7 +1599,13 @@ function durableRecoveryAttempt({ state, attempt }) {
     fail('direct payout recovery requires a recipient attempt');
   }
   const durableState = normalizedState(state);
-  const { attempt: durableAttempt } = stateRecipient(durableState, attempt.recipient);
+  const { attempt: durableRecipient } = stateRecipient(durableState, attempt.recipient);
+  const durableRetry = attempt.retryId === undefined
+    ? null
+    : durableRecipient.retries.find(retry => retry.retryId === attempt.retryId);
+  const durableAttempt = durableRetry === null || durableRetry === undefined
+    ? durableRecipient
+    : { ...durableRecipient, ...durableRetry, state: durableRetry.state };
   if (!['SIGNED', 'BROADCAST'].includes(durableAttempt.state)) {
     fail('direct payout recovery requires a durably persisted SIGNED or BROADCAST recipient');
   }
@@ -1515,22 +1692,37 @@ const localDirectPayoutPolicySigners = new WeakMap();
 
 function localDirectPayoutPolicySignerFactory({ signerClient, config }) {
   return async ({ state, attempt }) => {
+    const durable = normalizedState(state);
+    const { attempt: durableRecipient } = stateRecipient(durable, attempt.recipient);
+    const durableRetry = attempt.retryId === undefined
+      ? null
+      : durableRecipient.retries.find(retry => retry.retryId === attempt.retryId);
+    if (attempt.retryId !== undefined && durableRetry === undefined) {
+      fail('direct payout policy signer retry is not durably persisted');
+    }
+    const durableAttempt = durableRetry === null
+      ? durableRecipient
+      : { ...durableRecipient, ...durableRetry, state: durableRetry.state };
+    if (attempt.nonce !== durableAttempt.nonce || attempt.calldataDigest !== durableAttempt.calldataDigest) {
+      fail('direct payout policy signer attempt does not match the durable payout attempt');
+    }
     if (!signerClient || typeof signerClient !== 'object') {
-      return (await createDirectPayoutPolicySigner({
+      return (await createDirectPayoutPolicySignerForAttempt({
         signerClient,
-        state,
-        recipient: attempt.recipient,
+        state: durable,
+        attempt: durableAttempt,
         config,
       })).policySigner;
     }
     const key = canonicalDigest({
       schema: 'hookemon.direct-payout-policy-signer-cache-key.v1',
-      cycleId: state.cycleId,
-      planDigest: state.planDigest,
-      recipient: attempt.recipient,
-      nonce: attempt.nonce,
-      calldataDigest: attempt.calldataDigest,
-      gasPriceWei: attempt.gasPriceWei,
+      cycleId: durable.cycleId,
+      planDigest: durable.planDigest,
+      recipient: durableAttempt.recipient,
+      retryId: attempt.retryId ?? null,
+      nonce: durableAttempt.nonce,
+      calldataDigest: durableAttempt.calldataDigest,
+      gasPriceWei: durableAttempt.gasPriceWei,
     });
     let signers = localDirectPayoutPolicySigners.get(signerClient);
     if (signers === undefined) {
@@ -1539,10 +1731,10 @@ function localDirectPayoutPolicySignerFactory({ signerClient, config }) {
     }
     const cached = signers.get(key);
     if (cached !== undefined) return cached;
-    const composed = await createDirectPayoutPolicySigner({
+    const composed = await createDirectPayoutPolicySignerForAttempt({
       signerClient,
-      state,
-      recipient: attempt.recipient,
+      state: durable,
+      attempt: durableAttempt,
       config,
     });
     signers.set(key, composed.policySigner);
@@ -1826,6 +2018,304 @@ export async function advanceDirectPayout({
   fail(`direct payout recipient ${attempt.recipient} has an unsupported state ${attempt.state}`);
 }
 
+export async function retryRefusedPayoutRecipient({
+  payoutStore,
+  cycleRepository,
+  recipient,
+  requestId,
+  retryId = null,
+  adapters,
+  signerClient,
+  policySignerClient = null,
+  policySignerFactory = null,
+  config,
+  requestDigest = null,
+  fencingToken = null,
+  evmNonceFence = null,
+  nonceLeaseContext = null,
+}) {
+  if (fencingToken !== null && (typeof requestDigest !== 'string' || requestDigest.length === 0)) {
+    fail('direct payout retry requestDigest is required when fencingToken is provided');
+  }
+  const state = await load(payoutStore);
+  assertRuntimeConfiguration(state, config);
+  const { index, attempt } = stateRecipient(state, recipient);
+  if (attempt.state !== 'REFUSED' || !attempt.refusalEvidence?.transactionHash) {
+    fail(`${attempt.recipient} is not a definitively refused on-chain payout`);
+  }
+  if (attempt.settlement !== null || settledRetry(attempt) !== null) return state;
+  let openRetry = attempt.retries.find(retry => !['FINALIZED', 'REFUSED'].includes(retry.state)) ?? null;
+  let retryIndex = openRetry === null ? -1 : attempt.retries.findIndex(retry => retry.retryId === openRetry.retryId);
+  if (openRetry === null && retryId !== null && typeof cycleRepository?.readPayoutQuarantine === 'function') {
+    const reservation = await cycleRepository.readPayoutQuarantine(state.cycleId, state.planDigest, attempt.recipient);
+    const durableRetry = reservation?.retries?.find(retry => retry.retryId === retryId);
+    if (!durableRetry) fail(`direct payout retry ${retryId} is not durably requested`);
+    if (durableRetry.resolution !== null) {
+      openRetry = durableRetry.payoutRetry ?? {
+        retryId: durableRetry.retryId,
+        requestId: durableRetry.requestId,
+        state: durableRetry.resolution.state,
+      };
+      retryIndex = -1;
+    }
+  }
+  if (openRetry !== null) {
+    const repaired = await repairDurableRetryProjection({
+      payoutStore,
+      cycleRepository,
+      state,
+      index,
+      attempt,
+      retryIndex,
+      openRetry,
+    });
+    if (repaired) return repaired;
+  }
+  const client = adapters?.robinhood?.client;
+  const evidenceClient = adapters?.robinhood?.historicalEvidenceClient ?? client?.historicalEvidenceClient ?? null;
+  if (!client) fail('direct payout retry requires a chain 4663 client');
+  if (!openRetry) {
+    if (state.recipients.some(entry => entry.recipient.toLowerCase() !== attempt.recipient.toLowerCase()
+      && !RESOLVED_RECIPIENT_STATES.includes(entry.state))) {
+      fail('direct payout retry requires every other recipient attempt to be resolved');
+    }
+    if (state.recipients.some(entry => entry.recipient.toLowerCase() !== attempt.recipient.toLowerCase()
+      && entry.retries.some(retry => !['FINALIZED', 'REFUSED'].includes(retry.state)))) {
+      fail('direct payout retry cannot open while another retry is unresolved');
+    }
+    const reconciled = await reconcileRecipientAttempt(client, evidenceClient, state, attempt);
+    if (!reconciled) fail('original refused payout outcome is not finalized; refusing to retry');
+    if (!reconciled.refused) {
+      await cycleRepository.settlePayoutQuarantine(state.cycleId, {
+        planDigest: state.planDigest, recipient: attempt.recipient, retryId: null,
+        proof: reconciled.processProof, operations: state.operations,
+      });
+      await persistPayoutGas(cycleRepository, state, reconciled.processProof);
+      const next = copy(state);
+      next.recipients[index] = {
+        ...attempt, settlement: { retryId: null, finalizedTransfer: reconciled.finalizedTransfer },
+      };
+      next.quarantine = next.quarantine.filter(item => item.recipient !== attempt.recipient);
+      await persist(payoutStore, next);
+      return next;
+    }
+    const retry = await cycleRepository.requestPayoutQuarantineRetry(state.cycleId, {
+      planDigest: state.planDigest,
+      recipient: attempt.recipient,
+      amount: attempt.amount,
+      requestId,
+      originalTransactionHash: attempt.refusalEvidence.transactionHash,
+    });
+    const next = copy(state);
+    next.recipients[index] = {
+      ...attempt,
+      retries: [...attempt.retries, {
+        retryId: retry.retryId,
+        requestId: retry.requestId,
+        state: 'PREPARED',
+        nonce: null,
+        gasPriceWei: state.gasPriceWei,
+        rawSignedBytes: null,
+        rawSignedBytesHash: null,
+        txHash: null,
+        finalizedTransfer: null,
+        refusalEvidence: null,
+        approvalContext: null,
+      }],
+    };
+    await persist(payoutStore, next);
+    return next;
+  }
+
+  const retryView = { ...attempt, ...openRetry, state: openRetry.state };
+  const exactPolicySignerFactory = localDirectPayoutPolicySignerFactory({ signerClient, config });
+  if (openRetry.state === 'PREPARED') {
+    if (openRetry.nonce === null) {
+      await evmNonceFence?.();
+      const observedNonce = normalizeNonce(
+        await client.getTransactionCount({ address: state.operations, blockTag: 'pending' }),
+        'observed payout retry nonce',
+      );
+      if (BigInt(observedNonce) < BigInt(state.nextNonce)) {
+        throw new DirectPayoutNonceInterferenceError({
+          recipient: attempt.recipient, expectedNonce: state.nextNonce, observedNonce,
+        });
+      }
+      const normalizedObservedNonce = BigInt(observedNonce).toString();
+      const collision = state.recipients.some((entry, entryIndex) => {
+        if (entryIndex !== index && ['PREPARED', 'SIGNED', 'BROADCAST'].includes(entry.state)
+          && entry.nonce !== null && BigInt(entry.nonce).toString() === normalizedObservedNonce) return true;
+        return entry.retries.some((retry, candidateRetryIndex) => {
+          if (entryIndex === index && candidateRetryIndex === retryIndex) return false;
+          return ['PREPARED', 'SIGNED', 'BROADCAST'].includes(retry.state)
+            && retry.nonce !== null && BigInt(retry.nonce).toString() === normalizedObservedNonce;
+        });
+      });
+      if (collision) {
+        throw new DirectPayoutNonceInterferenceError({
+          recipient: attempt.recipient, expectedNonce: observedNonce, observedNonce,
+        });
+      }
+      const next = copy(state);
+      next.recipients[index] = {
+        ...attempt,
+        retries: attempt.retries.map((item, cursor) => cursor === retryIndex
+          ? { ...item, nonce: observedNonce } : item),
+      };
+      next.nextNonce = (BigInt(observedNonce) + 1n).toString();
+      await persist(payoutStore, next);
+      return next;
+    }
+    await evmNonceFence?.();
+    const observedNonce = normalizeNonce(
+      await client.getTransactionCount({ address: state.operations, blockTag: 'pending' }),
+      'observed payout retry signing nonce',
+    );
+    if (observedNonce !== openRetry.nonce) {
+      throw new DirectPayoutNonceInterferenceError({
+        recipient: attempt.recipient, expectedNonce: openRetry.nonce, observedNonce,
+      });
+    }
+    if (!state.feasibilityChecked) await assertFirstSignatureFeasibility({ state, client });
+    const resolved = await resolvePolicySignerClients({
+      signerClient, policySignerClient, policySignerFactory: exactPolicySignerFactory, state, attempt: retryView,
+    });
+    const { active, policy } = activePolicySigner(resolved);
+    const signed = await active.sign({ transaction: buildTransaction(state, retryView) });
+    const signedMaterial = await assertSignedTransaction({ rawSignedBytes: signed?.signedTx, state, attempt: retryView });
+    const material = {
+      rawSignedBytes: signedMaterial.rawSignedBytes,
+      rawSignedBytesHash: signedMaterial.rawSignedBytesHash,
+      txHash: signedMaterial.txHash,
+    };
+    const next = copy(state);
+    next.feasibilityChecked = true;
+    const approvalContext = approvalContextForSignedPayout({
+      policyApproval: readTransactionPolicyApprovalContext(policy, signed),
+      material, requestDigest, fencingToken,
+    });
+    next.recipients[index] = {
+      ...attempt,
+      retries: attempt.retries.map((item, cursor) => cursor === retryIndex
+        ? { ...item, state: 'SIGNED', ...material, approvalContext } : item),
+    };
+    await persist(payoutStore, next);
+    return next;
+  }
+
+  if (openRetry.state === 'SIGNED') {
+    const reconciled = await reconcileRecipientAttempt(client, evidenceClient, state, retryView);
+    if (!reconciled) {
+      await assertSignedTransaction({ rawSignedBytes: retryView.rawSignedBytes, state, attempt: retryView });
+      await broadcastExactSignedBytes({
+        signerClient, policySignerClient, policySignerFactory: exactPolicySignerFactory,
+        cycleRepository, state, attempt: retryView, nonceLeaseContext,
+      });
+      const next = copy(state);
+      next.manifestFrozen = true;
+      next.recipients[index] = {
+        ...attempt,
+        retries: attempt.retries.map((item, cursor) => cursor === retryIndex
+          ? { ...item, state: 'BROADCAST' } : item),
+      };
+      await persist(payoutStore, next);
+      return next;
+    }
+    if (reconciled.refused) {
+      await cycleRepository.recordPayoutQuarantineRetryRefusal(state.cycleId, {
+        planDigest: state.planDigest, recipient: attempt.recipient,
+        retryId: openRetry.retryId,
+        refusalEvidence: reconciled.refusalEvidence,
+        processProof: reconciled.processProof,
+        payoutRetry: {
+          ...openRetry,
+          state: 'REFUSED',
+          refusalEvidence: reconciled.refusalEvidence,
+        },
+      });
+      await persistPayoutGas(cycleRepository, state, reconciled.processProof);
+      const next = copy(state);
+      next.recipients[index] = {
+        ...attempt,
+        retries: attempt.retries.map((item, cursor) => cursor === retryIndex
+          ? { ...item, state: 'REFUSED', refusalEvidence: reconciled.refusalEvidence } : item),
+      };
+      await persist(payoutStore, next);
+      return next;
+    }
+    await cycleRepository.settlePayoutQuarantine(state.cycleId, {
+      planDigest: state.planDigest, recipient: attempt.recipient,
+      retryId: openRetry.retryId,
+      proof: reconciled.processProof,
+      operations: state.operations,
+      payoutRetry: {
+        ...openRetry,
+        state: 'FINALIZED',
+        finalizedTransfer: reconciled.finalizedTransfer,
+      },
+    });
+    await persistPayoutGas(cycleRepository, state, reconciled.processProof);
+    const next = copy(state);
+    next.recipients[index] = {
+      ...attempt,
+      retries: attempt.retries.map((item, cursor) => cursor === retryIndex
+        ? { ...item, state: 'FINALIZED', finalizedTransfer: reconciled.finalizedTransfer } : item),
+    };
+    next.quarantine = next.quarantine.filter(item => item.recipient !== attempt.recipient);
+    await persist(payoutStore, next);
+    return next;
+  }
+
+  if (openRetry.state === 'BROADCAST') {
+    const reconciled = await reconcileRecipientAttempt(client, evidenceClient, state, retryView);
+    if (!reconciled) return state;
+    if (reconciled.refused) {
+      await cycleRepository.recordPayoutQuarantineRetryRefusal(state.cycleId, {
+        planDigest: state.planDigest, recipient: attempt.recipient,
+        retryId: openRetry.retryId,
+        refusalEvidence: reconciled.refusalEvidence,
+        processProof: reconciled.processProof,
+        payoutRetry: {
+          ...openRetry,
+          state: 'REFUSED',
+          refusalEvidence: reconciled.refusalEvidence,
+        },
+      });
+      await persistPayoutGas(cycleRepository, state, reconciled.processProof);
+      const next = copy(state);
+      next.recipients[index] = {
+        ...attempt,
+        retries: attempt.retries.map((item, cursor) => cursor === retryIndex
+          ? { ...item, state: 'REFUSED', refusalEvidence: reconciled.refusalEvidence } : item),
+      };
+      await persist(payoutStore, next);
+      return next;
+    }
+    await cycleRepository.settlePayoutQuarantine(state.cycleId, {
+      planDigest: state.planDigest, recipient: attempt.recipient,
+      retryId: openRetry.retryId,
+      proof: reconciled.processProof,
+      operations: state.operations,
+      payoutRetry: {
+        ...openRetry,
+        state: 'FINALIZED',
+        finalizedTransfer: reconciled.finalizedTransfer,
+      },
+    });
+    await persistPayoutGas(cycleRepository, state, reconciled.processProof);
+    const next = copy(state);
+    next.recipients[index] = {
+      ...attempt,
+      retries: attempt.retries.map((item, cursor) => cursor === retryIndex
+        ? { ...item, state: 'FINALIZED', finalizedTransfer: reconciled.finalizedTransfer } : item),
+    };
+    next.quarantine = next.quarantine.filter(item => item.recipient !== attempt.recipient);
+    await persist(payoutStore, next);
+    return next;
+  }
+  fail(`direct payout retry ${openRetry.retryId} has an unsupported state ${openRetry.state}`);
+}
+
 /** Replaces an unresolved transaction only through the Operations transaction-policy signer. */
 export async function replaceDirectPayout({
   payoutStore,
@@ -1923,12 +2413,21 @@ export function assertPayoutManifestUnchanged(stateValue, plan) {
 
 export function isDirectPayoutComplete(stateValue) {
   const state = normalizedState(stateValue);
-  if (!state.recipients.every(attempt => ['FINALIZED', 'REFUSED', 'NONCE_INTERFERENCE'].includes(attempt.state))) return false;
+  if (!state.recipients.every(attempt => ['FINALIZED', 'REFUSED', 'NONCE_INTERFERENCE'].includes(attempt.state)
+    && !attempt.retries.some(retry => !['FINALIZED', 'REFUSED'].includes(retry.state)))) return false;
   const paid = state.recipients
-    .filter(attempt => attempt.state === 'FINALIZED')
+    .filter(isRecipientPaid)
     .reduce((sum, attempt) => sum + BigInt(attempt.amount.amountAtomic), 0n);
   const quarantined = state.quarantine.reduce((sum, liability) => sum + BigInt(liability.amount.amountAtomic), 0n);
   return paid + quarantined + BigInt(state.dust.amountAtomic) === BigInt(state.distributablePool.amountAtomic);
+}
+
+export function settledRetry(attempt) {
+  return attempt.retries.find(retry => retry.state === 'FINALIZED') ?? null;
+}
+
+export function isRecipientPaid(attempt) {
+  return attempt.state === 'FINALIZED' || settledRetry(attempt) !== null || attempt.settlement !== null;
 }
 
 /**
@@ -2385,6 +2884,8 @@ function payoutTerminalEvidence(stateValue) {
       transactionHash: attempt.txHash,
       finalizedTransfer: attempt.finalizedTransfer,
       refusalEvidence: attempt.refusalEvidence,
+      retries: attempt.retries,
+      settlement: attempt.settlement,
     })),
     quarantine: state.quarantine,
     heldPositionExclusions: state.heldPositionExclusions,
@@ -3031,7 +3532,7 @@ function directPayoutWalletNonceReservationInput({ context, config }) {
   };
 }
 
-async function reserveDirectPayoutWalletNonce({ cycleRepository, context, config }) {
+export async function reserveDirectPayoutWalletNonce({ cycleRepository, context, config }) {
   if (typeof cycleRepository.reserveWalletNonce !== 'function' || typeof cycleRepository.assertWalletNonce !== 'function') {
     fail('direct payout production execution requires a global wallet nonce reservation repository');
   }
@@ -3041,7 +3542,7 @@ async function reserveDirectPayoutWalletNonce({ cycleRepository, context, config
   return reservation;
 }
 
-async function assertDirectPayoutWalletNonce({ cycleRepository, context, config }) {
+export async function assertDirectPayoutWalletNonce({ cycleRepository, context, config }) {
   if (typeof cycleRepository.assertWalletNonce !== 'function') {
     fail('direct payout production execution requires a global wallet nonce reservation repository');
   }
@@ -3051,7 +3552,7 @@ async function assertDirectPayoutWalletNonce({ cycleRepository, context, config 
   );
 }
 
-async function releaseDirectPayoutWalletNonce({ cycleRepository, context, config }) {
+export async function releaseDirectPayoutWalletNonce({ cycleRepository, context, config }) {
   if (typeof cycleRepository.releaseWalletNonce !== 'function') {
     fail('direct payout production execution requires a wallet-wide nonce lock release repository');
   }

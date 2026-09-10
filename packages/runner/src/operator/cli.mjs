@@ -13,6 +13,7 @@ const commandFlags = new Map([
   ['update-configuration', new Set(['expected-revision', 'request-id', 'input'])],
   ['manual-approval', new Set(['expected-revision', 'request-id', 'input'])],
   ['held-owner-decision', new Set(['expected-revision', 'request-id', 'input'])],
+  ['retry-refused-payout', new Set(['expected-revision', 'request-id', 'input'])],
   ['resume-cycle', new Set(['expected-revision', 'request-id'])],
   ['run-cycle-now', new Set(['expected-revision', 'request-id'])],
 ]);
@@ -23,10 +24,11 @@ const auditedCommands = new Set([
   'update-configuration',
   'manual-approval',
   'held-owner-decision',
+  'retry-refused-payout',
   'resume-cycle',
   'run-cycle-now',
 ]);
-const inputCommands = new Set(['update-configuration', 'manual-approval', 'held-owner-decision']);
+const inputCommands = new Set(['update-configuration', 'manual-approval', 'held-owner-decision', 'retry-refused-payout']);
 const requestIdPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 
 function requireCycleDescription(value) {
@@ -189,6 +191,17 @@ function commandFromInput(command, input) {
       heldEvidenceDigest: input.heldEvidenceDigest,
       expectedPositionRevision: input.expectedPositionRevision,
       choice: input.choice,
+    };
+  }
+  if (command === 'retry-refused-payout') {
+    if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('retry refused payout input is invalid');
+    return {
+      type: command,
+      cycleId: input.cycleId,
+      planDigest: input.planDigest,
+      recipient: input.recipient,
+      amountAtomic: input.amountAtomic,
+      originalTransactionHash: input.originalTransactionHash,
     };
   }
   return { type: command };

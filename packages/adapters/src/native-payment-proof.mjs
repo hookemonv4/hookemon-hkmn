@@ -7,6 +7,7 @@ import { digest } from '../../runner/src/cycle/journal.mjs';
 import { readFinalizedTransactionReceipt, readBlockByNumber } from './robinhood-rpc.mjs';
 
 export const NATIVE_PAYMENT_PROOF_SCHEMA = 'hookemon.native-payment-proof.v1';
+export const NATIVE_TRANSACTION_GAS_PROOF_SCHEMA = 'hookemon.native-transaction-gas-proof.v1';
 const capabilities = new WeakMap();
 const gasCapabilities = new WeakMap();
 const releaseBindings = new WeakSet();
@@ -241,6 +242,10 @@ export async function createRelayNativePaymentProof({ client, binding, sourcePro
 export function applyNativeCustodyGasPayment(ledger, proof) {
   need((isProcessNativePaymentProof(proof, { chainId: '4663', assetId: 'native', decimals: 18 }) || gasCapabilities.has(proof))
     && typeof proof.gasSpentWei === 'string', 'gas cost requires a process native payment proof');
+  return applyNativeCustodyGasPaymentProjection(ledger, proof);
+}
+
+function applyNativeCustodyGasPaymentProjection(ledger, proof) {
   need(ledger?.schema === 'hookemon.custody-ledger.v3' && ledger.chainId === '4663' && ledger.assetId === 'native'
     && ledger.decimals === 18 && Array.isArray(ledger.gasPayments), 'gas accounting requires native custody v3');
   const gasPayments = ledger.gasPayments.map(item => ({ ...item }));
@@ -251,6 +256,19 @@ export function applyNativeCustodyGasPayment(ledger, proof) {
   need(previousTotal.toString() === ledger.gasSpent.amountAtomic, 'gas ledger sum is inconsistent');
   return { gasPayments, gasSpent: { chainId: '4663', assetId: 'native', decimals: 18,
     amountAtomic: (previousTotal + (existing ? 0n : BigInt(proof.gasSpentWei))).toString() } };
+}
+
+export function applyNativeCustodyGasPaymentFromDurableProof(ledger, proof) {
+  need(proof && typeof proof === 'object'
+    && [NATIVE_PAYMENT_PROOF_SCHEMA, NATIVE_TRANSACTION_GAS_PROOF_SCHEMA].includes(proof.schema)
+    && proof.chainId === '4663' && proof.assetId === 'native' && proof.decimals === 18
+    && typeof proof.transactionHash === 'string'
+    && typeof proof.gasSpentWei === 'string'
+    && typeof proof.evidenceDigest === 'string'
+    && digest(Object.fromEntries(Object.entries(proof).filter(([key]) => key !== 'evidenceDigest')))
+      === proof.evidenceDigest,
+  'durable native payment proof is invalid');
+  return applyNativeCustodyGasPaymentProjection(ledger, proof);
 }
 
 

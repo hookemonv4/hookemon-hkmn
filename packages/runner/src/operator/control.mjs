@@ -34,6 +34,7 @@ const commandTypes = new Set([
   'update-configuration',
   'manual-approval',
   'held-owner-decision',
+  'retry-refused-payout',
   'reconcile',
   'resume-cycle',
   'run-cycle-now',
@@ -161,6 +162,27 @@ function assertCommand(value) {
         expectedPositionRevision: assertCycleRevision(value.expectedPositionRevision),
         choice: value.choice,
       };
+    case 'retry-refused-payout':
+      exactObject(value, [
+        'type', 'cycleId', 'planDigest', 'recipient', 'amountAtomic', 'originalTransactionHash',
+      ], 'operator control command');
+      if (typeof value.recipient !== 'string' || !/^0x[0-9a-fA-F]{40}$/.test(value.recipient)) throw new Error('operator control payout recipient is invalid');
+      if (typeof value.amountAtomic !== 'string'
+        || !atomicAmountPattern.test(value.amountAtomic) || value.amountAtomic === '0') {
+        throw new Error('operator control payout amountAtomic is invalid');
+      }
+      if (typeof value.originalTransactionHash !== 'string'
+        || !/^0x[0-9a-fA-F]{64}$/.test(value.originalTransactionHash)) {
+        throw new Error('operator control payout originalTransactionHash is invalid');
+      }
+      return {
+        type: value.type,
+        cycleId: assertCycleId(value.cycleId),
+        planDigest: assertDigest(value.planDigest),
+        recipient: value.recipient.toLowerCase(),
+        amountAtomic: value.amountAtomic,
+        originalTransactionHash: value.originalTransactionHash.toLowerCase(),
+      };
     default:
       throw new Error('operator control command type is invalid');
   }
@@ -266,7 +288,7 @@ function projectCustodyBucket(cycleId, ledger) {
   return deepFreeze({ cycleId, ...identity, buckets });
 }
 
-function projectCycle(cycleId, description) {
+function projectCycle(cycleId, description, payoutObligations = []) {
   if (!description || typeof description !== 'object' || Array.isArray(description)) {
     throw new Error('operator control repository cycle description is invalid');
   }
@@ -318,6 +340,23 @@ function projectCycle(cycleId, description) {
   const payoutTransactionIds = [...new Set(transactions
     .filter(transaction => transaction.stage === 'payout' && transaction.transactionId !== null)
     .map(transaction => transaction.transactionId))];
+  const projectedPayoutObligations = payoutObligations.map(obligation => ({
+    recipient: obligation.recipient,
+    amountAtomic: obligation.amount.amountAtomic,
+    reason: obligation.reason,
+    originalTransactionHash: obligation.originalTransactionHash,
+    status: obligation.settlement !== null
+      ? 'SETTLED'
+      : obligation.retries.some(retry => retry.resolution === null)
+        ? 'RETRYING'
+        : 'OUTSTANDING',
+    retries: obligation.retries.map(retry => ({
+      retryId: retry.retryId,
+      requestId: retry.requestId,
+      state: retry.resolution?.state ?? 'REQUESTED',
+      transactionHash: retry.resolution?.transactionHash ?? null,
+    })),
+  }));
   return deepFreeze({
     cycleId,
     rewardSelection: description.rewardSelection ? assertRewardSelectionSnapshot(description.rewardSelection, { cycleId }) : null,
@@ -332,6 +371,7 @@ function projectCycle(cycleId, description) {
     transactions,
     transactionIds: transactionIds.length > 0 ? transactionIds : null,
     custodyBuckets,
+    payoutObligations: projectedPayoutObligations,
     payout: payoutStage === null
       ? null
       : { status: payoutStage.status, transactionIds: payoutTransactionIds.length > 0 ? payoutTransactionIds : null },
@@ -507,6 +547,7 @@ export function createOperatorControl({
   reconcileActiveCycle = undefined,
   readCustody = undefined,
   recordHeldOwnerDecision = undefined,
+  requestPayoutQuarantineRetry = undefined,
 } = {}) {
   if (typeof statePath !== 'string' || !isAbsolute(statePath)) throw new Error('operator control statePath must be absolute');
   requireRepository(cycleRepository);
@@ -520,6 +561,9 @@ export function createOperatorControl({
   if (readCustody !== undefined && typeof readCustody !== 'function') throw new Error('operator control readCustody must be a function');
   if (recordHeldOwnerDecision !== undefined && typeof recordHeldOwnerDecision !== 'function') {
     throw new Error('operator control recordHeldOwnerDecision must be a function');
+  }
+  if (requestPayoutQuarantineRetry !== undefined && typeof requestPayoutQuarantineRetry !== 'function') {
+    throw new Error('operator control requestPayoutQuarantineRetry must be a function');
   }
 
   async function status() {
@@ -535,7 +579,13 @@ export function createOperatorControl({
       ...knownCycleIds,
       ...(activeCycle === null ? [] : [activeCycle]),
     ])].sort();
-    const cycles = await Promise.all(cycleIds.map(async cycleId => projectCycle(cycleId, await cycleRepository.describeCycle(cycleId))));
+    const cycles = await Promise.all(cycleIds.map(async cycleId => projectCycle(
+      cycleId,
+      await cycleRepository.describeCycle(cycleId),
+      typeof cycleRepository.listPayoutObligations === 'function'
+        ? await cycleRepository.listPayoutObligations(cycleId)
+        : [],
+    )));
     const custodyBuckets = cycles.flatMap(cycle => cycle.custodyBuckets);
     const safetyTelemetry = await readSafetyTelemetry(readCustody);
     return deepFreeze({
@@ -686,6 +736,25 @@ export function createOperatorControl({
           action: 'held-owner-decision',
           revision: state?.revision ?? null,
           decision: structuredClone(decision),
+        });
+      }
+      case 'retry-refused-payout': {
+        const state = await requireExpectedRevision(statePath, revision);
+        if (requestPayoutQuarantineRetry === undefined) {
+          throw new Error('operator payout retry authority is unavailable');
+        }
+        const retry = await requestPayoutQuarantineRetry({
+          cycleId: normalized.cycleId,
+          planDigest: normalized.planDigest,
+          recipient: normalized.recipient,
+          amount: { chainId: '4663', assetId: 'native', decimals: 18, amountAtomic: normalized.amountAtomic },
+          requestId: assertRequestId(requestId),
+          originalTransactionHash: normalized.originalTransactionHash,
+        });
+        return deepFreeze({
+          action: 'retry-refused-payout',
+          revision: state?.revision ?? null,
+          retry: structuredClone(retry),
         });
       }
       case 'reconcile': {
