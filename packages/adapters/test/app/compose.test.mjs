@@ -3117,6 +3117,62 @@ test('dashboard composed in-process: ctx.listRecentWinners returns no cards when
   assert.deepEqual(await server.composition.dashboard.ctx.listRecentWinners({ limit: 10 }), []);
 });
 
+test('dashboard composed in-process rebuilds durable private card history and pages tied timestamps', async t => {
+  const stateDir = await tempStateDir(t);
+  const statePath = join(stateDir, 'operator-state.json');
+  const server = await buildComposedDashboard(t, {
+    statePath,
+    stateDir,
+    cycleSeed: {
+      releaseAmount: SUFFICIENT_BUDGET.packPriceWei,
+      completedStages: [
+        { stage: 'eligibility-snapshot' },
+        { stage: 'claim-process' },
+        { stage: 'outbound' },
+        { stage: 'purchase', evidence: { packs: [
+          { packIndex: 0, memo: 'memo-0', status: 'purchased', signature: 'purchase-0', packCost: { decimals: 6, amountAtomic: '1000000' } },
+          { packIndex: 1, memo: 'memo-1', status: 'purchased', signature: 'purchase-1', packCost: { decimals: 6, amountAtomic: '1000000' } },
+          { packIndex: 2, memo: 'memo-2', status: 'purchased', signature: 'purchase-2', packCost: { decimals: 6, amountAtomic: '1000000' } },
+        ] } },
+        { stage: 'open', evidence: { packs: [
+          { packIndex: 0, memo: 'memo-0', decision: 'opened', signature: 'open-0', mint: 'mint-0' },
+          { packIndex: 1, memo: 'memo-1', decision: 'opened', signature: 'open-1', mint: 'mint-1' },
+          { packIndex: 2, memo: 'memo-2', decision: 'opened', signature: 'open-2', mint: 'mint-2' },
+        ] } },
+        { stage: 'epic-gate', evidence: { packs: [
+          { packIndex: 0, memo: 'memo-0', decision: 'sell', mint: 'mint-0', rarity: 'common' },
+          { packIndex: 1, memo: 'memo-1', decision: 'sell', mint: 'mint-1', rarity: 'rare' },
+          { packIndex: 2, memo: 'memo-2', decision: 'sell', mint: 'mint-2', rarity: 'epic' },
+        ] } },
+        { stage: 'buyback', evidence: { soldCount: 3, packs: [
+          { packIndex: 0, memo: 'memo-0', decision: 'sold', mint: 'mint-0', signature: 'sale-0', proceeds: { chainId: 'solana', assetId: 'stablecoin', decimals: 6, amountAtomic: '10' } },
+          { packIndex: 1, memo: 'memo-1', decision: 'sold', mint: 'mint-1', signature: 'sale-1', proceeds: { chainId: 'solana', assetId: 'stablecoin', decimals: 6, amountAtomic: '20' } },
+          { packIndex: 2, memo: 'memo-2', decision: 'sold', mint: 'mint-2', signature: 'sale-2', proceeds: { chainId: 'solana', assetId: 'stablecoin', decimals: 6, amountAtomic: '30' } },
+        ] } },
+      ],
+      packBatchRequests: [{ stage: 'purchase', packs: [
+        { packIndex: 0, memo: 'memo-0', expectedCardCount: 1, packType: 'pack-a' },
+        { packIndex: 1, memo: 'memo-1', expectedCardCount: 1, packType: 'pack-b' },
+        { packIndex: 2, memo: 'memo-2', expectedCardCount: 1, packType: 'pack-c' },
+      ] }],
+    },
+  });
+  const first = await server.get('/operator/api/cards?limit=2', {
+    'x-hookemon-proxy-credential': DASHBOARD_CREDENTIAL,
+  });
+  assert.equal(first.status, 200);
+  assert.equal(first.body.cards.length, 2);
+  assert.equal(first.body.historyComplete, false);
+  assert.ok(first.body.nextCursor);
+  const second = await server.get(`/operator/api/cards?limit=2&cursor=${encodeURIComponent(first.body.nextCursor)}`, {
+    'x-hookemon-proxy-credential': DASHBOARD_CREDENTIAL,
+  });
+  assert.equal(second.status, 200);
+  assert.equal(second.body.cards.length, 1);
+  assert.equal(second.body.cards[0].productId, 'pack-a');
+  assert.equal(second.body.cards[0].observedAt, new Date(1_000).toISOString());
+});
+
 // --- WP-36: the full eight-stage liveMode true cycle ---------------------------------------------
 //
 // The central WP-36 acceptance criterion: with every adapter/config surface configured, a

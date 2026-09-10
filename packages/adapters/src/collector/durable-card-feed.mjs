@@ -81,7 +81,7 @@ function mapStagePacks(packs, expected, validate) {
 
 /** Validates every COMPLETE stage as one full transition before resolving an individual pack. A
  * corrupt later stage must reject the feed, not quietly fall back to an earlier lifecycle fact. */
-function validateCompleteStages(requests, stages = {}) {
+export function validateCompleteStages(requests, stages = {}) {
   const requestByIndex = new Map(requests.map(request => [request.packIndex, request]));
   const purchasePacks = stagePacks(stages.purchase);
   let purchase = null;
@@ -139,7 +139,7 @@ function validateCompleteStages(requests, stages = {}) {
 
 /** Resolves a lifecycle only after `validateCompleteStages` has verified all available COMPLETE
  * evidence. Pending stages are absent from the maps; malformed complete stages never reach here. */
-function resolvePackLifecycle(packIndex, { purchase, open, epicGate, buyback }) {
+export function resolvePackLifecycle(packIndex, { purchase, open, epicGate, buyback }) {
   const buybackPack = buyback?.get(packIndex) ?? null;
   if (buybackPack) {
     if (buybackPack.decision === 'sold') {

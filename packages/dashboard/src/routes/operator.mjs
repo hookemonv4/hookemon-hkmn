@@ -8,6 +8,7 @@ import {
   ContractValidationError,
   readDecisionRequest,
 } from '../contracts/operator-contracts.mjs';
+import { decodeCardCursor } from '../storage/sqlite-projection.mjs';
 import { buildBootstrap, buildDashboardReadModel } from '../projections/operator-projection.mjs';
 import { applyDecision, OperatorControlUnavailable } from '../projections/decision-application.mjs';
 import { proxyCredentialMatches } from '../auth/proxy-credential.mjs';
@@ -267,8 +268,11 @@ export function createCardsHandler(ctx) {
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 50) return sendJson(res, 400, { code: 'CARDS_QUERY_INVALID' });
     const sort = url.searchParams.get('sort') ?? 'recent';
     if (!['recent', 'buyback-desc', 'buyback-asc'].includes(sort)) return sendJson(res, 400, { code: 'CARDS_QUERY_INVALID' });
+    const cursor = url.searchParams.get('cursor');
+    if (cursor !== null && decodeCardCursor(cursor, sort) === null) return sendJson(res, 400, { code: 'CARDS_QUERY_INVALID' });
     try {
       const { cards, nextCursor } = ctx.sqliteProjection.listCards({
+        cycleId: url.searchParams.get('cycleId'),
         productId: url.searchParams.get('productId'),
         rarity: url.searchParams.get('rarity'),
         from: url.searchParams.get('from'),
@@ -276,11 +280,15 @@ export function createCardsHandler(ctx) {
         minBuybackMicroUsdg: url.searchParams.get('minBuybackMicroUsdg'),
         maxBuybackMicroUsdg: url.searchParams.get('maxBuybackMicroUsdg'),
         sort,
-        cursor: url.searchParams.get('cursor'),
+        cursor,
         limit,
       });
       const total = ctx.sqliteProjection.countCards();
-      sendJson(res, 200, assertCardsResponse({ cards, nextCursor, historyComplete: total === cards.length && nextCursor === null }));
+      sendJson(res, 200, assertCardsResponse({
+        cards,
+        nextCursor,
+        historyComplete: cursor === null && total === cards.length && nextCursor === null,
+      }));
     } catch (error) {
       ctx.onError?.('operator-cards', error);
       sendJson(res, 503, { code: 'OPERATOR_CARDS_UNAVAILABLE' });

@@ -9,7 +9,7 @@ import { appendAuditEntry, readAllAuditEntries } from '../../src/auth/audit-log.
 import { normalizePublicCycleStatus } from '../../src/contracts/public-cycle-status.mjs';
 import { normalizePublicCommunitySnapshot } from '../../src/contracts/public-community-snapshot.mjs';
 import { buildContext, createRequestListener, readEnvironmentConfig } from '../../src/server.mjs';
-import { openSqliteProjection } from '../../src/storage/sqlite-projection.mjs';
+import { encodeCardCursor, openSqliteProjection } from '../../src/storage/sqlite-projection.mjs';
 import { createOperatorControl } from '../../../runner/src/operator/control.mjs';
 import { createDefaultOperatorConfiguration } from '../../../runner/src/config/state-schema.mjs';
 import { CUSTODY_LEDGER_BUCKETS } from '../../../runner/src/cycle/money-schemas.mjs';
@@ -263,6 +263,30 @@ test('cards, packs, identities, static controls, and unknown paths preserve thei
   assert.match(page.body, /id="pauseBtn"/);
   assert.match(page.body, /id="manualApprovalBtn"/);
   assert.equal((await server.get('/nope')).status, 404);
+});
+
+test('cards route rejects malformed cursors and serves a valid opaque cursor page', async t => {
+  const server = await buildTestServer(t);
+  const observedAt = '2026-01-01T00:00:00.000Z';
+  server.ctx.sqliteProjection.upsertCard({
+    cycleId: 'cycle-a', packIndex: 0, productId: 'pack-a', rarity: 'rare', nftAddress: null,
+    cardName: null, setName: null, cardNumber: null, imageUrl: null,
+    packPriceMicroUsdg: '1000000', buybackMicroUsdg: null, observedAt,
+  });
+  server.ctx.sqliteProjection.upsertCard({
+    cycleId: 'cycle-b', packIndex: 0, productId: 'pack-b', rarity: 'epic', nftAddress: null,
+    cardName: null, setName: null, cardNumber: null, imageUrl: null,
+    packPriceMicroUsdg: '1000000', buybackMicroUsdg: null, observedAt,
+  });
+  const malformed = await server.get('/operator/api/cards?cursor=2026-01-01T00:00:00.000Z', AUTH);
+  assert.equal(malformed.status, 400);
+  assert.deepEqual(malformed.body, { code: 'CARDS_QUERY_INVALID' });
+  const cursor = encodeCardCursor({ sort: 'recent', value: observedAt, cycleId: 'cycle-b', packIndex: 0 });
+  const page = await server.get(`/operator/api/cards?limit=1&cursor=${encodeURIComponent(cursor)}`, AUTH);
+  assert.equal(page.status, 200);
+  assert.equal(page.body.cards.length, 1);
+  assert.equal(page.body.cards[0].cycleId, 'cycle-a');
+  assert.equal(page.body.historyComplete, false);
 });
 
 test('owner dashboard read projections use the injected authority and expose the configured network', async (t) => {

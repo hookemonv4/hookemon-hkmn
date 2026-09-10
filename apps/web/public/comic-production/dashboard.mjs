@@ -29,6 +29,19 @@ export function safeCardImage(value) {
   } catch { return null; }
 }
 
+export function historyRefreshDecision({ previousFingerprint, community, retryPending }) {
+  const fingerprint = JSON.stringify([
+    community.metrics.completedCycles,
+    community.metrics.skippedCycles,
+    community.historyComplete,
+    community.latestCycle?.cycleId ?? null,
+  ]);
+  return {
+    fingerprint,
+    reload: retryPending || (previousFingerprint !== null && previousFingerprint !== fingerprint),
+  };
+}
+
 // The Worker normalizes legacy inputs. This client accepts only its canonical public output.
 const cardShape = {
   productId: text, rarity: text,
@@ -532,6 +545,16 @@ export function startDashboard(doc = document) {
       catch (error) { pair = null; throw error; }
       failed = false;
       consecutiveFailures = 0;
+      const refreshDecision = historyRefreshDecision({
+        previousFingerprint: previousCompletionFingerprint,
+        community: pair.community,
+        retryPending: historyRetryPending,
+      });
+      previousCompletionFingerprint = refreshDecision.fingerprint;
+      if (refreshDecision.reload) {
+        historyRetryPending = false;
+        void loadHistory(null, false);
+      }
     } catch {
       if (requestVersion === version && visible() && !stopped) { failed = true; consecutiveFailures += 1; }
     }
@@ -563,6 +586,8 @@ export function startDashboard(doc = document) {
   // any response that arrives after a newer request has already started (e.g. a fast double-click
   // on "Load more"), so responses can never apply out of order.
   let historyItems = [], historyGeneration = 0, historyLoadingMore = false;
+  let historyRetryPending = false;
+  let previousCompletionFingerprint = null;
   const renderHistory = (page, unavailable) => {
     const statusNode = doc.getElementById('cycleHistoryStatus');
     const listNode = doc.getElementById('cycleHistoryList');
@@ -616,7 +641,10 @@ export function startDashboard(doc = document) {
     } catch {
       if (historyGeneration !== generation) return;
       historyLoadingMore = false;
-      if (!append) renderHistory(null, true);
+      if (!append) {
+        historyRetryPending = true;
+        renderHistory(null, true);
+      }
     }
   };
   let lastHistoryPage = null;

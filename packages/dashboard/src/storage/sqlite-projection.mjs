@@ -12,10 +12,34 @@
 // Both tables are fully rebuildable: `rebuildAuditProjection` truncates and re-derives `audit_entries`
 // from `auth/audit-log.mjs`'s `readAllAuditEntries`, and `upsertCard`/card reads never touch anything
 // this service could not re-derive from the durable journal if the sqlite file were deleted. Losing
-// this file is a (rebuildable) inconvenience, never data loss.
+// this file is a (rebuildable) inconvenience, never data loss. Card pagination uses opaque
+// base64url JSON keyset cursors containing the sort, key value, cycle ID, and pack index. The
+// shared cycle observation timestamp is intentionally tie-broken by `(cycle_id, pack_index)`;
+// legacy raw ISO/number cursors are invalid.
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
+
+export function encodeCardCursor({ sort, value, cycleId, packIndex }) {
+  return Buffer.from(JSON.stringify({ sort, value, cycleId, packIndex }), 'utf8')
+    .toString('base64url');
+}
+
+export function decodeCardCursor(text, sort) {
+  if (typeof text !== 'string' || !/^[A-Za-z0-9_-]{1,512}$/.test(text)) return null;
+  try {
+    const decoded = JSON.parse(Buffer.from(text, 'base64url').toString('utf8'));
+    if (!decoded || decoded.sort !== sort || typeof decoded.cycleId !== 'string'
+      || !Number.isSafeInteger(decoded.packIndex) || decoded.packIndex < 0) return null;
+    if (sort === 'recent') {
+      if (typeof decoded.value !== 'string' || Number.isNaN(Date.parse(decoded.value))
+        || new Date(decoded.value).toISOString() !== decoded.value) return null;
+    } else if (!Number.isSafeInteger(decoded.value)) return null;
+    return decoded;
+  } catch {
+    return null;
+  }
+}
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS audit_entries (
@@ -190,6 +214,17 @@ export function openSqliteProjection(path) {
       });
     },
 
+    upsertCards(cards) {
+      db.exec('BEGIN');
+      try {
+        for (const card of cards) this.upsertCard(card);
+        db.exec('COMMIT');
+      } catch (error) {
+        db.exec('ROLLBACK');
+        throw error;
+      }
+    },
+
     /** Clear the `cards` table (used before a full rebuild from the durable journal). */
     clearCards() {
       deleteAllCards.run();
@@ -205,13 +240,14 @@ export function openSqliteProjection(path) {
      * `rarity`, `from`/`to` (ISO timestamps on `observedAt`), `minBuybackMicroUsdg`/
      * `maxBuybackMicroUsdg`, `sort` (`recent` | `buyback-desc` | `buyback-asc`), `cursor`/`limit`. */
     listCards({
-      productId = null, rarity = null, from = null, to = null,
+      cycleId = null, productId = null, rarity = null, from = null, to = null,
       minBuybackMicroUsdg = null, maxBuybackMicroUsdg = null, sort = 'recent',
       cursor = null, limit = 20,
     } = {}) {
       const boundedLimit = Math.max(1, Math.min(50, limit));
       const clauses = [];
       const params = {};
+      if (cycleId !== null) { clauses.push('cycle_id = :cycleId'); params.cycleId = cycleId; }
       if (productId !== null) { clauses.push('product_id = :productId'); params.productId = productId; }
       if (rarity !== null) { clauses.push('rarity = :rarity'); params.rarity = rarity; }
       if (from !== null) { clauses.push('observed_at >= :from'); params.from = from; }
@@ -225,21 +261,32 @@ export function openSqliteProjection(path) {
         params.maxBuyback = Number(maxBuybackMicroUsdg);
       }
       const orderColumn = sort === 'buyback-desc' || sort === 'buyback-asc'
-        ? 'CAST(buyback_micro_usdg AS INTEGER)'
+        ? 'COALESCE(CAST(buyback_micro_usdg AS INTEGER), -1)'
         : 'observed_at';
       const orderDirection = sort === 'buyback-asc' ? 'ASC' : 'DESC';
-      const cursorColumn = orderColumn;
       if (cursor !== null) {
+        const decoded = decodeCardCursor(cursor, sort);
+        if (decoded === null) throw new Error('cards cursor invalid');
         const comparator = orderDirection === 'DESC' ? '<' : '>';
-        clauses.push(`${cursorColumn} ${comparator} :cursor`);
-        params.cursor = sort === 'buyback-desc' || sort === 'buyback-asc' ? Number(cursor) : cursor;
+        const tieComparator = comparator;
+        clauses.push(`(${orderColumn} ${comparator} :cursorValue OR (${orderColumn} = :cursorValue AND (cycle_id ${tieComparator} :cursorCycle OR (cycle_id = :cursorCycle AND pack_index ${tieComparator} :cursorPack))))`);
+        params.cursorValue = decoded.value;
+        params.cursorCycle = decoded.cycleId;
+        params.cursorPack = decoded.packIndex;
       }
       const where = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
       const sql = `SELECT * FROM cards ${where} ORDER BY ${orderColumn} ${orderDirection}, cycle_id ${orderDirection}, pack_index ${orderDirection} LIMIT :limit`;
       const rows = db.prepare(sql).all({ ...params, limit: boundedLimit });
       const cards = rows.map(rowToCard);
       const nextCursor = cards.length === boundedLimit
-        ? String(sort === 'buyback-desc' || sort === 'buyback-asc' ? Number(cards.at(-1).buybackMicroUsdg ?? '0') : cards.at(-1).observedAt)
+        ? encodeCardCursor({
+          sort,
+          value: sort === 'buyback-desc' || sort === 'buyback-asc'
+            ? Number(cards.at(-1).buybackMicroUsdg ?? '-1')
+            : cards.at(-1).observedAt,
+          cycleId: cards.at(-1).cycleId,
+          packIndex: cards.at(-1).packIndex,
+        })
         : null;
       return { cards, nextCursor };
     },

@@ -42,6 +42,7 @@ import {
   loadCollectorProductionBindingRegistry,
 } from '../signing/collector-production-binding.mjs';
 import { buildDurableCardFeed } from '../collector/durable-card-feed.mjs';
+import { buildDurableCardHistory } from '../collector/durable-card-history.mjs';
 import { createRecentWinnersCollector } from '../collector/recent-winners.mjs';
 import {
   assertCycleRepositoryInterface,
@@ -353,6 +354,7 @@ async function composeDashboard({
 
   return {
     ctx,
+    sqliteProjection,
     port: dashboardConfig.port,
     listener: createRequestListener(ctx),
     async close() {
@@ -1862,6 +1864,7 @@ export async function compose(config) {
   // guessed or cached independently. Updated on every tick outcome, not only a successful one, since
   // "when does the next tick happen" is meaningful even after a failed one.
   let lastTick = null;
+  let dashboard = null;
   const scheduler = createScheduler({
     statePath: resolved.statePath,
     now,
@@ -1869,6 +1872,16 @@ export async function compose(config) {
     buildWorker: ({ liveMode }) => buildAutomatedCycleService(liveMode, liveMode ? 'production' : 'rehearsal'),
     onTick(event) {
       lastTick = { at: event.at, intervalMs: event.intervalMs };
+      const cycleIds = [
+        event.result?.cycleId,
+      ].filter(value => typeof value === 'string');
+      void refreshCardHistory({ cycleIds }).catch(error => {
+        if (dashboard?.ctx?.onError) dashboard.ctx.onError('card-history-refresh', error);
+        else {
+          // eslint-disable-next-line no-console -- composition has no injected logger.
+          console.error('[dashboard] card-history refresh failed:', error);
+        }
+      });
       resolved.onTick?.(event);
     },
   });
@@ -1960,6 +1973,32 @@ export async function compose(config) {
     return collector.list({ limit });
   }
 
+  async function refreshCardHistory({ cycleIds = undefined } = {}) {
+    if (dashboard === null) return;
+    const known = await cycleRepository.listKnownCycleIds();
+    const selected = cycleIds === undefined
+      ? known
+      : [...new Set([...cycleIds, ...known.slice(-2)])];
+    const rows = [];
+    for (const cycleId of selected) {
+      const batch = await cycleRepository.readPackBatchRequest(cycleId, 'purchase');
+      if (batch === null) continue;
+      const built = buildDurableCardHistory({
+        cycleId,
+        packBatchRequestPacks: batch.packs,
+        purchaseRequestedAtMs: batch.requestedAtMs,
+        stages: {
+          purchase: await cycleRepository.readStage(cycleId, 'purchase'),
+          open: await cycleRepository.readStage(cycleId, 'open'),
+          epicGate: await cycleRepository.readStage(cycleId, 'epic-gate'),
+          buyback: await cycleRepository.readStage(cycleId, 'buyback'),
+        },
+      });
+      rows.push(...built.cards);
+    }
+    dashboard.sqliteProjection.upsertCards(rows);
+  }
+
   const activationLiveMode = resolved.execution.profile === 'production'
     ? !resolved.execution.dryRun
     : resolved.execution.profile === 'rehearsal'
@@ -1981,7 +2020,7 @@ export async function compose(config) {
     },
   });
 
-  const dashboard = dashboardConfig
+  dashboard = dashboardConfig
     ? await composeDashboard({
       dashboardConfig,
       chainId: resolved.chainId,
@@ -1998,6 +2037,11 @@ export async function compose(config) {
       readReadiness: activationReadiness.readReadiness,
     })
     : null;
+  if (dashboard !== null) {
+    dashboard.refreshCardHistory = refreshCardHistory;
+    dashboard.sqliteProjection.clearCards();
+    await refreshCardHistory();
+  }
 
   return {
     scheduler,
@@ -2007,6 +2051,7 @@ export async function compose(config) {
     operatorControl,
     executeAudited,
     dashboard,
+    refreshCardHistory,
     policyEngine,
     // WP-39: the real, composed adapter clients — exposed read-only for a one-off caller (e.g.
     // `bin/hookemon-runner.mjs`'s `accept-degraded-return`) that needs a live adapter without

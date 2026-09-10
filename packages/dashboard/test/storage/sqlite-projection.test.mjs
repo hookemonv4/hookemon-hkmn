@@ -5,7 +5,11 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { openSqliteProjection } from '../../src/storage/sqlite-projection.mjs';
+import {
+  decodeCardCursor,
+  encodeCardCursor,
+  openSqliteProjection,
+} from '../../src/storage/sqlite-projection.mjs';
 
 function auditEntry(sequence, overrides = {}) {
   return {
@@ -96,8 +100,8 @@ function card(cycleId, packIndex, overrides = {}) {
     productId: overrides.productId ?? 'p1',
     rarity: overrides.rarity ?? 'common',
     nftAddress: null, cardName: null, setName: null, cardNumber: null, imageUrl: null,
-    packPriceMicroUsdg: overrides.packPriceMicroUsdg ?? '1000000',
-    buybackMicroUsdg: overrides.buybackMicroUsdg ?? '500000',
+    packPriceMicroUsdg: Object.hasOwn(overrides, 'packPriceMicroUsdg') ? overrides.packPriceMicroUsdg : '1000000',
+    buybackMicroUsdg: Object.hasOwn(overrides, 'buybackMicroUsdg') ? overrides.buybackMicroUsdg : '500000',
     observedAt: overrides.observedAt ?? new Date(2026, 0, 1, 0, packIndex).toISOString(),
   };
 }
@@ -142,5 +146,39 @@ test('upsertCard is idempotent on (cycleId, packIndex)', () => {
   assert.equal(proj.countCards(), 1);
   const { cards } = proj.listCards({ limit: 10 });
   assert.equal(cards[0].rarity, 'legendary');
+  proj.close();
+});
+
+test('listCards uses opaque tie-safe recent cursors', () => {
+  const proj = openSqliteProjection(':memory:');
+  for (let index = 0; index < 3; index += 1) {
+    proj.upsertCard(card('cycle', index, { observedAt: '2026-01-01T00:00:00.000Z' }));
+  }
+  const page1 = proj.listCards({ limit: 2 });
+  assert.equal(page1.cards.length, 2);
+  assert.match(page1.nextCursor, /^[A-Za-z0-9_-]{1,512}$/);
+  assert.deepEqual(decodeCardCursor(page1.nextCursor, 'recent'), {
+    sort: 'recent', value: '2026-01-01T00:00:00.000Z', cycleId: 'cycle', packIndex: 1,
+  });
+  const page2 = proj.listCards({ cursor: page1.nextCursor, limit: 2 });
+  assert.deepEqual(page2.cards.map(item => item.packIndex), [0]);
+  assert.equal(page2.nextCursor, null);
+  assert.throws(() => proj.listCards({ cursor: '2026-01-01T00:00:00.000Z' }), /cards cursor invalid/);
+  proj.close();
+});
+
+test('listCards uses coalesced buyback keys and tie-safe ascending cursors', () => {
+  const proj = openSqliteProjection(':memory:');
+  proj.upsertCard(card('cycle', 0, { buybackMicroUsdg: null }));
+  proj.upsertCard(card('cycle', 1, { buybackMicroUsdg: '10' }));
+  proj.upsertCard(card('cycle', 2, { buybackMicroUsdg: '10' }));
+  const desc = proj.listCards({ sort: 'buyback-desc', limit: 2 });
+  assert.deepEqual(desc.cards.map(item => item.packIndex), [2, 1]);
+  assert.deepEqual(proj.listCards({ sort: 'buyback-desc', cursor: desc.nextCursor, limit: 2 }).cards.map(item => item.packIndex), [0]);
+  const asc = proj.listCards({ sort: 'buyback-asc', limit: 2 });
+  assert.deepEqual(asc.cards.map(item => item.packIndex), [0, 1]);
+  assert.deepEqual(proj.listCards({ sort: 'buyback-asc', cursor: asc.nextCursor, limit: 2 }).cards.map(item => item.packIndex), [2]);
+  assert.equal(decodeCardCursor(asc.nextCursor, 'buyback-desc'), null);
+  assert.match(encodeCardCursor({ sort: 'recent', value: '2026-01-01T00:00:00.000Z', cycleId: 'cycle', packIndex: 0 }), /^[A-Za-z0-9_-]+$/);
   proj.close();
 });

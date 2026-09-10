@@ -220,6 +220,18 @@ when diagnosing deployment.
 
 ## Reward recipient controls
 
+## Private card history
+
+Private card history is a rebuildable SQLite projection ingested from durable pack-batch and
+lifecycle evidence. A row is emitted only after epic-gate rarity is verified. `/operator/api/cards`
+uses opaque base64url JSON cursors containing the sort, key value, cycle ID, and pack index;
+cursors are keyset-tie-safe and raw ISO or numeric cursors are invalid. The shared
+purchase-request timestamp is the cycle's observation time, so `(cycle_id, pack_index)` is always
+the tie-break.
+
+The public history list remains independently paginated. A validated terminal-cycle fingerprint
+change resets it, and a failed initial load is retried once on the next successful main poll.
+
 Bootstrap publishes the runner's canonical recipient options and the saved future-cycle limit.
 The authenticated configuration command accepts only numeric integers 100–1000 in steps of 100.
 The owner page separates the editable choice, confirmed saved value and active-cycle frozen value.
