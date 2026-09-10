@@ -2,6 +2,8 @@
 
 Status: preparation for review; no signable launch transaction is present. This handoff covers one complete cycle, followed by a second cycle only after the first is reconciled. The owner prioritizes functional evidence and will fund the wallets separately. The decision in `decisions/owner-approvals/mainnet-test-priority-20260908.json` defers proof that EUR 250 covers the complete process. It does not select a seed amount, increase transaction limits, change fees or authorize a signature.
 
+The assisted-launch revision 0.1.2 is recorded in `decisions/assisted-launch-v012/README.md`. Its fixed economics supersede the earlier draft choices below. Launch time and optional initial purchase remain unset and are not preparation requirements.
+
 ## Review inputs
 
 | Item | Bound value or present state |
@@ -9,12 +11,12 @@ Status: preparation for review; no signable launch transaction is present. This 
 | Chain | Robinhood, chain ID 4663; native ETH at 18 decimals |
 | Launch wallet and treasury | `0xfc82B0da6d487B97d7eA1AA0d51E00AfF4F3a729` |
 | Operations | `0xB54AAF746eb1e80AFDb5eb0992a75b08DB2E4384` |
-| Programmable recipient | `0x4957f49620AFf3Adbbe8195a4f633E49cc93376c` |
+| Programmable recipient | `0xD88539d3c4C460136a733A3Fd60cf6BF269079da` |
 | Stock | Exactly 1 billion HKMN at 18 decimals, entirely allocated to the canonical market |
-| Pool | Native ETH currency0, HKMN currency1; zero LP fee, spacing 60, full-range ticks -887220 through 887220 |
-| Project fee | 300 bps: 250 process, 40 treasury, 10 Programmable. The provider publishes an additional 20 bps requirement; this difference remains unadmitted. |
+| Pool | Native ETH currency0, HKMN currency1; zero LP fee, spacing 60, inventory ticks 133500 through 161220 |
+| Project fee | 300 bps inclusive: 240 process, 40 treasury, 20 Programmable; no additional surcharge. |
 | Liquidity custody | Permanent position custody; the test provides no withdrawal route |
-| Seed and process claim ceilings | Explicit wei values required before materialization; currently unset |
+| Seed and process claim ceilings | Zero creator ETH; initial claim cap 9960873688152935270 wei, maximum 19921747376305870540 wei; 24 claims per six hours |
 | Total test funding | Owner plans EUR 250; adequacy is deliberately unproven and measured after the test |
 
 The 0.04 ETH seed and 0.02 ETH recycled float in `feasibility/native-funding/` are local experiment inputs, not selected wallet actions. Their 32 swaps reach one expired historical bridge principal. They do not prove two complete cycles, a fresh quote, a production slippage limit or sufficient gas. USD comparisons in that evidence use a historical ratio and are not an EUR conversion.

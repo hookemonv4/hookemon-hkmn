@@ -15,7 +15,7 @@
     "launchWallet": "0xfc82B0da6d487B97d7eA1AA0d51E00AfF4F3a729",
     "treasury": "0xfc82B0da6d487B97d7eA1AA0d51E00AfF4F3a729",
     "operations": "0xB54AAF746eb1e80AFDb5eb0992a75b08DB2E4384",
-    "programmablePlatform": "0x4957f49620AFf3Adbbe8195a4f633E49cc93376c",
+    "programmablePlatform": "0xD88539d3c4C460136a733A3Fd60cf6BF269079da",
     "poolManager": "0x8366a39CC670B4001A1121B8F6A443A643e40951",
     "positionManager": "0x58daec3116aae6D93017bAAea7749052E8a04fA7",
     "permit2": "0x000000000022D473030F116dDEE9F6B43aC78BA3",
@@ -58,10 +58,10 @@
   "pool": {
     "fee": 0,
     "tickSpacing": 60,
-    "tickSpacingRationale": "The existing canonical market uses tick spacing 60. The owner-selected inventory range must have ordered, aligned bounds; no production bounds have been selected.",
+    "tickSpacingRationale": "Owner-preserved token-only inventory bounds 133500 and 161220 align with tick spacing 60. Deployment pool identities remain platform supplied.",
     "fullRange": {
-      "minimumTick": null,
-      "maximumTick": null
+      "minimumTick": 133500,
+      "maximumTick": 161220
     },
     "quoteAsset": {
       "chainId": "4663",
@@ -76,10 +76,22 @@
       "amountAtomic": "1000000000000000000000000000"
     },
     "priceCandidates": {
-      "nativeCurrency0": null,
+      "nativeCurrency0": {
+        "sqrtPriceX96": "250929875796514805540091219040452",
+        "sqrtLowerX96": "62755286167801460104445931611012",
+        "sqrtUpperX96": "250929875796514805540091219040452",
+        "liquidity": "421035394154913054639875",
+        "amount0Max": "0",
+        "amount1Max": "1000000000000000000000000000",
+        "consumedAmount0": "0",
+        "consumedAmount1": "999999999999999999999999885",
+        "consumedHkmn": "999999999999999999999999885",
+        "lockedHkmnDust": "115",
+        "refundWei": "0"
+      },
       "selection": {
         "status": "OPEN_FACT",
-        "rule": "Native ETH is currency0. Zero-native inventory starts exactly at the selected upper tick; derive maximal token-only liquidity from the complete HKMN stock and permanently lock mechanical rounding dust.",
+        "rule": "The preserved inventory price is 250929875796514805540091219040452 at the upper tick; nativeCurrency0 records its exact calculation. selectedSqrtPriceX96 remains unset until bound to platform-supplied deployment identities.",
         "selectedOrdering": "nativeCurrency0",
         "selectedSqrtPriceX96": null,
         "poolKey": null,
@@ -130,7 +142,6 @@
     "Missing: provider-supplied encoded preimage for the accepted three-call initialization sequence token.allocate(hook), custody.configureBindingHook(hook), and hook.initializeGraphLaunch(custody,sqrtPriceX96). Resolve: obtain the route namespace, route nonce, topology hash, target-id hashes, and serialized provider graph call data. Verified alternative: retain no encoded call data, target addresses, or signing payload.",
     "Missing: owner-reviewed seed deadline, wallet nonce and gas parameters. Resolve: bind them to the exact unsigned native transaction after preflight. Verified alternative: retain the 900-second deadline ceiling without a transaction payload.",
     "Missing: final provider metadata binding. Resolve: bind the selected release/phase3/metadata/hkmn-logo.png and its verified immutable public URI through the official metadata packer. Verified alternative: the actual logo bytes, matching public image and API metadata input are retained; no banner is required by the selected metadata input.",
-    "Missing: owner-selected inventory price range, native claim ceilings and transaction gas budget. Resolve: choose reviewed range bounds and independent wei limits without converting dollar numerals into wei. Verified alternative: zero creator seed and zero graph funding are fixed; production price, addresses and transaction payload remain unmaterialized.",
-    "Missing: provider admission of the unchanged inclusive 10/40/250 basis-point custom fee graph and compatible buyer-prepayment router. Resolve: obtain a server-owned custom economic adapter and verified external bindings; then run authenticated preflight on a complete request. Verified alternative: the local zero-native inventory and buyer-funded router sequence are tested without deployment or submission claims."
+    "Missing: provider admission of the revised inclusive 20/40/240 basis-point custom fee graph and compatible buyer-prepayment router. Resolve: obtain a server-owned custom economic adapter and verified external bindings; then run authenticated preflight on a complete request. Verified alternative: the local zero-native inventory and buyer-funded router sequence are tested without deployment or submission claims."
   ]
 }

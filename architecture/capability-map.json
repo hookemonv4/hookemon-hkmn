@@ -91,7 +91,7 @@
     },
     {
       "id": "fee-accounting",
-      "capability": "Account for gross USDG quote volume with isolated 10, 40, and 250 basis-point lifetime streams and solvent liabilities.",
+      "capability": "Account for gross USDG quote volume with isolated 20, 40, and 240 basis-point lifetime streams and solvent liabilities.",
       "deploymentPlacement": "immutable-hook-runtime",
       "dependsOn": ["canonical-market", "role-control"],
       "requirementIds": ["REQ-fee-accounting-1", "REQ-fee-accounting-2", "REQ-fee-accounting-3", "REQ-fee-accounting-4", "REQ-fee-accounting-5", "REQ-fee-accounting-6", "REQ-fee-accounting-7", "REQ-fee-accounting-8", "REQ-fee-accounting-9"]

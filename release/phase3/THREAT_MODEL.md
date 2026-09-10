@@ -4,7 +4,7 @@ An incorrect source closure, runtime authority, constructor, salt or provider gr
 
 The separate seed carries native value equal to its reviewed maximum. Its boundary includes the hook mask, deterministic price, exact full-stock debt, full-range liquidity, payer, refund and deadline. HKMN approvals are temporary and cleared; native ETH has no Permit2 allowance. Custody cannot withdraw, approve or delegate the position. A mismatch or rejected refund reverts the seed-local transaction.
 
-Fee accounting preserves cumulative 10/40/250-bps liabilities on gross native quote volume, exact-output behavior, partial-fill refusal, callback settlement and same-pool call restrictions. Published provider fees are a separate admission question; the package cannot invent an exception.
+Fee accounting preserves cumulative 20/40/240-bps liabilities on gross native quote volume, exact-output behavior, partial-fill refusal, callback settlement and same-pool call restrictions. The inclusive 300-bps total contains the revised platform share; platform integration must verify this custom model without an added surcharge.
 
 Every external cycle effect requires the configured policy authority, fresh bound quotes, exact recipient/amount, gas and rent reserves, durable intent and once-only reconciliation. Expired or uncertain signed effects are recovered from their original journal; no replacement signature or optimistic duplicate transfer is inferred. Held cards and unknown proceeds remain actual custody, never assumed cash. A second cycle waits for reconciliation of the first.
 

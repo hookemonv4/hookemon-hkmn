@@ -17,7 +17,7 @@ Role control defines the bounded Treasury and Operations authorities for the Pha
   rotation is pending; only a new explicit Treasury emergency-rotation intent may supersede it
   with a fresh delay.
 - Operations may request a bounded process claim only through `claimProcess(bytes32 cycleId,uint256 amountAtomicUsdg,address destination)` with `destination == msg.sender`.
-- `remainingProcessClaimCapacity()`, `activeProcessClaimLimit()`, and `scheduledOperationsRotation()` expose the current bounded-claim and pending-rotation state. Constructor fields `processClaimLimit6h`, `processClaimLimitMax`, `processClaimMaxCount`, and `operationsRotationDelay` configure the initial cap, immutable 500000 USDG maximum, active-entry count hard-capped at 64, and immutable 43200-second rotation delay.
+- `remainingProcessClaimCapacity()`, `activeProcessClaimLimit()`, and `scheduledOperationsRotation()` expose the current bounded-claim and pending-rotation state. Constructor fields `processClaimLimit6h`, `processClaimLimitMax`, `processClaimMaxCount`, and `operationsRotationDelay` configure the initial native cap, immutable native maximum, active-entry count hard-capped at 64, and immutable 43200-second rotation delay.
 - Programmable and Treasury beneficiaries select a nonzero destination for their own claims; the exact transfer target is recorded.
 
 ## Invariants
@@ -30,6 +30,8 @@ Role control defines the bounded Treasury and Operations authorities for the Pha
   cancelled by Operations, clears any ordinary Operations proposal, prevents ordinary Operations
   handover while pending, and never silently resumes process claims.
 - No role can alter the fee split, clear a remainder, erase history, redirect another beneficiary's liability, or grant a generic call, approval, withdrawal, rescue, upgrade, or delegatecall authority.
+
+The selected assisted launch configures `processClaimMaxCount=24`, initial six-hour cap `9960873688152935270` wei and immutable maximum `19921747376305870540` wei. These ETH contract limits remain separate from the dynamic bot-side rolling six-hour budget of $25,000, adjustable up to $50,000. No onchain USD oracle or automatic Treasury-to-Operations refill exists.
 
 ## State transitions
 

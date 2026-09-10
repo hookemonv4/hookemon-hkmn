@@ -1,5 +1,5 @@
 {
-  "revision": 74,
+  "revision": 75,
   "requirements": [
     {
       "id": "REQ-token-core-1",
@@ -95,7 +95,7 @@
       "id": "REQ-fee-accounting-1",
       "kind": "functional",
       "title": "Exact collected-USDG fee split",
-      "statement": "Given official fee semantics and a supported finalized swap with executed native ETH quote volume Q, each of the three existing cumulative streams uses its own rate r of 10 basis points for Programmable, 40 for treasury and 250 for process. Its funded liability increment is floor((priorRemainder + Q multiplied by r) divided by 10000), and its next remainder is (priorRemainder + Q multiplied by r) modulo 10000. The exact collected native ETH fee is the sum of those three increments. No independently floored per-swap total or residual process allocation replaces this calculation. Minimum-unit rounding, exact output, zero collection, or an unsupported partial fill never overcharges, creates unfunded liability, or leaves unaccounted collected wei.",
+      "statement": "Given official fee semantics and a supported finalized swap with executed native ETH quote volume Q, each of the three existing cumulative streams uses its own rate r of 20 basis points for Programmable, 40 for treasury and 240 for process. Its funded liability increment is floor((priorRemainder + Q multiplied by r) divided by 10000), and its next remainder is (priorRemainder + Q multiplied by r) modulo 10000. The exact collected native ETH fee is the sum of those three increments. No independently floored per-swap total or residual process allocation replaces this calculation. Minimum-unit rounding, exact output, zero collection, or an unsupported partial fill never overcharges, creates unfunded liability, or leaves unaccounted collected wei.",
       "measurement": "The bound conformance suite covers all four buy or sell by exact-input or exact-output combinations with native currency0 and rejection of reversed currency order, every rounding transition around zero and one unit, and at least 100,000 fuzzed Q values; every accepted vector proves exact collected-native ETH conservation and every rejected vector proves zero mutation.",
       "module": "fee-accounting",
       "status": "approved"
@@ -131,7 +131,7 @@
       "id": "REQ-fee-accounting-5",
       "kind": "security",
       "title": "Money paths resist reentrancy and token failure",
-      "statement": "No external interaction on the active native ETH money path can reenter a money-moving path, retain a liability debit after a rejected value call, redirect another liability, or create funded liability from an unrelated or forced ETH balance. Native collection authenticates the exact PoolManager fee take; native payout executes the exact value under the existing guard and checks solvency after the call. The 10/40/250 basis-point cumulative accounting is unchanged.",
+      "statement": "No external interaction on the active native ETH money path can reenter a money-moving path, retain a liability debit after a rejected value call, redirect another liability, or create funded liability from an unrelated or forced ETH balance. Native collection authenticates the exact PoolManager fee take; native payout executes the exact value under the existing guard and checks solvency after the call. The 20/40/240 basis-point cumulative accounting is unchanged.",
       "measurement": "Adversarial native recipients, forced-funding harnesses, guarded claim tests and pinned static analysis report zero reentrant payment, surviving failed-call debit, unfunded accrual, post-call insolvency, or cross-liability mutation. Historical ERC20 harnesses for excluded contracts retain their semantics.",
       "module": "fee-accounting",
       "status": "approved"
@@ -464,7 +464,7 @@
       "id": "REQ-fee-accounting-6",
       "kind": "security",
       "title": "Cumulative cross-swap fee remainder",
-      "statement": "For the canonical pool lifetime, Programmable, treasury and process each retain a separate fractional numerator remainder for their 10, 40 and 250 basis-point stream. A later authenticated swap carries each complete denominator into that same stream liability and collects the carried wei from that swap. Claims and process releases never reset or redistribute any remainder. Each remainder is below 10000 and is not a funded wei liability. No sequence of small swaps can suppress a stream entitlement by discarding its fractional carry.",
+      "statement": "For the canonical pool lifetime, Programmable, treasury and process each retain a separate fractional numerator remainder for their 20, 40 and 240 basis-point stream. A later authenticated swap carries each complete denominator into that same stream liability and collects the carried wei from that swap. Claims and process releases never reset or redistribute any remainder. Each remainder is below 10000 and is not a funded wei liability. No sequence of small swaps can suppress a stream entitlement by discarding its fractional carry.",
       "measurement": "Forge boundaries prove all three remainders survive claims and process releases, each denominator crossing contributes exactly one extra collected wei, and a fresh Q of 1034 wei yields increments of 1, 4 and 25 with total collection 30. Across at least 100000 fuzzed swaps, each stream satisfies cumulativeVolume multiplied by its rate equals cumulativeAccruedWei multiplied by 10000 plus currentRemainder. Total collected wei equals cumulative accrued stream wei, and separately equals unpaid liabilities plus cumulative successful beneficiary payments and process releases. Forced ETH is excluded from collection and these equalities.",
       "module": "fee-accounting",
       "status": "approved"
@@ -482,7 +482,7 @@
       "id": "REQ-fee-accounting-8",
       "kind": "security",
       "title": "Pinned Programmable beneficiary and claim events",
-      "statement": "Given hook deployment, when the constructor binds the Programmable beneficiary, then deployment reverts unless that address equals the policy-mandated address `0x4957f49620AFf3Adbbe8195a4f633E49cc93376c`. Given a successful Programmable or treasury liability claim, when `_claimLiability` transfers the exact accrued amount, then it emits a `ProgrammableClaimed` or `TreasuryClaimed` event carrying the exact beneficiary and the exact claimed amount. Edge case: a deployment attempt naming any other nonzero, non-self address reverts before any storage is written; the existing zero-address and self-address rejections are unchanged.",
+      "statement": "Given hook deployment, when the constructor binds the Programmable beneficiary, then deployment reverts unless that address equals the policy-mandated address `0xD88539d3c4C460136a733A3Fd60cf6BF269079da`. Given a successful Programmable or treasury liability claim, when `_claimLiability` transfers the exact accrued amount, then it emits a `ProgrammableClaimed` or `TreasuryClaimed` event carrying the exact beneficiary and the exact claimed amount. Edge case: a deployment attempt naming any other nonzero, non-self address reverts before any storage is written; the existing zero-address and self-address rejections are unchanged.",
       "measurement": "Forge tests assert deployment reverts for every non-pinned nonzero candidate address, deployment with the pinned address succeeds, and a claim from each of the Programmable and treasury liability buckets emits the exact matching event with the exact claimed amount and beneficiary.",
       "module": "fee-accounting",
       "status": "approved"
@@ -617,7 +617,7 @@
       "id": "REQ-canonical-market-7",
       "kind": "security",
       "title": "Gross-volume fee basis across all swap forms",
-      "statement": "Given a supported canonical swap with native currency0 in either direction and exactness form, when its gross native ETH quote volume is authenticated, then the hook applies the 10, 40, and 250 basis-point streams to that gross volume. Exact-output quoting uses a monotonic gross-up where gross minus the sum of stream deltas equals requested net. A gross volume below 1000 wei reverts. selfCallPolicy is same-pool-swap-forbidden, and REVERT_WHOLE_SWAP is the ratified partial-fill policy. Edge case: a partial fill, cross-pool self-call, incorrect gross-up, or under-minimum volume produces no collection or liability mutation.",
+      "statement": "Given a supported canonical swap with native currency0 in either direction and exactness form, when its gross native ETH quote volume is authenticated, then the hook applies the 20, 40, and 240 basis-point streams to that gross volume. Exact-output quoting uses a monotonic gross-up where gross minus the sum of stream deltas equals requested net. A gross volume below 1000 wei reverts. selfCallPolicy is same-pool-swap-forbidden, and REVERT_WHOLE_SWAP is the ratified partial-fill policy. Edge case: a partial fill, cross-pool self-call, incorrect gross-up, or under-minimum volume produces no collection or liability mutation.",
       "measurement": "Fork and property tests cover all four direction and exactness combinations plus rejection of reversed currency order, exact-output gross-up, the 999 and 1000 boundaries, whole-swap rollback, and exact PoolManager and caller deltas.",
       "module": "canonical-market",
       "status": "approved"
@@ -626,8 +626,8 @@
       "id": "REQ-fee-accounting-9",
       "kind": "security",
       "title": "Three independent lifetime fee remainders",
-      "statement": "Given fee accrual over the canonical pool lifetime, when each gross quote volume is split, then the 10, 40, and 250 basis-point streams maintain independent quotient and remainder accumulators. Claims never reset, merge, discard, or redistribute any accumulator. Edge case: splitting a volume into many swaps cannot suppress any stream's eventual atomic unit, and an unsuccessful claim leaves every remainder unchanged.",
-      "measurement": "Property tests compare split and unsplit sequences, prove per-stream lifetime conservation for 10, 40, and 250 basis points, and assert claim-invariant remainders across every claim path.",
+      "statement": "Given fee accrual over the canonical pool lifetime, when each gross quote volume is split, then the 20, 40, and 240 basis-point streams maintain independent quotient and remainder accumulators. Claims never reset, merge, discard, or redistribute any accumulator. Edge case: splitting a volume into many swaps cannot suppress any stream's eventual atomic unit, and an unsuccessful claim leaves every remainder unchanged.",
+      "measurement": "Property tests compare split and unsplit sequences, prove per-stream lifetime conservation for 20, 40, and 240 basis points, and assert claim-invariant remainders across every claim path.",
       "module": "fee-accounting",
       "status": "approved"
     },
@@ -707,7 +707,7 @@
       "id": "REQ-provider-binding-4",
       "kind": "compatibility",
       "title": "Provider-bound fee and launch readiness",
-      "statement": "Given Phase 3 provider evidence, when the release package evaluates readiness, then repairMergeEligible and launchEligible are distinct. Code readiness cannot authorize live readiness, signing, broadcast, deployment, or spend. FEE-01 retains the historical 10 basis-point decision to the pinned Programmable recipient on 2026-09-04. Current native launch admission separately proves the exact seeded full-range native ETH/HKMN model and inclusive 300 basis-point split of 250 process, 40 treasury and 10 Programmable, with no additional trading surcharge. The observed provider profile version 4.1.0 requires a separate 20 basis-point gross-native kernel with ceil-per-trade rounding and an atomic initial buy of at least 1 USD; those requirements differ from this selected model and remain open compatibility facts until exact-model admission is evidenced. Programmatic provider access is read-only preflight and validation only. Edge case: an unavailable public route, unresolved provider preimage, recipient, rounding, accrual, claim mechanism, graph, or readiness signal keeps launchEligible false.",
+      "statement": "The assisted native launch revision uses the inclusive 300 basis-point split of 20 Programmable, 40 treasury and 240 process. The immutable Programmable recipient on chain 4663 is 0xD88539d3c4C460136a733A3Fd60cf6BF269079da. Historical FEE-01 decisions and submissions remain historical evidence. Provider integration must verify this exact custom cumulative-remainder model; an additive standard fee profile or per-trade ceiling cannot replace it. Code readiness does not authorize deployment, signing, broadcast, funding or launch. Launch timing and optional initial purchase remain unset and are not preparation requirements.",
       "measurement": "Recorded provider acceptance, probes, and release-gate tests prove each required evidence field, the separate readiness flags, the accepted fee share, and refusal of every unresolved or contradictory response.",
       "module": "provider-binding",
       "status": "approved"

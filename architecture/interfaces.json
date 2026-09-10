@@ -50,7 +50,7 @@
     "streams": [
       {
         "name": "programmable",
-        "basisPoints": 10,
+        "basisPoints": 20,
         "remainder": "independent-lifetime"
       },
       {
@@ -60,7 +60,7 @@
       },
       {
         "name": "process",
-        "basisPoints": 250,
+        "basisPoints": 240,
         "remainder": "independent-lifetime"
       }
     ],
@@ -69,8 +69,8 @@
     "claimsResetRemainders": false,
     "confusion": {
       "id": "FEE-01",
-      "defaultOption": "A",
-      "status": "PENDING_PROVIDER_BOUND_CONFIRMATION",
+      "defaultOption": "B",
+      "status": "OWNER_SELECTED_INCLUSIVE_20_40_240_PROVIDER_INTEGRATION_PENDING",
       "options": {
         "A": "10/40/250 within 300",
         "B": "20/40/240 within 300",
@@ -105,10 +105,9 @@
       "xmax": {
         "unit": "wei",
         "constructorField": "processClaimLimitMaxWei",
-        "value": null,
-        "status": "REQUIRED_EXPLICIT_LAUNCH_INPUT",
-        "valuationCeilingMicroUsd": "500000000000",
-        "rule": "positive integer derived conservatively from the approved launch valuation; never use the USD ceiling as wei"
+        "value": "19921747376305870540",
+        "status": "OWNER_PRESERVED_ASSISTED_LAUNCH_INPUT",
+        "rule": "fixed native wei cap, separate from the dynamic bot six-hour USD budget; no onchain USD oracle"
       },
       "pendingOperationsCancellation": "forbidden",
       "treasuryReschedule": "requires a new Treasury intent and starts a new delay"
@@ -855,9 +854,9 @@
       "minimumGrossWei": "1000",
       "belowMinimum": "999 reverts; 1000 succeeds",
       "basisPoints": [
-        10,
+        20,
         40,
-        250
+        240
       ],
       "rounding": "independent lifetime cumulative numerator/remainder per stream; never per-trade ceil or reset on claims",
       "conservation": "funded wei conservation and cumulative numerator arithmetic are separate unit-correct invariants"

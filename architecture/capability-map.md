@@ -26,7 +26,7 @@ The hook exposes `beforeInitialize`, `beforeSwap`, `afterSwap`, and the two retu
 | `role-control` | Controls Treasury, Operations, beneficiary claims, limits, pause, and rotation. | Immutable hook runtime | None | `REQ-operations-wallet-1..3` |
 | `token-core` | Creates fixed-supply HKMN through the admitted launch path. | Token runtime | `provider-binding` | `REQ-token-core-1..4` |
 | `canonical-market` | Authenticates the canonical market, initialization, gross volume, and whole-fill swaps. | Immutable hook runtime and position custody | `token-core`, `role-control` | `REQ-canonical-market-7` |
-| `fee-accounting` | Maintains solvent 10/40/250 liabilities and lifetime remainders. | Immutable hook runtime | `canonical-market`, `role-control` | `REQ-fee-accounting-9` |
+| `fee-accounting` | Maintains solvent 20/40/240 liabilities and lifetime remainders. | Immutable hook runtime | `canonical-market`, `role-control` | `REQ-fee-accounting-9` |
 | `operations-wallet` | Releases bounded process liability to Operations, retains immutable claim history, and supports a Treasury-only delayed emergency rotation. | Immutable hook runtime and external identities | `fee-accounting`, `role-control` | `REQ-operations-wallet-1..3` |
 | `launch-orchestration` | Performs an atomic provider graph transaction and a separate retryable atomic owner-signed seed transaction. | Immutable launch runtime | `provider-binding`, `token-core`, `canonical-market`, `fee-accounting`, `operations-wallet` | `REQ-launch-orchestration-1..2` |
 | `legacy-custody-family` | Keeps the excluded legacy family frozen and non-deployed. | Frozen not deployed | None | `REQ-phase3-deployment-1` |

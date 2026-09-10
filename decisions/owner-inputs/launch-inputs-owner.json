@@ -68,7 +68,7 @@
     "website": "https://hookemon.com",
     "x": "https://x.com/hookemon4",
     "image": "hookemon-mark.png 512x512 (icon/logo for Programmable, DexScreener, wallets); hookemon-logo.svg wordmark for the website; favicon.svg",
-    "banner": "hookemon-banner.jpeg 1500x500 (website design worktree apps/web/public/; also .webp) — used for X header, DexScreener/FOMO header and Programmable listing",
+    "banner": "hookemon-banner.jpeg 1500x500 (website design worktree apps/web/public/; also .webp) \u2014 used for X header, DexScreener/FOMO header and Programmable listing",
     "ogImage": "og.png 1731x909 (website link preview; resize to 1200x630 in the website relaunch)"
   },
   "archiveRpcUrl": "provided by the owner on 2026-09-04 (Alchemy, network Robinhood Chain Mainnet); stored outside the repository in the operator environment as ROBINHOOD_FORK_RPC_URL; verified: chainId 0x1237, historical eth_call at latest-500000 works",
@@ -77,7 +77,7 @@
   "ownerInputNotes": {
     "processClaimLimit6h": "owner: 50000 USDG per six hours to start",
     "processClaimLimitMax": "owner confirmed 2026-09-04: 500000 USDG (immutable)",
-    "processClaimMaxCount": "coordinator suggestion 24; owner did not object",
+    "processClaimMaxCount": "Confirmed coordinator selection for v0.1.2: 24 successful claims per rolling six hours, within the existing contract bound 1 through 64. The owner requested confirmation of 24 or an explicit intended value on 2026-09-10.",
     "operationsRotationDelaySeconds": "owner decision 2026-09-04: 12 hours (43200 s), immutable",
     "manualApprovalCycles": "owner: 3"
   },
@@ -105,5 +105,43 @@
       "acceptedAt": "2026-09-04",
       "status": "accepted"
     }
+  },
+  "assistedLaunchRevision": {
+    "version": "0.1.2",
+    "recordedAt": "2026-09-10",
+    "supersedesSubmission": "45ddd161-e5bb-4cb0-ad92-8f4eb044d82e",
+    "feeBps": {
+      "total": 300,
+      "programmable": 20,
+      "treasury": 40,
+      "process": 240
+    },
+    "programmableRecipient": "0xD88539d3c4C460136a733A3Fd60cf6BF269079da",
+    "processClaimLimit6hWei": "9960873688152935270",
+    "processClaimLimitMaxWei": "19921747376305870540",
+    "processClaimMaxCount": 24,
+    "tickSpacing": 60,
+    "tickLower": 133500,
+    "tickUpper": 161220,
+    "sqrtPriceX96": "250929875796514805540091219040452",
+    "positionLiquidity": "421035394154913054639875",
+    "permanentCustodyDustHkmnAtomic": "115",
+    "creatorEthLiquidityWei": "0",
+    "initialInventory": "buyer-funded",
+    "creatorTokenAllocationAtomic": "0",
+    "gas": "separate and manually funded",
+    "automaticTreasuryToOperationsRefill": false,
+    "operationsRotationDelaySeconds": 43200,
+    "botRollingSixHourUsdBudget": 25000,
+    "botRollingSixHourMaximumUsdBudget": 50000,
+    "ethUsdReference": {
+      "value": "2509.82",
+      "kind": "dated calculation snapshot, not a peg"
+    },
+    "launchTime": null,
+    "optionalInitialPurchase": null,
+    "liveDeadline": null,
+    "walletNonce": null,
+    "authority": "Owner preparation request dated 2026-09-10 authorizes the bounded fee revision and preserving these launch economics; no live action is authorized. This revision supersedes earlier USDG launch inputs above for native assisted launch."
   }
 }

@@ -530,10 +530,19 @@ export function normalizePhaseThreeSubmissionDraft(submission, { native = false 
     if (feeCapability) feeCapability.summary = 'Calculate inclusive cumulative native fees in all four canonical swap quadrants.';
     normalized.capabilities.externalCalls.targets = normalized.capabilities.externalCalls.targets.filter(target => target !== 'USDG token');
     normalized.risk.rationales.externalDependencies = 'Provider admission, exact manager runtimes and native Relay source/order proofs remain separately verified release facts.';
+    // Native v0.1.2 supersedes the historical phase-two fee allocation only.
+    const reviseFeeText = value => value.replaceAll('10/40/250', '20/40/240').replaceAll('10 bps programmable, 40 bps treasury and 250 bps process', '20 bps programmable, 40 bps treasury and 240 bps process').replaceAll('combined 290 bps', 'combined 280 bps').replaceAll('treasury and 250 bps process', 'treasury and 240 bps process').replaceAll('0x4957f49620AFf3Adbbe8195a4f633E49cc93376c', '0xD88539d3c4C460136a733A3Fd60cf6BF269079da');
+    const reviseFeeTree = value => typeof value === 'string' ? reviseFeeText(value) : Array.isArray(value) ? value.map(reviseFeeTree) : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, reviseFeeTree(entry)])) : value;
+    Object.assign(normalized, reviseFeeTree(normalized));
+    for (const recipient of normalized.hook.feeMechanism.recipients) {
+      if (recipient.role === 'programmable-platform') recipient.sharePpm = 66667;
+      if (recipient.role === 'treasury') recipient.sharePpm = 133333;
+      if (recipient.role === 'process') recipient.sharePpm = 800000;
+    }
     normalized.disclosures = normalized.disclosures.filter(value => !value.includes('USDG') && !value.includes('240000000') && !value.includes('accepted 10 bps') && !value.startsWith('Native ETH is currency0.'));
-    normalized.disclosures.push('The unchanged inclusive 10/40/250 basis-point native model and separate seed require current provider admission; historical acceptance does not establish it.', 'Native ETH is currency0. Seed and wei claim ceilings require reviewed per-action limits and gas reserves. Complete EUR 250 affordability proof is deferred by the owner until functional testing.');
+    normalized.disclosures.push('The revised inclusive 20/40/240 basis-point native model and separate seed require current provider admission; historical acceptance does not establish it.', 'Native ETH is currency0. Seed and wei claim ceilings require reviewed per-action limits and gas reserves. Complete EUR 250 affordability proof is deferred by the owner until functional testing.');
     normalized.disclosures = [...new Set(normalized.disclosures)];
-    launchGraph.summary = 'The native graph preserves complete HKMN allocation and cumulative 10/40/250 basis-point streams. Native provider admission, funding, route fields and final runtime identities remain required.';
+    normalized.capabilityExtensions.find(extension => extension.capabilityId === 'phase-three-launch-graph').summary = 'The native graph preserves complete HKMN allocation and cumulative 20/40/240 basis-point streams. Native provider admission, funding, route fields and final runtime identities remain required.';
   }
   return normalized;
 }
@@ -1576,7 +1585,7 @@ function validatePhaseThreeAddressDerivationDraft(launchInputs, addressManifest,
     launchWallet: '0xfc82B0da6d487B97d7eA1AA0d51E00AfF4F3a729',
     treasury: '0xfc82B0da6d487B97d7eA1AA0d51E00AfF4F3a729',
     operations: '0xB54AAF746eb1e80AFDb5eb0992a75b08DB2E4384',
-    programmablePlatform: '0x4957f49620AFf3Adbbe8195a4f633E49cc93376c',
+    programmablePlatform: native ? '0xD88539d3c4C460136a733A3Fd60cf6BF269079da' : '0x4957f49620AFf3Adbbe8195a4f633E49cc93376c',
     poolManager: '0x8366a39CC670B4001A1121B8F6A443A643e40951',
     positionManager: '0x58daec3116aae6D93017bAAea7749052E8a04fA7',
     permit2: '0x000000000022D473030F116dDEE9F6B43aC78BA3',

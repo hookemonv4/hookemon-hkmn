@@ -34,10 +34,11 @@ test('native draft binds real compiler artifacts without inventing seed or claim
     assert.equal(draft.schemaVersion, 'hookemon.phase3.graph-draft.v2');
     assert.equal(value.inputs.pool.quoteAsset.assetId, 'native');
     assert.equal(value.inputs.pool.quoteAsset.amountAtomic, '0');
-    assert.deepEqual(value.inputs.pool.fullRange, { minimumTick: null, maximumTick: null });
-    assert.equal(value.inputs.pool.priceCandidates.nativeCurrency0, null);
-    assert.equal(value.manifest.targets[2].constructor.processClaimLimit6hWei, null);
-    assert.equal(value.manifest.targets[2].constructor.processClaimLimitMaxWei, null);
+    assert.deepEqual(value.inputs.pool.fullRange, { minimumTick: 133500, maximumTick: 161220 });
+    assert.equal(value.inputs.pool.priceCandidates.nativeCurrency0.sqrtPriceX96, '250929875796514805540091219040452');
+    assert.equal(value.manifest.targets[2].constructor.processClaimLimit6hWei, '9960873688152935270');
+    assert.equal(value.manifest.targets[2].constructor.processClaimLimitMaxWei, '19921747376305870540');
+    assert.equal(value.manifest.targets[2].constructor.processClaimMaxCount, 24);
     assert.equal(draft.seed.nativeFunding.amountWei, '0');
     assert.equal('permit2Allowance' in draft.seed, false);
     for (const name of ['address-manifest.schema.json', 'address-manifest-draft.schema.json']) {
@@ -80,6 +81,8 @@ test('native review disclosures remove obsolete seed instructions and remain ide
   submission.disclosures.push('Native ETH is currency0. An obsolete complete-budget prerequisite.');
   const normalized = normalizePhaseThreeSubmissionDraft(submission, { native: true });
   assert.deepEqual(normalizePhaseThreeSubmissionDraft(normalized, { native: true }), normalized);
+  assert.deepEqual(normalized.hook.feeMechanism.recipients.map(({sharePpm}) => sharePpm), [66667, 133333, 800000]);
+  assert.equal(normalized.hook.feeMechanism.recipients[0].address, '0xD88539d3c4C460136a733A3Fd60cf6BF269079da');
   assert.equal(normalized.disclosures.filter(value => value.startsWith('Native ETH is currency0.')).length, 1);
   assert.match(normalized.launchLifecycle.liquidityFormation.actor, /native ETH/);
   assert.match(normalized.launchLifecycle.liquidityFormation.failure, /native value/);
