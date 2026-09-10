@@ -753,7 +753,7 @@ contract RobinhoodV4ArchiveForkTest is Test {
         uint256 secondProcessLiability = hook.processLiability();
         assertEq(
             secondProcessLiability,
-            960_000,
+            1_000_000, // 4 * 10_000_000 gross quote * 250 / 10_000.
             "four trades did not accrue the revised process allocation"
         );
         vm.warp(claimTimestamp + 21_599);
