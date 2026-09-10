@@ -10,7 +10,7 @@
 
 ## Deployment model
 
-Phase 3 deploys one immutable token runtime, one immutable hook runtime, and one permanent position-custody runtime. The 2.5% process share is claimed by the current Operations EVM identity under the hook's bounded claim policy. A distinct Operations Solana identity performs the Solana leg. The content-addressed deployment manifest is authoritative for this runtime set.
+Phase 3 deploys one immutable token runtime, one immutable hook runtime, and one permanent position-custody runtime. The 2.4% process share is claimed by the current Operations EVM identity under the hook's bounded claim policy. A distinct Operations Solana identity performs the Solana leg. The content-addressed deployment manifest is authoritative for this runtime set.
 
 The legacy custody family is frozen source evidence, not a Phase 3 runtime. It includes the former vault-coordination, per-cycle escrow, route, on-chain commitment, settlement, and Merkle components. The manifest must reject every member of that family.
 
@@ -76,4 +76,4 @@ No callback edge can move from an offchain client into a provider of its own aut
 
 Recorded verbatim from the approved planning record:
 
-> **CONFUSION FEE-01:** Discovery v4 verlangt 20 bps an `0xD885…79da` (`enforcement: not-guaranteed-onchain`, Basis/Rundung/Claim `null`); Owner-Entscheidung 10 bps an `0x4957…76c` per Absprache. Optionen: (A) 10 bps bestätigt (Owner-Aussage, Nachweis via WP00b) — Plan-Default; (B) 20/40/240 in 300; (C) 20/40/250 = 310; (D) andere Route. Nur fee-/graphabhängige WPs (WP01ff.) warten auf die Bestätigung; alles andere läuft.
+> FEE-01 selects 20/40/240 bps within 300 for the assisted native launch. The platform recipient is `0xD88539d3c4C460136a733A3Fd60cf6BF269079da`. Historical acceptance of 10 bps remains historical evidence; current integration must verify the revised custom model.

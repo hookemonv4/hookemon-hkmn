@@ -534,6 +534,12 @@ export function normalizePhaseThreeSubmissionDraft(submission, { native = false 
     const reviseFeeText = value => value.replaceAll('10/40/250', '20/40/240').replaceAll('10 bps programmable, 40 bps treasury and 250 bps process', '20 bps programmable, 40 bps treasury and 240 bps process').replaceAll('combined 290 bps', 'combined 280 bps').replaceAll('treasury and 250 bps process', 'treasury and 240 bps process').replaceAll('0x4957f49620AFf3Adbbe8195a4f633E49cc93376c', '0xD88539d3c4C460136a733A3Fd60cf6BF269079da');
     const reviseFeeTree = value => typeof value === 'string' ? reviseFeeText(value) : Array.isArray(value) ? value.map(reviseFeeTree) : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, reviseFeeTree(entry)])) : value;
     Object.assign(normalized, reviseFeeTree(normalized));
+    Object.assign(normalized.programmableFee.rates, {
+      minimumEffectiveHundredthsOfBip: 2000,
+      platformHundredthsOfBip: 2000,
+      projectHundredthsOfBip: 28000,
+      formula: 'effective=max(selected,2000);platform=2000;project=effective-2000',
+    });
     for (const recipient of normalized.hook.feeMechanism.recipients) {
       if (recipient.role === 'programmable-platform') recipient.sharePpm = 66667;
       if (recipient.role === 'treasury') recipient.sharePpm = 133333;

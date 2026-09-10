@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Role control defines the bounded Treasury and Operations authorities for the Phase 3 money path. Operations controls its EVM and Solana signing identities and may custody only its earned 2.5 percent process share; Treasury controls the constrained claim safeguards. This card covers `REQ-role-control-1` through `REQ-role-control-4` and `REQ-operations-wallet-1` through `REQ-operations-wallet-3`.
+Role control defines the bounded Treasury and Operations authorities for the Phase 3 money path. Operations controls its EVM and Solana signing identities and may custody only its earned 2.4 percent process share; Treasury controls the constrained claim safeguards. This card covers `REQ-role-control-1` through `REQ-role-control-4` and `REQ-operations-wallet-1` through `REQ-operations-wallet-3`.
 
 ## Public interface
 

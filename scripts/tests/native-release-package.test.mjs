@@ -83,6 +83,12 @@ test('native review disclosures remove obsolete seed instructions and remain ide
   assert.deepEqual(normalizePhaseThreeSubmissionDraft(normalized, { native: true }), normalized);
   assert.deepEqual(normalized.hook.feeMechanism.recipients.map(({sharePpm}) => sharePpm), [66667, 133333, 800000]);
   assert.equal(normalized.hook.feeMechanism.recipients[0].address, '0xD88539d3c4C460136a733A3Fd60cf6BF269079da');
+  assert.deepEqual(normalized.programmableFee.rates, {
+    unit: 'hundredths-of-bip', selectedHundredthsOfBip: 30000,
+    minimumEffectiveHundredthsOfBip: 2000, effectiveHundredthsOfBip: 30000,
+    platformHundredthsOfBip: 2000, projectHundredthsOfBip: 28000,
+    formula: 'effective=max(selected,2000);platform=2000;project=effective-2000', lpFeeExcluded: true,
+  });
   assert.equal(normalized.disclosures.filter(value => value.startsWith('Native ETH is currency0.')).length, 1);
   assert.match(normalized.launchLifecycle.liquidityFormation.actor, /native ETH/);
   assert.match(normalized.launchLifecycle.liquidityFormation.failure, /native value/);
