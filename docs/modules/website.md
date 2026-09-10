@@ -47,7 +47,7 @@ The hero uses a two-line shared-cycle heading and the supplied transparent Robin
   `/operator/api/*` proxy. Configuration commands carry `allowedPackIds`, `requestedOrders`,
   `maxBoostersPerCycle`, `intervalMinutes` and `maxUnitPriceMicroUsd`, `maxCycleBudgetMicroUsd`,
   `max24HourBudgetMicroUsd`. These limits are USD valuations, bounded by 55, 165 and 495 USD.
-  Collector catalog prices remain Solana USDC. A bootstrap with historical `MicroUsdg` controls
+  Collector catalog prices remain Circle USD Coin on Solana. A bootstrap with historical `MicroUsdg` controls
   cannot enable commands; a failed refresh clears the previous bootstrap.
 - `operator-locale.ts` formats native ETH from integer wei with bigint arithmetic and USD controls
   from integer micro-USD. Historical USDG formatters and dashboard decoders retain their original
