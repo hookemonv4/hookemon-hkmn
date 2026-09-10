@@ -16,8 +16,9 @@ dashboard, CLI, and runner callers receive a frozen read client rather than a se
 - `CYCLE_REPOSITORY_CLIENT_INTERFACE` exposes `readActiveCycle`, `peekActiveCycle`, `readStage`,
   `describeCycle`, `readOperationalStageAttempt`,
   `readChainTransactionAttempt(cycleId, stage, requestDigest)`, `readClaimPreconditions`, and
-  `listKnownCycleIds`. `peekActiveCycle` observes the active slot without performing the archival
-  repair that `readActiveCycle` may perform.
+  `listKnownCycleIds`, plus `readPagedPayoutState` for durable payout allocation projections.
+  `peekActiveCycle` observes the active slot without performing the archival repair that
+  `readActiveCycle` may perform.
 - `CYCLE_REPOSITORY_INTERFACE` adds `createCycle`, `prepareStage`, `completeStage`,
   `completeCycle`, `holdCycle`, provider-attempt writes, chain-attempt writes, Relay settlement,
   standing-authority decisions, wallet nonce reservations, paged payout state, and custody writes.

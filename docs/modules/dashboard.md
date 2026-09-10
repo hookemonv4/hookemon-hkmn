@@ -148,7 +148,7 @@ The bootstrap hard-cap projection exposes only its four published pack-spend fie
 
 ## Native money boundary
 
-Cycle status v7, community snapshots v9 and the private dashboard v7 carry native accounting.
+Cycle status v7, community snapshots v9 and the private dashboard v8 carry native accounting.
 `native-accounting.mjs` validates integer wei separately from micro-USD valuation fields and rejects
 historical `MicroUsdg` keys in native money surfaces. A validation-only historical skeleton checks
 unchanged layout and metadata fields with amount-presence sentinels; native scalars are never
@@ -159,7 +159,8 @@ retain their original readers. The standalone website parser copies are byte-par
 and return amounts carry the explicit 4663/native/18 identity; Collector debit and proceeds retain
 their Solana asset identity. Physical balances, reserves and payout liabilities use `Wei`; economic
 valuations use `MicroUsd` and remain null without corresponding evidence. A funding quote does
-not establish actual pack spend. Lifetime monetary totals remain null without an accounting index.
+not establish actual pack spend. Lifetime monetary totals remain null when terminal cycles lack
+the corresponding durable accounting evidence; mixed native/historical lifetimes are quarantined.
 
 Operator bootstrap and configuration decisions use USD caps with `MicroUsd` names. Historical
 USDG configuration keys fail validation before a command reaches the runner. Native public payout
@@ -172,6 +173,31 @@ exercises projection, both public parser boundaries, the served comic dashboard,
 and parser parity. Historical contract and dashboard presentation tests exercise the old readers.
 
 Pack selection groups use native expandable sections, with Pokémon first, followed by One Piece, Sports, and other packs. Pokémon opens initially; each group orders packs by catalog price and code. Collapsing a section preserves selection.
+
+## Lifetime projection and completeness
+
+The composed dashboard exposes a repository-backed `readLifetimeTotals` seam. It scans every known
+cycle, reads durable purchase/open evidence, and delegates monetary facts to the cycle accounting
+projection. A lifetime amount is emitted only when every terminal cycle has the required evidence;
+otherwise the amount is `null` and its `completeness` flag is `false`. Opened-pack and skipped-cycle
+counts follow the same rule. Active-cycle observations remain visible in `perCycle` but are excluded
+from terminal lifetime totals. The private operator projection uses schema version 8 and includes
+per-metric completeness plus `cyclesScanned`; schema 7 remains accepted for legacy readers.
+
+## Public 503 diagnosis
+
+The public Worker requires `PUBLIC_DASHBOARD_PROFILE`, `PUBLIC_CYCLE_STATUS_URL`,
+`PUBLIC_COMMUNITY_SNAPSHOT_URL`, `PUBLIC_CYCLE_HISTORY_URL`, `OPERATOR_CONTROL_SERVICE_URL`, and
+`OPERATOR_CONTROL_PROXY_CREDENTIAL`. The three public URLs must be HTTPS URLs without credentials,
+ports, query strings, or fragments, with exact paths `/public/api/cycle-status`,
+`/public/api/community-dashboard`, and `/public/api/cycle-history`, and must share one origin.
+Missing or invalid configuration, unreachable/non-success upstream responses, timeouts, oversized
+bodies, and fetch failures produce `503 PUBLIC_*_UNAVAILABLE`, even when the homepage itself is
+healthy. A reachable upstream response whose JSON or schema is invalid produces
+`502 PUBLIC_*_INVALID`. The runner must start with its dashboard composed (not `--no-dashboard`),
+and the configured URLs must reach that listener/control service. The current deployment workflow
+explicitly synchronizes only two of the four public secrets; verify the other Worker secrets exist
+when diagnosing deployment.
 
 ## Reward recipient controls
 

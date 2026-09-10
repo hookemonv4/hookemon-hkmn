@@ -21,6 +21,7 @@ import { applyOperatorConfiguration } from '../../../runner/src/config/state-sch
 import { digest } from '../../../runner/src/cycle/journal.mjs';
 import { createRelayClient, createQuoteUsdValuation, relayQuoteDigest } from '../../src/relay-client.mjs';
 import { createRequestListener } from '../../../dashboard/src/server.mjs';
+import { normalizePublicCommunitySnapshot } from '../../../dashboard/src/contracts/public-community-snapshot.mjs';
 import { appendAuditEntry, readAllAuditEntries } from '../../../dashboard/src/auth/audit-log.mjs';
 import { buildQuoteRefreshPlanner, compose as composeRoot, createTrustedSolanaBlockhashContextResolver } from '../../src/app/compose.mjs';
 import {
@@ -1700,6 +1701,7 @@ test('compose exposes one repository-backed cycle client instead of a bare runne
     'readActiveCycle', 'peekActiveCycle', 'readStage', 'describeCycle', 'readOperationalStageAttempt',
     'readChainTransactionAttempt', 'readClaimPreconditions', 'readHeldPosition', 'listHeldPositions',
     'readSupplementarySettlement', 'listKnownCycleIds', 'readOutboundQuoteRefresh', 'readFinalizedClaimCustodyEvidence',
+    'readPagedPayoutState',
   ]);
   assert.equal(assertCycleRepositoryClientInterface(composition.cycleRepository), composition.cycleRepository);
   assert.deepEqual(Object.keys(composition.cycleRepository).sort(), [...CYCLE_REPOSITORY_CLIENT_INTERFACE].sort());
@@ -2658,6 +2660,54 @@ test('dashboard composed in-process: run-cycle-now over HTTP actually drives the
   const dashboardBody = await server.get('/operator/api/dashboard', { 'x-hookemon-proxy-credential': DASHBOARD_CREDENTIAL });
   assert.equal(dashboardBody.status, 200);
   assert.notEqual(dashboardBody.body.nextCycleAt, null);
+});
+
+test('dashboard composed in-process: public and private routes share the real lifetime projection', async t => {
+  const stateDir = await tempStateDir(t);
+  const statePath = join(stateDir, 'operator-state.json');
+  const server = await buildComposedDashboard(t, { statePath, stateDir });
+
+  const decision = await server.post('/operator/api/decisions', {
+    requestId: 'req-public-routes-1',
+    expectedVersion: 0,
+    command: { type: 'run-cycle-now' },
+  }, { 'x-hookemon-proxy-credential': DASHBOARD_CREDENTIAL });
+  assert.equal(decision.status, 200);
+
+  const headers = { 'x-hookemon-proxy-credential': DASHBOARD_CREDENTIAL };
+  const [status, community, history, operator] = await Promise.all([
+    server.get('/public/api/cycle-status'),
+    server.get('/public/api/community-dashboard'),
+    server.get('/public/api/cycle-history?limit=5'),
+    server.get('/operator/api/dashboard', headers),
+  ]);
+  for (const response of [status, community, history, operator]) assert.equal(response.status, 200);
+  const cycleId = (await server.composition.cycleRepository.listKnownCycleIds())[0];
+  const purchaseStage = await server.composition.cycleRepository.readStage(cycleId, 'purchase');
+  const openStage = await server.composition.cycleRepository.readStage(cycleId, 'open');
+  const openedPacks = Array.isArray(openStage.evidence?.packs)
+    ? openStage.evidence.packs.filter(pack => pack.decision === 'opened').length
+    : null;
+  const accounting = await server.composition.dashboard.ctx.readAccounting(cycleId);
+  assert.equal(accounting.schema, undefined);
+  assert.equal(community.body.schemaVersion, 8);
+  normalizePublicCommunitySnapshot(community.body, 'mainnet');
+  assert.equal(community.body.metrics.completedCycles, 1);
+  assert.equal(operator.body.metrics.completedCycles, 1);
+  assert.equal(operator.body.historyComplete, true);
+  assert.equal(operator.body.execution.connected, true);
+  assert.equal(community.body.metrics.openedPacks, openedPacks);
+  assert.equal(operator.body.metrics.openedPacks, openedPacks);
+  assert.match(accounting.packSpendMicroUsdg, /^(0|[1-9][0-9]*)$/);
+  assert.strictEqual(community.body.metrics.totalCycleFundingMicroUsdg, accounting.packSpendMicroUsdg);
+  assert.strictEqual(operator.body.metrics.totalCycleFundingMicroUsdg, accounting.packSpendMicroUsdg);
+  assert.equal(operator.body.metrics.totalCollectorSpendMicroUsdg, null);
+  const purchasedPacks = Array.isArray(purchaseStage.evidence?.packs)
+    ? purchaseStage.evidence.packs.filter(pack => pack.status === 'purchased').length
+    : 0;
+  assert.equal(operator.body.metrics.skippedCycles, purchasedPacks > 0 ? 0 : 1);
+  assert.equal(operator.body.completeness.totalCycleFundingMicroUsdg, accounting.packSpendMicroUsdg !== null);
+  assert.equal(operator.body.completeness.totalCollectorSpendMicroUsdg, false);
 });
 
 test('dashboard composed in-process: restart-request/reconcile-request over HTTP actually reach AutomatedCycleService.recoverActiveCycle', async t => {

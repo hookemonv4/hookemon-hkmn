@@ -126,6 +126,8 @@ export function createBootstrapHandler(ctx) {
         identity: identityFor(identity.email),
         catalog: ctx.catalog ?? null,
         readiness: ctx.readiness ?? { ready: false, reasons: ['catalog-not-loaded'] },
+        now: ctx.now,
+        lastTick: ctx.lastTick ? ctx.lastTick() : null,
       });
       sendJson(res, 200, assertBootstrap(body));
     } catch (error) {
@@ -143,10 +145,38 @@ export function createDashboardHandler(ctx) {
     if (req.method !== 'GET') return sendJson(res, 405, { code: 'METHOD_NOT_ALLOWED' });
     try {
       const authorityStatus = await loadAuthorityStatus(ctx);
+      let lifetimeTotals = null;
+      if (typeof ctx.readLifetimeTotals === 'function') {
+        try {
+          lifetimeTotals = await ctx.readLifetimeTotals();
+        } catch (error) {
+          ctx.onError?.('operator-lifetime-totals', error);
+        }
+      }
+      let cardHistory = null;
+      if (typeof ctx.cardHistory === 'function') {
+        try {
+          cardHistory = await ctx.cardHistory({ limit: 60 });
+        } catch (error) {
+          ctx.onError?.('operator-card-history', error);
+        }
+      }
+      const latestCycle = lifetimeTotals?.latestCycle;
+      let latestCycleAllocations = null;
+      if (latestCycle && typeof ctx.readCycleAllocations === 'function') {
+        try {
+          latestCycleAllocations = await ctx.readCycleAllocations(latestCycle.cycleId);
+        } catch (error) {
+          ctx.onError?.('operator-cycle-allocations', error);
+        }
+      }
       const body = buildDashboardReadModel({
         authorityStatus,
         now: ctx.now,
         lastTick: ctx.lastTick ? ctx.lastTick() : null,
+        lifetimeTotals,
+        cardHistory,
+        latestCycleAllocations,
       });
       sendJson(res, 200, assertDashboardResponse(body));
     } catch (error) {

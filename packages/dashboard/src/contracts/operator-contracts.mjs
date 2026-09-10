@@ -1,6 +1,6 @@
 import { REWARD_RECIPIENT_LIMITS, assertRewardRecipientLimit } from '../../../runner/src/config/reward-recipient-selection.mjs';
 import { assertPackPlan, PACK_PLAN_SCHEMA } from '../../../runner/src/config/pack-plan.mjs';
-import { nativeValidationSkeleton, requireNativeRound } from './native-accounting.mjs';
+import { nativeFieldName, nativeValidationSkeleton, requireNativeRound } from './native-accounting.mjs';
 // Clean-room re-implementation of the private /operator/api/* contracts (readSet:
 // apps/web/app/operator/OperatorControlPanel.tsx, operator-types.ts and the coordinator's own
 // "CONTRACT FACTS extracted from the website source" note on this package's work order). These
@@ -320,11 +320,18 @@ const DASHBOARD_KEYS = new Set([
   'cap', 'custody', 'alerts', 'payoutStatus',
 ]);
 const DASHBOARD_V6_KEYS = new Set([...DASHBOARD_KEYS, 'alertSources']);
+const DASHBOARD_V8_KEYS = new Set([...DASHBOARD_KEYS, 'completeness', 'alertSources']);
 const DASHBOARD_METRICS_KEYS = new Set([
   'cycleStartProjectPoolMicroUsdg', 'totalCycleFundingMicroUsdg', 'totalCollectorSpendMicroUsdg',
   'totalBuybacksReturnedMicroUsdg', 'totalBridgedBackMicroUsdg', 'totalRewardsPaidMicroUsdg',
   'totalRewardsDeferredMicroUsdg', 'totalQuotedOperatingCostsMicroUsdg', 'latestRetainedReserveMicroUsdg',
   'latestCycleReserveTargetMicroUsdg', 'completedCycles', 'skippedCycles', 'openedPacks',
+]);
+const DASHBOARD_NATIVE_METRICS_KEYS = new Set([
+  ...[...DASHBOARD_METRICS_KEYS]
+    .filter(key => key.endsWith('MicroUsdg'))
+    .map(nativeFieldName),
+  'completedCycles', 'skippedCycles', 'openedPacks',
 ]);
 const ACTIVE_CYCLE_KEYS = new Set([
   'cycleId', 'status', 'updatedAt', 'configurationRevision', 'allowedPackIds', 'requestedOrders',
@@ -332,9 +339,11 @@ const ACTIVE_CYCLE_KEYS = new Set([
   'revealedCards', 'rewardRecipientLimit',
 ]);
 const DASHBOARD_LATEST_CYCLE_KEYS = new Set([
-  'cycleId', 'status', 'reason', 'updatedAt', 'paidMicroUsdg', 'payoutRecipientCount', 'rewardRecipientLimit',
+  'cycleId', 'status', 'reason', 'updatedAt', 'payoutRecipientCount', 'rewardRecipientLimit',
   'selectedCount', 'paidCount', 'deferredCount', 'roundAccounting', 'transactions',
 ]);
+const DASHBOARD_NATIVE_LATEST_CYCLE_KEYS = new Set([...DASHBOARD_LATEST_CYCLE_KEYS, 'paidWei']);
+const DASHBOARD_HISTORICAL_LATEST_CYCLE_KEYS = new Set([...DASHBOARD_LATEST_CYCLE_KEYS, 'paidMicroUsdg']);
 
 /** Validate `/operator/api/dashboard`'s response shape (readSet: apps/web/app/operator/
  * OperatorControlPanel.tsx's `Dashboard` type / `decodeDashboard`). Only checks key sets and basic
@@ -355,8 +364,10 @@ export function assertDashboardResponse(value) {
   }
 
   const source = requiredRecord(value, invalid);
-  if (![1, 2, 3, 4, 5, 6].includes(source.schemaVersion)) invalid();
-  const dashboardKeys = source.schemaVersion === 6 ? DASHBOARD_V6_KEYS : DASHBOARD_KEYS;
+  if (![1, 2, 3, 4, 5, 6, 8].includes(source.schemaVersion)) invalid();
+  const dashboardKeys = source.schemaVersion === 8
+    ? DASHBOARD_V8_KEYS
+    : source.schemaVersion === 6 ? DASHBOARD_V6_KEYS : DASHBOARD_KEYS;
   exactKeys(source, dashboardKeys, invalid);
   requiredKeys(source, dashboardKeys, invalid);
   if (typeof source.historyComplete !== 'boolean' || typeof source.cardHistoryComplete !== 'boolean') invalid();
@@ -370,9 +381,36 @@ export function assertDashboardResponse(value) {
   if (source.cycleStartProjectPoolObservedAt !== null) isoTimestamp(source.cycleStartProjectPoolObservedAt, invalid);
   if (source.latestCompletedAllocationCycleId !== null) boundedText(source.latestCompletedAllocationCycleId, invalid);
   const metrics = requiredRecord(source.metrics, invalid);
-  exactKeys(metrics, DASHBOARD_METRICS_KEYS, invalid);
-  requiredKeys(metrics, DASHBOARD_METRICS_KEYS, invalid);
-  boundedArray(source.latestCycleTopAllocations, 200, invalid);
+  const native = source.latestCycle?.roundAccounting?.schema === 'hookemon.native-round-accounting.v1';
+  if (native) requireNativeRound(source.latestCycle.roundAccounting);
+  const metricKeys = native ? DASHBOARD_NATIVE_METRICS_KEYS : DASHBOARD_METRICS_KEYS;
+  exactKeys(metrics, metricKeys, invalid);
+  requiredKeys(metrics, metricKeys, invalid);
+  const nullableMetricFields = source.schemaVersion === 8
+    ? [...metricKeys].filter(key => key.endsWith('MicroUsdg') || key.endsWith('MicroUsd') || key.endsWith('Wei') || ['skippedCycles', 'openedPacks'].includes(key))
+    : [];
+  for (const key of nullableMetricFields) {
+    if (metrics[key] !== null) {
+      if (key.endsWith('MicroUsdg') || key.endsWith('MicroUsd') || key.endsWith('Wei')) money(metrics[key], invalid);
+      else if (!Number.isSafeInteger(metrics[key]) || metrics[key] < 0) invalid();
+    }
+  }
+  if (source.schemaVersion === 8) {
+    const completeness = requiredRecord(source.completeness, invalid);
+    if (!Number.isSafeInteger(completeness.cyclesScanned) || completeness.cyclesScanned < 0) invalid();
+    for (const [key, value] of Object.entries(completeness)) {
+      if (key !== 'cyclesScanned' && typeof value !== 'boolean') invalid();
+    }
+  }
+  boundedArray(source.latestCycleTopAllocations, 200, invalid).forEach(allocation => {
+    const value = requiredRecord(allocation, invalid);
+    const amountKey = native ? 'allocatedWei' : 'allocatedMicroUsdg';
+    exactKeys(value, new Set(['rank', 'address', amountKey]), invalid);
+    requiredKeys(value, ['rank', 'address', amountKey], invalid);
+    if (!Number.isSafeInteger(value.rank) || value.rank < 1) invalid();
+    boundedText(value.address, invalid);
+    money(value[amountKey], invalid);
+  });
   boundedArray(source.cards, 60, invalid);
   if (source.activeCycle !== null) {
     const activeCycle = requiredRecord(source.activeCycle, invalid);
@@ -383,8 +421,9 @@ export function assertDashboardResponse(value) {
   }
   if (source.latestCycle !== null) {
     const latestCycle = requiredRecord(source.latestCycle, invalid);
-    exactKeys(latestCycle, DASHBOARD_LATEST_CYCLE_KEYS, invalid);
-    requiredKeys(latestCycle, DASHBOARD_LATEST_CYCLE_KEYS, invalid);
+    const latestKeys = native ? DASHBOARD_NATIVE_LATEST_CYCLE_KEYS : DASHBOARD_HISTORICAL_LATEST_CYCLE_KEYS;
+    exactKeys(latestCycle, latestKeys, invalid);
+    requiredKeys(latestCycle, latestKeys, invalid);
     boundedText(latestCycle.cycleId, invalid);
     boundedText(latestCycle.status, invalid);
   }
@@ -397,11 +436,12 @@ export function assertDashboardResponse(value) {
   requiredKeys(cap, [...capKeys], invalid);
   if (cap.offChain24Hour !== null) {
     const offChain = requiredRecord(cap.offChain24Hour, invalid);
-    exactKeys(offChain, new Set(['usedMicroUsdg', 'limitMicroUsdg', 'remainingMicroUsdg']), invalid);
-    requiredKeys(offChain, ['usedMicroUsdg', 'limitMicroUsdg', 'remainingMicroUsdg'], invalid);
-    money(offChain.usedMicroUsdg, invalid);
-    money(offChain.limitMicroUsdg, invalid);
-    money(offChain.remainingMicroUsdg, invalid);
+    const capFields = source.schemaVersion === 8
+      ? ['usedMicroUsd', 'limitMicroUsd', 'remainingMicroUsd']
+      : ['usedMicroUsdg', 'limitMicroUsdg', 'remainingMicroUsdg'];
+    exactKeys(offChain, new Set(capFields), invalid);
+    requiredKeys(offChain, capFields, invalid);
+    for (const field of capFields) money(offChain[field], invalid);
   }
   if (source.schemaVersion === 6 && cap.loss !== null) {
     const loss = requiredRecord(cap.loss, invalid);

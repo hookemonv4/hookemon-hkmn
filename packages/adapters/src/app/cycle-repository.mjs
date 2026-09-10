@@ -184,6 +184,7 @@ export const CYCLE_REPOSITORY_CLIENT_INTERFACE = Object.freeze([
   'listKnownCycleIds',
   'readOutboundQuoteRefresh',
   'readFinalizedClaimCustodyEvidence',
+  'readPagedPayoutState',
 ]);
 
 export const CYCLE_REPOSITORY_INTERFACE = Object.freeze([

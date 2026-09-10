@@ -16,9 +16,10 @@ import {
   germanStatus,
   parseGermanUsd,
   formatGermanUsd,
-  formatGermanEth,
   assertNativeOperatorConfiguration,
+  operatorHistoryLabel,
 } from "./operator-locale";
+import { formatNativeAmount } from "../../lib/native-accounting.mjs";
 import type { ActiveCycle, DashboardCard } from "./operator-types";
 import styles from "./operator.module.css";
 
@@ -71,7 +72,7 @@ type Bootstrap = {
 type DashboardRoundAccounting = PublicRoundAccounting;
 
 type Dashboard = {
-  schemaVersion: 4 | 7;
+  schemaVersion: 4 | 7 | 8;
   historyComplete: boolean;
   cardHistoryComplete: boolean;
   generatedAt: string;
@@ -82,23 +83,34 @@ type Dashboard = {
   latestCompletedAllocationCycleId: string | null;
   metrics: {
     cycleStartProjectPoolMicroUsdg: string | null;
-    totalCycleFundingMicroUsdg: string;
-    totalCollectorSpendMicroUsdg: string;
-    totalBuybacksReturnedMicroUsdg: string;
-    totalBridgedBackMicroUsdg: string;
-    totalRewardsPaidMicroUsdg: string;
-    totalRewardsDeferredMicroUsdg: string;
-    totalQuotedOperatingCostsMicroUsdg: string;
-    latestRetainedReserveMicroUsdg: string;
-    latestCycleReserveTargetMicroUsdg: string;
+    totalCycleFundingMicroUsdg: string | null;
+    totalCollectorSpendMicroUsdg: string | null;
+    totalBuybacksReturnedMicroUsdg: string | null;
+    totalBridgedBackMicroUsdg: string | null;
+    totalRewardsPaidMicroUsdg: string | null;
+    totalRewardsDeferredMicroUsdg: string | null;
+    totalQuotedOperatingCostsMicroUsdg: string | null;
+    latestRetainedReserveMicroUsdg: string | null;
+    latestCycleReserveTargetMicroUsdg: string | null;
+    cycleStartProjectPoolWei: string | null;
+    totalCycleFundingWei: string | null;
+    totalBridgedBackWei: string | null;
+    totalRewardsPaidWei: string | null;
+    totalRewardsDeferredWei: string | null;
+    totalCollectorSpendMicroUsd: string | null;
+    totalBuybacksReturnedMicroUsd: string | null;
+    totalQuotedOperatingCostsMicroUsd: string | null;
+    latestRetainedReserveWei: string | null;
+    latestCycleReserveTargetWei: string | null;
     completedCycles: number;
-    skippedCycles: number;
-    openedPacks: number;
+    skippedCycles: number | null;
+    openedPacks: number | null;
   };
   latestCycleTopAllocations: Array<{
     rank: number;
     address: string;
-    allocatedMicroUsdg: string;
+    allocatedMicroUsdg?: string;
+    allocatedWei?: string;
   }>;
   cards: DashboardCard[];
   activeCycle: ActiveCycle | null;
@@ -108,7 +120,8 @@ type Dashboard = {
     reason: string | null;
     updatedAt: string | null;
     paidMicroUsdg: string | null;
-    payoutRecipientCount: number;
+    paidWei: string | null;
+    payoutRecipientCount: number | null;
     roundAccounting: DashboardRoundAccounting | null;
     transactions: Array<{ chain: "evm" | "solana"; purpose: string; id: string }>;
   } | null;
@@ -576,12 +589,12 @@ export default function OperatorControlPanel() {
             label="Pool beim letzten Zyklusstart"
             value={dashboard ? formatCycleStartProjectPool(dashboard) : dashboardPlaceholder}
           />
-          <Metric label="Packkäufe" value={dashboard ? (dashboard.schemaVersion === 7 ? nativeOperatorAmount((dashboard.metrics as unknown as Record<string, unknown>).totalCollectorSpendMicroUsd, true) : historicalMicroUsdg(dashboard, dashboard.metrics.totalCollectorSpendMicroUsdg)) : dashboardPlaceholder} />
-          <Metric label="Bestätigte Buybacks" value={dashboard ? (dashboard.schemaVersion === 7 ? nativeOperatorAmount((dashboard.metrics as unknown as Record<string, unknown>).totalBuybacksReturnedMicroUsd, true) : historicalMicroUsdg(dashboard, dashboard.metrics.totalBuybacksReturnedMicroUsdg)) : dashboardPlaceholder} />
-          <Metric label="Zurück transferiert" value={dashboard ? (dashboard.schemaVersion === 7 ? nativeOperatorAmount((dashboard.metrics as unknown as Record<string, unknown>).totalBridgedBackWei, false) : historicalMicroUsdg(dashboard, dashboard.metrics.totalBridgedBackMicroUsdg)) : dashboardPlaceholder} />
+          <Metric label="Packkäufe" value={dashboard ? dashboardNativeMetric(dashboard, "totalCollectorSpendMicroUsd", "totalCollectorSpendMicroUsdg", true) : dashboardPlaceholder} />
+          <Metric label="Bestätigte Buybacks" value={dashboard ? dashboardNativeMetric(dashboard, "totalBuybacksReturnedMicroUsd", "totalBuybacksReturnedMicroUsdg", true) : dashboardPlaceholder} />
+          <Metric label="Zurück transferiert" value={dashboard ? dashboardNativeMetric(dashboard, "totalBridgedBackWei", "totalBridgedBackMicroUsdg") : dashboardPlaceholder} />
           <Metric label="Letzte tatsächliche Ausschüttung" value={dashboard ? latestActuallyPaid(dashboard) : dashboardPlaceholder} />
           <Metric label="Nächste Gebührenreserve (50 %)" value={dashboard ? latestReserveTarget(dashboard) : dashboardPlaceholder} />
-          <Metric label="Angebotene Betriebskosten" value={dashboard ? (dashboard.schemaVersion === 7 ? nativeOperatorAmount((dashboard.metrics as unknown as Record<string, unknown>).totalQuotedOperatingCostsMicroUsd, true) : historicalMicroUsdg(dashboard, dashboard.metrics.totalQuotedOperatingCostsMicroUsdg)) : dashboardPlaceholder} />
+          <Metric label="Angebotene Betriebskosten" value={dashboard ? dashboardNativeMetric(dashboard, "totalQuotedOperatingCostsMicroUsd", "totalQuotedOperatingCostsMicroUsdg", true) : dashboardPlaceholder} />
           <Metric label="Abgeschlossene Zyklen" value={dashboard ? historicalCount(dashboard, dashboard.metrics.completedCycles) : dashboardPlaceholder} />
           <Metric label="Geöffnete Packs" value={dashboard ? historicalCount(dashboard, dashboard.metrics.openedPacks) : dashboardPlaceholder} />
         </div>
@@ -879,7 +892,7 @@ export default function OperatorControlPanel() {
                 <li key={entry.address}>
                   <span>#{entry.rank}</span>
                   <code>{shortAddress(entry.address)}</code>
-                  <strong>{formatMicroUsdg(entry.allocatedMicroUsdg)}</strong>
+                  <strong>{isNativeDashboard(dashboard) ? nativeOperatorAmount(entry.allocatedWei) : formatMicroUsdg(entry.allocatedMicroUsdg ?? null)}</strong>
                 </li>
               ))}
             </ol>
@@ -1164,12 +1177,12 @@ function formatOptionalMicroUsdg(value: string | undefined) {
   return value === undefined ? "Noch nicht bestätigt" : formatMicroUsdg(value);
 }
 
-function historicalMicroUsdg(dashboard: Dashboard | null, value: string | undefined) {
+function historicalMicroUsdg(dashboard: Dashboard | null, value: string | null | undefined) {
   if (!dashboard) return "Wird geladen…";
   return dashboard.historyComplete ? formatOptionalMicroUsdg(value) : "Historie unvollständig";
 }
 
-function historicalCount(dashboard: Dashboard | null, value: number | undefined) {
+function historicalCount(dashboard: Dashboard | null, value: number | null | undefined) {
   if (!dashboard) return "Wird geladen…";
   return dashboard.historyComplete && value !== undefined ? formatNumber(value) : "Historie unvollständig";
 }
@@ -1178,7 +1191,7 @@ function latestActuallyPaid(dashboard: Dashboard | null) {
   if (!dashboard) return "Wird geladen…";
   if (!dashboard.latestCycle) return "Noch keine abgeschlossene Runde";
   const accounting = dashboard.latestCycle.roundAccounting;
-  if (dashboard.schemaVersion === 7) return nativeOperatorAmount((accounting as unknown as Record<string, unknown> | null)?.paidHolderRewardsWei);
+  if (isNativeDashboard(dashboard)) return nativeOperatorAmount((accounting as unknown as Record<string, unknown> | null)?.paidHolderRewardsWei);
   if (accounting) {
     return pendingMicroUsdg(
       accounting.paidHolderRewardsMicroUsdg,
@@ -1192,7 +1205,7 @@ function latestReserveTarget(dashboard: Dashboard | null) {
   if (!dashboard) return "Wird geladen…";
   if (!dashboard.latestCycle) return "Noch keine abgeschlossene Runde";
   const accounting = dashboard.latestCycle.roundAccounting;
-  if (dashboard.schemaVersion === 7) return nativeOperatorAmount((accounting as unknown as Record<string, unknown> | null)?.feeReserveTargetWei);
+  if (isNativeDashboard(dashboard)) return nativeOperatorAmount(dashboard.metrics.latestCycleReserveTargetWei);
   return accounting
     ? pendingMicroUsdg(
       accounting.feeReserveTargetMicroUsdg,
@@ -1305,7 +1318,7 @@ function downloadCommunityCard(dashboard: Dashboard) {
   context.fillStyle = "#f5d94c";
   context.font = "700 28px monospace";
   context.fillText(
-    dashboard.historyComplete ? "GESAMTHISTORIE VOLLSTÄNDIG" : "GESAMTHISTORIE VORLÄUFIG",
+    operatorHistoryLabel(dashboard.historyComplete),
     72,
     1010,
   );
@@ -1334,13 +1347,48 @@ function decodeDashboard(value: unknown): Dashboard {
     decodeDashboard(skeleton);
     return structuredClone(raw) as unknown as Dashboard;
   }
+  const nativeLatest = raw.schemaVersion === 8
+    && (raw.latestCycle as Record<string, unknown> | null)?.roundAccounting
+    && ((raw.latestCycle as Record<string, unknown>).roundAccounting as Record<string, unknown>).schema
+      === "hookemon.native-round-accounting.v1";
+  if (nativeLatest) {
+    const latest = raw.latestCycle as Record<string, unknown>;
+    requireNativeRound(latest.roundAccounting);
+    const skeleton = nativeValidationSkeleton(raw) as Record<string, unknown>;
+    skeleton.schemaVersion = 8;
+    (skeleton.latestCycle as Record<string, unknown>).roundAccounting = null;
+    const decoded = decodeDashboard(skeleton);
+    const nativeMetrics = dashboardRecord(raw.metrics);
+    return {
+      ...decoded,
+      schemaVersion: 8,
+      metrics: { ...decoded.metrics, ...nativeMetrics } as Dashboard["metrics"],
+      latestCycle: decoded.latestCycle
+        ? {
+          ...decoded.latestCycle,
+          paidMicroUsdg: null,
+          paidWei: dashboardOptionalMoney(latest.paidWei),
+          roundAccounting: latest.roundAccounting as DashboardRoundAccounting,
+        }
+        : null,
+      latestCycleTopAllocations: dashboardArray(raw.latestCycleTopAllocations, 200).map((entry) => {
+        const allocation = dashboardRecord(entry);
+        return {
+          rank: dashboardInteger(allocation.rank, 1, 200),
+          address: dashboardText(allocation.address),
+          allocatedWei: dashboardMoney(allocation.allocatedWei),
+        };
+      }),
+    };
+  }
   if (
     raw.schemaVersion !== 1 &&
     raw.schemaVersion !== 2 &&
     raw.schemaVersion !== 3 &&
     raw.schemaVersion !== 4 &&
     raw.schemaVersion !== 5 &&
-    raw.schemaVersion !== 6
+    raw.schemaVersion !== 6 &&
+    raw.schemaVersion !== 8
   ) {
     throw new Error(DASHBOARD_RESPONSE_UNSUPPORTED);
   }
@@ -1356,7 +1404,10 @@ function decodeDashboard(value: unknown): Dashboard {
       ? metrics.cycleStartProjectPoolMicroUsdg ?? metrics.currentProjectPoolMicroUsdg
       : metrics.cycleStartProjectPoolMicroUsdg;
   const decodedMetrics = Object.fromEntries(
-    DASHBOARD_MONEY_FIELDS.map((field) => [field, dashboardMoney(metrics[field])]),
+    DASHBOARD_MONEY_FIELDS.map((field) => [
+      field,
+      raw.schemaVersion === 8 ? dashboardOptionalMoney(metrics[field]) : dashboardMoney(metrics[field]),
+    ]),
   ) as Pick<Dashboard["metrics"], (typeof DASHBOARD_MONEY_FIELDS)[number]>;
   const allocationSource = schemaVersion === 1
     ? raw.top200 ?? raw.latestCycleTopAllocations
@@ -1377,7 +1428,7 @@ function decodeDashboard(value: unknown): Dashboard {
   const pool = decodeCycleStartProjectPool(poolValue, observedAt);
 
   return {
-    schemaVersion: 4,
+    schemaVersion: raw.schemaVersion === 8 ? 8 : 4,
     historyComplete,
     cardHistoryComplete,
     generatedAt: dashboardTimestamp(raw.generatedAt),
@@ -1393,8 +1444,8 @@ function decodeDashboard(value: unknown): Dashboard {
       cycleStartProjectPoolMicroUsdg: pool.cycleStartProjectPoolMicroUsdg,
       ...decodedMetrics,
       completedCycles: dashboardInteger(metrics.completedCycles, 0),
-      skippedCycles: dashboardInteger(metrics.skippedCycles, 0),
-      openedPacks: dashboardInteger(metrics.openedPacks, 0),
+      skippedCycles: raw.schemaVersion === 8 && metrics.skippedCycles === null ? null : dashboardInteger(metrics.skippedCycles, 0),
+      openedPacks: raw.schemaVersion === 8 && metrics.openedPacks === null ? null : dashboardInteger(metrics.openedPacks, 0),
     },
     latestCycleTopAllocations: dashboardArray(allocationSource, 200).map((entry) => {
       const allocation = dashboardRecord(entry);
@@ -1404,6 +1455,7 @@ function decodeDashboard(value: unknown): Dashboard {
         rank: dashboardInteger(allocation.rank, 1, 200),
         address,
         allocatedMicroUsdg: dashboardMoney(allocation.allocatedMicroUsdg),
+        allocatedWei: null,
       };
     }),
     cards: dashboardArray(raw.cards, 60).map((card) =>
@@ -1442,14 +1494,14 @@ function decodeActiveCycle(value: unknown): ActiveCycle {
     maxUnitPriceMicroUsdg: dashboardOptionalMoney(raw.maxUnitPriceMicroUsdg),
     maxCycleBudgetMicroUsdg: dashboardOptionalMoney(raw.maxCycleBudgetMicroUsdg),
     max24HourBudgetMicroUsdg: dashboardOptionalMoney(raw.max24HourBudgetMicroUsdg),
-    revealedCards: dashboardInteger(raw.revealedCards, 0, 10_000),
+    revealedCards: raw.revealedCards === null ? null : dashboardInteger(raw.revealedCards, 0, 10_000),
     rewardRecipientLimit: raw.rewardRecipientLimit === undefined
       ? undefined
       : raw.rewardRecipientLimit === null ? null : dashboardInteger(raw.rewardRecipientLimit, 50, 1_000),
   };
 }
 
-function decodeDashboardCard(value: unknown, schemaVersion: 1 | 2 | 3 | 4): DashboardCard {
+function decodeDashboardCard(value: unknown, schemaVersion: 1 | 2 | 3 | 4 | 8): DashboardCard {
   const raw = dashboardRecord(value);
   if (schemaVersion === 4) dashboardExactKeys(raw, DASHBOARD_CARD_KEYS);
   const card: DashboardCard = {
@@ -1476,7 +1528,7 @@ function decodeDashboardCard(value: unknown, schemaVersion: 1 | 2 | 3 | 4): Dash
   return card;
 }
 
-function decodeLatestCycle(value: unknown, schemaVersion: 1 | 2 | 3 | 4): Dashboard["latestCycle"] {
+function decodeLatestCycle(value: unknown, schemaVersion: 1 | 2 | 3 | 4 | 8): Dashboard["latestCycle"] {
   if (value === null) return null;
   const raw = dashboardRecord(value);
   return {
@@ -1485,8 +1537,11 @@ function decodeLatestCycle(value: unknown, schemaVersion: 1 | 2 | 3 | 4): Dashbo
     reason: dashboardNullableText(raw.reason),
     updatedAt: dashboardNullableTimestamp(raw.updatedAt),
     paidMicroUsdg: schemaVersion >= 3 ? dashboardOptionalMoney(raw.paidMicroUsdg) : null,
+    paidWei: null,
     payoutRecipientCount: schemaVersion >= 3
-      ? dashboardInteger(raw.payoutRecipientCount, 0)
+      ? (schemaVersion === 8 && raw.payoutRecipientCount === null
+        ? null
+        : dashboardInteger(raw.payoutRecipientCount, 0))
       : 0,
     roundAccounting: schemaVersion === 3 || schemaVersion === 4
       ? decodeRoundAccounting(raw.roundAccounting, schemaVersion, raw.paidMicroUsdg)
@@ -1499,7 +1554,7 @@ function decodeLatestCycle(value: unknown, schemaVersion: 1 | 2 | 3 | 4): Dashbo
 
 function decodeRoundAccounting(
   value: unknown,
-  schemaVersion: 3 | 4,
+  schemaVersion: 3 | 4 | 8,
   paidMicroUsdg: unknown,
 ): DashboardRoundAccounting | null {
   if (value === null) return null;
@@ -1727,5 +1782,21 @@ function nullableUsd(value: string | null) {
 
 function nativeOperatorAmount(value: unknown, usd = false) {
   if (typeof value !== "string") return "Noch nicht bestätigt";
-  return usd ? formatGermanUsd(value) : formatGermanEth(value);
+  return usd ? formatGermanUsd(value) : formatNativeAmount(value, 18, "ETH");
+}
+
+function isNativeDashboard(dashboard: Dashboard) {
+  return dashboard.schemaVersion === 7
+    || dashboard.latestCycle?.roundAccounting?.schema === "hookemon.native-round-accounting.v1";
+}
+
+function dashboardNativeMetric(
+  dashboard: Dashboard,
+  nativeKey: keyof Dashboard["metrics"],
+  historicalKey: keyof Dashboard["metrics"],
+  usd = false,
+) {
+  return isNativeDashboard(dashboard)
+    ? nativeOperatorAmount(dashboard.metrics[nativeKey], usd)
+    : historicalMicroUsdg(dashboard, dashboard.metrics[historicalKey]);
 }

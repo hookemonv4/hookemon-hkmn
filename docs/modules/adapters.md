@@ -244,6 +244,13 @@ infrastructure.
    their chain-journal stage from canonical Relay settlement evidence; pending provider integrations
    stop after `PREPARED`. Dry-run also refuses to bypass an unresolved live attempt with a probe.
 
+## Lifetime dashboard projection
+
+The adapter composition wires the dashboard's lifetime projection, bounded recent-card history,
+and durable terminal payout allocations. Recent cards are intentionally limited to the newest 50
+cycles and expose a completeness flag; lifetime totals do not use that cap. Monetary fields that
+the accounting projection cannot source without relabeling another chain's asset remain null.
+
 ## Operational commands
 
 ```sh

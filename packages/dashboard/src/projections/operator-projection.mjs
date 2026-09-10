@@ -1,5 +1,4 @@
 import { assertPackPlan } from '../../../runner/src/config/pack-plan.mjs';
-import { nativeUnknownFields } from '../contracts/native-accounting.mjs';
 // Maps the runner-owned operator-control status into the dashboard's compatibility read models.
 // The dashboard receives a snapshot from `operatorControl.status()` and does not inspect a state
 // file or a cycle repository itself. That keeps lifecycle facts on the one authority boundary.
@@ -7,6 +6,7 @@ import { createDefaultOperatorConfiguration, DEFAULT_INTERVAL_MINUTES } from '..
 import { OPERATOR_HARD_CAPS } from '../../../runner/src/operator/state-file.mjs';
 
 import { REWARD_RECIPIENT_LIMITS } from '../../../runner/src/config/reward-recipient-selection.mjs';
+import { nativeUnknownFields } from '../contracts/native-accounting.mjs';
 export { REWARD_RECIPIENT_LIMITS };
 
 export const HARD_CAPS = Object.freeze({
@@ -24,7 +24,7 @@ function isPaused(configuration) {
   return Boolean(configuration?.paused || configuration?.executionPaused || configuration?.killSwitch);
 }
 
-function mapOperatorState(configuration, revision) {
+function mapOperatorState(configuration, revision, lastTick = null, now = Date.now) {
   const effective = effectiveConfiguration(configuration);
   return {
     version: revision,
@@ -45,9 +45,16 @@ function mapOperatorState(configuration, revision) {
     maxCycleBudgetMicroUsd: effective.maxCycleBudgetMicroUsd,
     max24HourBudgetMicroUsd: effective.max24HourBudgetMicroUsd,
     configurationComplete: configuration !== null && configuration !== undefined && configuration.allowedPackIds.length > 0,
-    executionConnected: false,
+    executionConnected: tickConnected(lastTick, now()),
     liveMode: effective.liveMode === true,
   };
+}
+
+function tickConnected(lastTick, nowMs) {
+  return Number.isSafeInteger(lastTick?.at)
+    && Number.isSafeInteger(lastTick?.intervalMs)
+    && Number.isSafeInteger(nowMs)
+    && nowMs - lastTick.at <= 2 * lastTick.intervalMs;
 }
 
 function activeCycle(authorityStatus) {
@@ -76,6 +83,22 @@ function payoutStatus(cycle) {
   };
 }
 
+function operatorCards(cards) {
+  if (!Array.isArray(cards)) return [];
+  return cards.map(card => ({
+    cycleId: card?.cycleId ?? '',
+    productId: card?.productId ?? '',
+    rarity: card?.rarity ?? '',
+    nftAddress: card?.nftAddress ?? null,
+    cardName: card?.cardName ?? null,
+    setName: card?.setName ?? null,
+    cardNumber: card?.cardNumber ?? null,
+    imageUrl: card?.imageUrl ?? null,
+    packPriceMicroUsdg: card?.packPriceMicroUsdg ?? null,
+    buybackMicroUsdg: card?.buybackMicroUsdg ?? null,
+  }));
+}
+
 function capProjection(authorityStatus) {
   const cap = authorityStatus?.cap ?? {};
   return {
@@ -93,58 +116,129 @@ function alertSources(authorityStatus) {
 }
 
 /** Build the private bootstrap compatibility response from one authority snapshot. */
-export function buildBootstrap({ authorityStatus, identity, catalog = null, readiness = { ready: false, reasons: ['catalog-not-loaded'] } }) {
+export function buildBootstrap({
+  authorityStatus,
+  identity,
+  catalog = null,
+  readiness = { ready: false, reasons: ['catalog-not-loaded'] },
+  now = Date.now,
+  lastTick = null,
+}) {
   const configuration = authorityStatus?.configuration ?? null;
   return {
     identity,
-    state: mapOperatorState(configuration, authorityStatus?.revision ?? null),
+    state: mapOperatorState(configuration, authorityStatus?.revision ?? null, lastTick, now),
     hardCaps: HARD_CAPS,
     catalog,
     readiness,
-    executionConnected: false,
+    executionConnected: tickConnected(lastTick, now()),
     rewardRecipientLimits: REWARD_RECIPIENT_LIMITS,
   };
 }
 
 /** Project the runner authority snapshot without inventing lifecycle, transaction, or payout facts. */
-export function buildDashboardReadModel({ authorityStatus, now = Date.now, lastTick = null }) {
+export function buildDashboardReadModel({
+  authorityStatus,
+  now = Date.now,
+  lastTick = null,
+  lifetimeTotals = null,
+  cardHistory = null,
+  latestCycleAllocations = null,
+}) {
   const configuration = authorityStatus?.configuration ?? null;
   const current = activeCycle(authorityStatus);
   const cycles = Array.isArray(authorityStatus?.cycles) ? authorityStatus.cycles : [];
   const completedCycles = cycles.filter(cycle => cycle?.terminalState === 'COMPLETED').length;
 
+  const terminalCycles = cycles.filter(cycle => typeof cycle?.terminalState === 'string');
+  const historyComplete = terminalCycles.every(
+    cycle => Number.isSafeInteger(cycle?.terminalAtMs) && cycle.terminalAtMs >= 0,
+  );
+  const latest = lifetimeTotals?.latestCycle ?? null;
+  const native = latest?.accounting?.schema === 'hookemon.native-round-accounting.v1'
+    || lifetimeTotals?.units === 'wei';
+  const activeLifetime = lifetimeTotals?.perCycle?.find(cycle => cycle.cycleId === current?.cycleId) ?? null;
+  const historicalMetrics = lifetimeTotals ? {
+    cycleStartProjectPoolMicroUsdg: null,
+    totalCycleFundingMicroUsdg: lifetimeTotals.totals.totalCycleFundingMicroUsdg,
+    totalCollectorSpendMicroUsdg: lifetimeTotals.totals.totalCollectorSpendMicroUsdg,
+    totalBuybacksReturnedMicroUsdg: lifetimeTotals.totals.totalBuybacksReturnedMicroUsdg,
+    totalBridgedBackMicroUsdg: lifetimeTotals.totals.totalBridgedBackMicroUsdg,
+    totalRewardsPaidMicroUsdg: lifetimeTotals.totals.totalRewardsPaidMicroUsdg,
+    totalRewardsDeferredMicroUsdg: lifetimeTotals.totals.totalRewardsDeferredMicroUsdg,
+    totalQuotedOperatingCostsMicroUsdg: lifetimeTotals.totals.totalQuotedOperatingCostsMicroUsdg,
+    latestRetainedReserveMicroUsdg: lifetimeTotals.totals.latestRetainedReserveMicroUsdg,
+    latestCycleReserveTargetMicroUsdg: lifetimeTotals.totals.latestCycleReserveTargetMicroUsdg,
+    completedCycles,
+    skippedCycles: lifetimeTotals.completeness.skippedCycles ? lifetimeTotals.counts.skippedCycles : null,
+    openedPacks: lifetimeTotals.completeness.openedPacks ? lifetimeTotals.counts.openedPacks : null,
+  } : {
+    cycleStartProjectPoolMicroUsdg: null,
+    totalCycleFundingMicroUsdg: null,
+    totalCollectorSpendMicroUsdg: null,
+    totalBuybacksReturnedMicroUsdg: null,
+    totalBridgedBackMicroUsdg: null,
+    totalRewardsPaidMicroUsdg: null,
+    totalRewardsDeferredMicroUsdg: null,
+    totalQuotedOperatingCostsMicroUsdg: null,
+    latestRetainedReserveMicroUsdg: null,
+    latestCycleReserveTargetMicroUsdg: null,
+    completedCycles,
+    skippedCycles: null,
+    openedPacks: null,
+  };
+  const metrics = native
+    ? {
+      cycleStartProjectPoolWei: null,
+      totalCycleFundingWei: lifetimeTotals?.completeness?.totalCycleFundingWei ? lifetimeTotals.totals.totalCycleFundingWei : null,
+      totalCollectorSpendMicroUsd: null,
+      totalBuybacksReturnedMicroUsd: null,
+      totalBridgedBackWei: lifetimeTotals?.completeness?.totalBridgedBackWei ? lifetimeTotals.totals.totalBridgedBackWei : null,
+      totalRewardsPaidWei: lifetimeTotals?.completeness?.totalRewardsPaidWei ? lifetimeTotals.totals.totalRewardsPaidWei : null,
+      totalRewardsDeferredWei: lifetimeTotals?.completeness?.totalRewardsDeferredWei ? lifetimeTotals.totals.totalRewardsDeferredWei : null,
+      totalQuotedOperatingCostsMicroUsd: null,
+      latestRetainedReserveWei: null,
+      latestCycleReserveTargetWei: null,
+      completedCycles: historicalMetrics.completedCycles,
+      skippedCycles: historicalMetrics.skippedCycles,
+      openedPacks: historicalMetrics.openedPacks,
+    }
+    : historicalMetrics;
+  const schemaVersion = lifetimeTotals || cardHistory || latestCycleAllocations ? 8 : 7;
+  const allocations = Array.isArray(latestCycleAllocations) ? latestCycleAllocations : [];
+  const projectedCap = capProjection(authorityStatus);
   return {
-    schemaVersion: 7,
-    historyComplete: true,
-    cardHistoryComplete: true,
+    schemaVersion,
+    historyComplete,
+    cardHistoryComplete: cardHistory?.complete === true,
+    ...(schemaVersion === 8 ? {
+      completeness: {
+        cyclesScanned: lifetimeTotals?.cyclesScanned ?? 0,
+        ...Object.fromEntries(Object.entries(lifetimeTotals?.completeness ?? {}).map(([key, value]) => [key, value === true])),
+      },
+    } : {}),
     generatedAt: new Date(now()).toISOString(),
     nextCycleAt: nextCycleAt(configuration, lastTick),
     cycleIntervalMinutes: configuration ? configuration.intervalMinutes : DEFAULT_INTERVAL_MINUTES,
-    execution: { connected: false, lastHeartbeatAt: null },
+    execution: {
+      connected: tickConnected(lastTick, now()),
+      lastHeartbeatAt: Number.isSafeInteger(lastTick?.at) ? new Date(lastTick.at).toISOString() : null,
+    },
     cycleStartProjectPoolObservedAt: null,
-    latestCompletedAllocationCycleId: null,
-    metrics: nativeUnknownFields({
-      cycleStartProjectPoolMicroUsdg: null,
-      totalCycleFundingMicroUsdg: '0',
-      totalCollectorSpendMicroUsdg: '0',
-      totalBuybacksReturnedMicroUsdg: '0',
-      totalBridgedBackMicroUsdg: '0',
-      totalRewardsPaidMicroUsdg: '0',
-      totalRewardsDeferredMicroUsdg: '0',
-      totalQuotedOperatingCostsMicroUsdg: '0',
-      latestRetainedReserveMicroUsdg: '0',
-      latestCycleReserveTargetMicroUsdg: '0',
-      completedCycles,
-      skippedCycles: 0,
-      openedPacks: 0,
-    }),
-    latestCycleTopAllocations: [],
-    cards: [],
+    latestCompletedAllocationCycleId: allocations.length > 0 ? latest?.cycleId ?? null : null,
+    metrics: schemaVersion === 8 ? metrics : nativeUnknownFields(metrics),
+    latestCycleTopAllocations: allocations.slice().sort((left, right) =>
+      BigInt(right.allocatedWei ?? right.allocatedMicroUsdg)
+      > BigInt(left.allocatedWei ?? left.allocatedMicroUsdg) ? 1 : -1).slice(0, 10),
+    cards: operatorCards(cardHistory?.cards),
     activeCycle: current
       ? {
         cycleId: current.cycleId,
         status: visibleStage(current),
-        updatedAt: null,
+        updatedAt: current?.stages?.map(stage => stage?.updatedAtMs).filter(Number.isSafeInteger)
+          .sort((left, right) => right - left)[0] === undefined
+          ? null
+          : new Date(Math.max(...current.stages.map(stage => stage.updatedAtMs).filter(Number.isSafeInteger))).toISOString(),
         configurationRevision: current.rewardSelection ? String(current.rewardSelection.configurationRevision) : null,
         allowedPackIds: configuration ? configuration.allowedPackIds : [],
         requestedOrders: configuration?.requestedOrders ?? 0,
@@ -152,13 +246,31 @@ export function buildDashboardReadModel({ authorityStatus, now = Date.now, lastT
         maxUnitPriceMicroUsd: configuration ? configuration.maxUnitPriceMicroUsd : null,
         maxCycleBudgetMicroUsd: configuration ? configuration.maxCycleBudgetMicroUsd : null,
         max24HourBudgetMicroUsd: configuration ? configuration.max24HourBudgetMicroUsd : null,
-        revealedCards: 0,
+        revealedCards: activeLifetime?.openedPacks ?? null,
         rewardRecipientLimit: current.rewardSelection?.rewardRecipientLimit ?? null,
       }
       : null,
-    latestCycle: null,
+    latestCycle: latest ? {
+      cycleId: latest.cycleId,
+      status: latest.terminalState,
+      reason: null,
+      updatedAt: Number.isSafeInteger(latest.terminalAtMs) ? new Date(latest.terminalAtMs).toISOString() : null,
+      ...(native ? { paidWei: latest.paidWei } : { paidMicroUsdg: latest.paidMicroUsdg }),
+      payoutRecipientCount: latest.accounting?.paidHolderRewardsRecipientCount ?? null,
+      rewardRecipientLimit: null,
+      selectedCount: null,
+      paidCount: latest.accounting?.paidHolderRewardsRecipientCount ?? null,
+      deferredCount: latest.accounting?.payoutLiabilityMicroUsdg === null ? null : null,
+      roundAccounting: latest.accounting,
+      transactions: [],
+    } : null,
     cycles,
-    cap: capProjection(authorityStatus),
+    cap: schemaVersion === 8
+      ? {
+        offChain24Hour: projectedCap.offChain24Hour,
+        onChainRemainingCapacity: projectedCap.onChainRemainingCapacity,
+      }
+      : projectedCap,
     custody: authorityStatus?.custody ?? { buckets: [] },
     alertSources: alertSources(authorityStatus),
     alerts: Array.isArray(authorityStatus?.alerts) ? authorityStatus.alerts : [],

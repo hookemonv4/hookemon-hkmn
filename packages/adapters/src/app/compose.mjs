@@ -54,6 +54,7 @@ import { createCycleAttributableFinalizedAvailableReader } from './payout-availa
 import { createObservability } from './observability.mjs';
 import { createStageDriver } from './stage-driver.mjs';
 import { projectCycleAccounting, projectPolicyCustody } from './accounting-projection.mjs';
+import { projectLifetimeTotals } from './lifetime-projection.mjs';
 import { MoneyConfigurationRejected, validateMoneyConfiguration } from './environment.mjs';
 import { createSupplementaryBuybackHandler } from './stages/supplementary-buyback.mjs';
 import {
@@ -66,6 +67,7 @@ export { validateMoneyConfiguration } from './environment.mjs';
 
 const decimalPattern = /^(0|[1-9][0-9]*)$/;
 const solanaGenesisHashPattern = /^[1-9A-HJ-NP-Za-km-z]{32,88}$/;
+const RECENT_WINNERS_CYCLE_SCAN_LIMIT = 50;
 
 function assertDecimal(value, label) {
   if (typeof value !== 'string' || !decimalPattern.test(value)) throw new Error(`${label} must be a canonical unsigned decimal string`);
@@ -241,7 +243,7 @@ function buildDashboardIdentities(config) {
   });
 }
 
-async function composeDashboard({ dashboardConfig, chainId, operationsAddress, cycleRepository, operatorControl, readLastTick, adapters, identities, getSchedulerView, listRecentWinners }) {
+async function composeDashboard({ dashboardConfig, chainId, operationsAddress, cycleRepository, operatorControl, readLastTick, adapters, identities, getSchedulerView, listRecentWinners, now }) {
   const auditVerification = await verifyAuditChain(dashboardConfig.auditLogPath);
   if (!auditVerification.valid) {
     throw new Error(`compose dashboard audit chain is invalid at sequence ${auditVerification.brokenAtSequence}: ${auditVerification.reason}`);
@@ -281,9 +283,44 @@ async function composeDashboard({ dashboardConfig, chainId, operationsAddress, c
         operationsAddress,
       } });
     },
+    async readLifetimeTotals() {
+      const cycleIds = await cycleRepository.listKnownCycleIds();
+      return projectLifetimeTotals({
+        cycleRepository,
+        cycleIds,
+        readAccounting: cycleId => ctx.readAccounting(cycleId),
+      });
+    },
+    async cardHistory({ limit } = {}) {
+      const cycleIds = await cycleRepository.listKnownCycleIds();
+      return {
+        cards: await listRecentWinners({ limit }),
+        complete: cycleIds.length <= RECENT_WINNERS_CYCLE_SCAN_LIMIT,
+      };
+    },
+    async readCycleAllocations(cycleId) {
+      if (typeof cycleRepository.readPagedPayoutState !== 'function') return null;
+      const state = await cycleRepository.readPagedPayoutState(cycleId, 'payout');
+      if (!state || !Array.isArray(state.recipients)) return null;
+      return state.recipients
+        .map((entry, index) => {
+          const amount = entry?.amount?.amountAtomic ?? entry?.amount?.units ?? entry?.amountAtomic;
+          const address = entry?.recipient ?? entry?.address;
+          if (typeof address !== 'string' || typeof amount !== 'string' || !/^(0|[1-9][0-9]*)$/.test(amount)) return null;
+          const native = entry?.amount?.assetId === 'native' && String(entry?.amount?.chainId) === '4663'
+            && entry?.amount?.decimals === 18;
+          return {
+            rank: index + 1,
+            address: address.toLowerCase(),
+            ...(native ? { allocatedWei: amount } : { allocatedMicroUsdg: amount }),
+          };
+        })
+        .filter(Boolean);
+    },
     // Public-Integration-interface.md binding 2: the frozen SchedulerView, read synchronously off
     // the real running scheduler — never wrapped in a Promise, never a second timer's guess.
     getSchedulerView,
+    now,
     // Public-Integration-interface.md binding 3: real recently-revealed cards, deduplicated and
     // attributed to this project's own known operations, never a second source of financial truth.
     listRecentWinners,
@@ -1877,7 +1914,6 @@ export async function compose(config) {
   // Bounded to the most recently known cycles: `listKnownCycleIds()` returns every cycle a store has
   // ever held (archived cycles first, then active), unbounded over a long production lifetime, and
   // this feed only ever needs to show the newest cards.
-  const RECENT_WINNERS_CYCLE_SCAN_LIMIT = 50;
   async function listRecentWinners({ limit } = {}) {
     const knownCycleIds = await cycleRepository.listKnownCycleIds();
     const scannedCycleIds = knownCycleIds.slice(-RECENT_WINNERS_CYCLE_SCAN_LIMIT);
@@ -1919,6 +1955,7 @@ export async function compose(config) {
       adapters,
       identities: buildDashboardIdentities(resolved),
       operationsAddress: resolved.accounts.evm,
+      now,
     })
     : null;
 

@@ -27,7 +27,7 @@ export type ActiveCycle = {
   maxUnitPriceMicroUsdg: string | null;
   maxCycleBudgetMicroUsdg: string | null;
   max24HourBudgetMicroUsdg: string | null;
-  revealedCards: number;
+  revealedCards: number | null;
   rewardRecipientLimit?: number | null;
 };
 
