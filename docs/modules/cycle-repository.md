@@ -23,7 +23,13 @@ dashboard, CLI, and runner callers receive a frozen read client rather than a se
   standing-authority decisions, wallet nonce reservations, paged payout state, and custody writes.
 - Provider writes are `prepareStageAttempt`, `markStageAttemptNotSent`,
   `markStageAttemptSentUnknown`, `recordStageAttemptResponse`, and
-  `reconcileStageAttempt`. `markStageAttemptNotSent` preserves the request digest without effect
+  `anchorOperationalStageDeadline`, and `reconcileStageAttempt`.
+  `anchorOperationalStageDeadline` appends the observational
+  `stage-attempt-deadline-anchored` event for a legacy `SENT_UNKNOWN` or `RESPONSE_RECORDED`
+  attempt whose sent, response, and prior anchor timestamps are all absent. Its
+  `deadlineAnchorMs` is the first durable observation time, is replay-validated against the
+  unchanged attempt and request digest, and repeated calls return the existing record without
+  another append. `markStageAttemptNotSent` preserves the request digest without effect
   evidence so the same request can return to `PREPARED` for a lease-fenced retry.
 - Chain writes are `prepareChainTransactionAttempt`,
   `recordSignedTransaction(cycleId, stage, requestDigest, signingMaterial)`,
@@ -136,8 +142,9 @@ dashboard, CLI, and runner callers receive a frozen read client rather than a se
 - Provider attempts progress through `PREPARED -> NOT_SENT -> PREPARED` for a pre-call failure,
   `PREPARED -> SENT_UNKNOWN -> RESPONSE_RECORDED -> RECONCILED` for post-send ambiguity, or
   `PREPARED -> RESPONSE_RECORDED -> RECONCILED` for a recorded response. `SENT_UNKNOWN` is
-  observation-only. A completed stage with a provider attempt must use its matching reconciliation
-  evidence.
+  observation-only. Historical attempts without timestamps gain a persisted `deadlineAnchorMs`
+  only on first deadline observation; the anchor event cannot alter the attempt or request digest.
+  A completed stage with a provider attempt must use its matching reconciliation evidence.
 - Chain attempts are keyed by `(cycleId, stage, requestDigest)`. They progress through
   `PREPARED`, `SIGNED`, `BROADCAST`, and `FINALIZED`; `SIGNED` stores raw bytes, one nonce or
   blockhash, and a hash. Later transitions cannot replace that material. Broadcast and finality

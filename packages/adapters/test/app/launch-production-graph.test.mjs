@@ -3869,8 +3869,8 @@ test('N=2 composed offline scenario: real compose(config) drives purchase throug
 
   assert.deepEqual(
     calls,
-    { getMachines: 4, generateYoloPacks: 1, getPackStatus: 8, submitTransaction: 3, openPack: 2, getNfts: 3, getBuybackAvailable: 5, buyback: 1, getBuybackCheck: 1 },
-    `the graph must reach exactly these real Collector provider calls for a complete two-pack cycle, no more, no fewer; ${diagnostics()}`,
+    { getMachines: 4, generateYoloPacks: 1, getPackStatus: 9, submitTransaction: 3, openPack: 2, getNfts: 3, getBuybackAvailable: 5, buyback: 1, getBuybackCheck: 1 },
+    `the graph must reach exactly these real Collector provider calls for a complete two-pack cycle, no more, no fewer (the pre-open reconciliation tick reads both packs' status instead of stopping at the first unresolved pack); ${diagnostics()}`,
   );
   assert.equal(signSpy.calls, 6, `exactly six real signer approvals (one EVM claim, two Solana purchase, one Solana buyback, one Solana return, one EVM direct payout), never a duplicate; ${diagnostics()}`);
 

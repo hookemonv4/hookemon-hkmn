@@ -4211,6 +4211,87 @@ test('timestamps a sent-unknown provider attempt for deadline reconciliation', a
   assert.equal((await repository.readOperationalStageAttempt(cycleId, 'buyback')).sentAtMs, 1_700_000_300_000);
 });
 
+test('anchors legacy timestamp-less provider attempts idempotently and across SQLite reopen', async t => {
+  const directory = await tempDirectory(t);
+  const repository = await CycleRepository.open(directory, () => 1_700_000_300_000);
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  const attempt = {
+    schema: 'hookemon.provider-mutation-attempt.v1',
+    cycleId,
+    stage: 'buyback',
+    state: 'PREPARED',
+    requestDigest: `sha256:${'d'.repeat(64)}`,
+    responseDigest: null,
+    reconciliationDigest: null,
+  };
+  await repository.prepareStageAttempt(cycleId, 'buyback', attempt);
+  await injectRawJournalEntry(directory, cycleId, 'stage-attempt-sent-unknown', {
+    stage: 'buyback',
+    attempt: { ...attempt, state: 'SENT_UNKNOWN' },
+  });
+  const reopenedLegacy = await CycleRepository.open(directory, () => 1_700_000_300_000);
+
+  const anchored = await reopenedLegacy.anchorOperationalStageDeadline(cycleId, 'buyback', { nowMs: 1_700_000_300_000 });
+  assert.equal(anchored.deadlineAnchorMs, 1_700_000_300_000);
+  const stored = (await DurableCycleStore.open(directory)).readCycle(cycleId);
+  assert.equal(stored.entries.filter(entry => entry.kind === 'stage-attempt-deadline-anchored').length, 1);
+  const repeated = await reopenedLegacy.anchorOperationalStageDeadline(cycleId, 'buyback', { nowMs: 1_700_000_400_000 });
+  assert.equal(repeated.deadlineAnchorMs, 1_700_000_300_000);
+  assert.equal((await DurableCycleStore.open(directory)).readCycle(cycleId).entries
+    .filter(entry => entry.kind === 'stage-attempt-deadline-anchored').length, 1);
+  const reopened = await CycleRepository.open(directory, () => 1_700_000_400_000);
+  assert.equal((await reopened.readOperationalStageAttempt(cycleId, 'buyback')).deadlineAnchorMs, 1_700_000_300_000);
+});
+
+test('rejects deadline anchors when a timestamp already exists or anchoredAtMs is invalid', async t => {
+  const timestampDirectory = await tempDirectory(t);
+  const timestampRepository = await CycleRepository.open(timestampDirectory, () => 1_700_000_300_000);
+  const { cycleId: timestampCycleId } = await timestampRepository.createCycle({ releaseAmount: '1', mode: 'production' });
+  const timestampAttempt = {
+    schema: 'hookemon.provider-mutation-attempt.v1',
+    cycleId: timestampCycleId,
+    stage: 'buyback',
+    state: 'PREPARED',
+    requestDigest: `sha256:${'e'.repeat(64)}`,
+    responseDigest: null,
+    reconciliationDigest: null,
+  };
+  await timestampRepository.prepareStageAttempt(timestampCycleId, 'buyback', timestampAttempt);
+  await timestampRepository.markStageAttemptSentUnknown(timestampCycleId, 'buyback');
+  await injectRawJournalEntry(timestampDirectory, timestampCycleId, 'stage-attempt-deadline-anchored', {
+    stage: 'buyback',
+    attempt: { ...timestampAttempt, state: 'SENT_UNKNOWN' },
+    requestDigest: timestampAttempt.requestDigest,
+    anchoredAtMs: 1_700_000_300_000,
+  });
+  const timestampReopened = await CycleRepository.open(timestampDirectory, () => 1_700_000_300_000);
+  await assert.rejects(
+    () => timestampReopened.readOperationalStageAttempt(timestampCycleId, 'buyback'),
+    /stored provider mutation deadline anchor is invalid/,
+  );
+
+  const invalidDirectory = await tempDirectory(t);
+  const invalidRepository = await CycleRepository.open(invalidDirectory, () => 1_700_000_300_000);
+  const { cycleId: invalidCycleId } = await invalidRepository.createCycle({ releaseAmount: '1', mode: 'production' });
+  const invalidAttempt = { ...timestampAttempt, cycleId: invalidCycleId, requestDigest: `sha256:${'f'.repeat(64)}` };
+  await invalidRepository.prepareStageAttempt(invalidCycleId, 'buyback', invalidAttempt);
+  await injectRawJournalEntry(invalidDirectory, invalidCycleId, 'stage-attempt-sent-unknown', {
+    stage: 'buyback',
+    attempt: { ...invalidAttempt, state: 'SENT_UNKNOWN' },
+  });
+  await injectRawJournalEntry(invalidDirectory, invalidCycleId, 'stage-attempt-deadline-anchored', {
+    stage: 'buyback',
+    attempt: { ...invalidAttempt, state: 'SENT_UNKNOWN' },
+    requestDigest: invalidAttempt.requestDigest,
+    anchoredAtMs: -1,
+  });
+  const invalidReopened = await CycleRepository.open(invalidDirectory, () => 1_700_000_300_000);
+  await assert.rejects(
+    () => invalidReopened.readOperationalStageAttempt(invalidCycleId, 'buyback'),
+    /stored provider mutation deadline anchor is invalid/,
+  );
+});
+
 function packBatch(count, overrides = {}) {
   return Array.from({ length: count }, (_, packIndex) => ({
     packIndex,
