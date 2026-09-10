@@ -6,8 +6,8 @@ import {
 } from '../../solana-rpc.mjs';
 import { requireCollectorOnlyMutationAuthority } from '../../../rehearsal/collector-only-authorization.mjs';
 import { assertTypedAmount } from '../../../../runner/src/cycle/money-schemas.mjs';
+import { existingHeldPackOutcome, heldPackIdForMemo } from './held-pack.mjs';
 import { AmbiguousCardMintError } from './errors.mjs';
-import { heldPackIdForMemo } from './held-pack.mjs';
 
 const DEFAULT_UNRESOLVED_CARD_DEADLINE_MINUTES = 30;
 const MINIMUM_UNRESOLVED_CARD_DEADLINE_MINUTES = 5;
@@ -54,6 +54,13 @@ async function holdPack(cycleRepository, config, context, evidence, { terminalSt
   if (typeof memo !== 'string' || memo.length === 0) {
     throw new Error('open cannot record a held card without its durable purchase memo');
   }
+  const existing = await existingHeldPackOutcome({
+    cycleRepository,
+    cycleId: context.cycleId,
+    memo,
+    packIndex: evidence.packIndex,
+  });
+  if (existing !== null) return existing;
   if (typeof cycleRepository?.recordHeldPosition !== 'function' || typeof cycleRepository.describeCycle !== 'function') {
     throw new Error('open requires held-position attribution capabilities');
   }
@@ -149,12 +156,38 @@ async function deriveCardAssetFromOpenTransaction({ adapters, playerAddress, sig
  * Reconciles one purchased pack against the provider's memo-bound status. Returns either an
  * opened-card evidence entry or a held-position evidence entry; never blocks another pack.
  */
-async function reconcilePack({ adapters, config, cycleRepository, context, pack, playerAddress, immediateHoldOnMissingSend, missingSendReason, missingSendTerminal }) {
+async function reconcilePack({
+  adapters,
+  config,
+  cycleRepository,
+  context,
+  pack,
+  playerAddress,
+  immediateHoldOnMissingSend,
+  missingSendReason,
+  missingSendTerminal,
+  pastDeadline: deadlinePassed,
+  deadlineTerminal,
+}) {
+  const holdFailureAtDeadline = ({ failure, packStatus, send, signature }) => {
+    if (!deadlinePassed) return null;
+    return holdPack(cycleRepository, config, context, {
+      stage: 'open',
+      packIndex: pack.packIndex,
+      memo: pack.memo,
+      reason: 'open reconciliation could not verify the card before the unresolved-card deadline',
+      failure,
+      ...(send ? { send: packStatus.send, signature } : {}),
+    }, deadlineTerminal);
+  };
+
   let packStatus;
   try {
     packStatus = await adapters.collectorCrypt.getPackStatus({ memo: pack.memo });
-  } catch {
-    return null;
+  } catch (error) {
+    return holdFailureAtDeadline({
+      failure: { kind: 'pack-status', message: error?.message ?? String(error) },
+    });
   }
   if (packStatus.memo !== pack.memo) {
     return holdPack(cycleRepository, config, context, { stage: 'open', packIndex: pack.packIndex, memo: pack.memo, reason: 'pack status memo did not match' });
@@ -178,10 +211,22 @@ async function reconcilePack({ adapters, config, cycleRepository, context, pack,
   let status;
   try {
     status = await readFinalizedSignatureStatus(adapters.solana.client, signature);
-  } catch {
-    return null;
+  } catch (error) {
+    return holdFailureAtDeadline({
+      failure: { kind: 'signature-status', message: error?.message ?? String(error) },
+      packStatus,
+      send,
+      signature,
+    });
   }
-  if (status === null) return null;
+  if (status === null) {
+    return holdFailureAtDeadline({
+      failure: { kind: 'signature-pending' },
+      packStatus,
+      send,
+      signature,
+    });
+  }
   if (status.err) {
     return holdPack(cycleRepository, config, context, { stage: 'open', packIndex: pack.packIndex, memo: pack.memo, mint: send.mint, signature, signatureStatus: status });
   }
@@ -192,7 +237,12 @@ async function reconcilePack({ adapters, config, cycleRepository, context, pack,
     if (error instanceof AmbiguousCardMintError) {
       return holdPack(cycleRepository, config, context, { stage: 'open', packIndex: pack.packIndex, memo: pack.memo, signature, candidateMints: error.candidateMints });
     }
-    return null;
+    return holdFailureAtDeadline({
+      failure: { kind: 'card-asset', message: error?.message ?? String(error) },
+      packStatus,
+      send,
+      signature,
+    });
   }
   if (send.mint !== asset.mint) {
     return holdPack(cycleRepository, config, context, { stage: 'open', packIndex: pack.packIndex, memo: pack.memo, mint: send.mint, signature, reportedAsset: send.mint, observedAsset: asset.mint });
@@ -249,9 +299,23 @@ export async function reconcileLiveOpen({ adapters, config, cycleRepository, con
   if (intentRecord === null) throw new Error('open reconciliation requires the purchase stage pre-call intent that must exist alongside any completed purchase');
   const playerAddress = intentRecord.intent.playerAddress;
 
-  const record = await cycleRepository.readOperationalStageAttempt(context.cycleId, 'open');
+  let record = await cycleRepository.readOperationalStageAttempt(context.cycleId, 'open');
   const sentUnknown = record?.attempt?.state === 'SENT_UNKNOWN';
-  const sentUnknownPastDeadline = sentUnknown && pastDeadline(record.sentAtMs, config, context);
+  const responseRecorded = record?.attempt?.state === 'RESPONSE_RECORDED';
+  const nowMs = context?.nowMs ?? Date.now();
+  if (!Number.isSafeInteger(nowMs) || nowMs < 0) throw new Error('open reconciliation clock is invalid');
+  const deadlineContext = context?.nowMs === undefined ? { ...context, nowMs } : context;
+  const sinceMs = () => responseRecorded
+    ? record.respondedAtMs ?? record.sentAtMs ?? record.deadlineAnchorMs ?? null
+    : record.sentAtMs ?? record.deadlineAnchorMs ?? null;
+  if ((sentUnknown || responseRecorded) && sinceMs() === null
+    && typeof cycleRepository.anchorOperationalStageDeadline === 'function') {
+    record = await cycleRepository.anchorOperationalStageDeadline(context.cycleId, 'open', { nowMs });
+  }
+  const sentUnknownPastDeadline = sentUnknown && pastDeadline(sinceMs(), config, deadlineContext);
+  const responseRecordedPastDeadline = responseRecorded
+    && pastDeadline(sinceMs(), config, deadlineContext);
+  const deadlinePassed = sentUnknownPastDeadline || responseRecordedPastDeadline;
   const confirmedMemos = new Set(
     plainObject(record?.responseEvidence) && Array.isArray(record.responseEvidence.packs)
       ? record.responseEvidence.packs.map(entry => entry.memo)
@@ -272,9 +336,12 @@ export async function reconcileLiveOpen({ adapters, config, cycleRepository, con
       missingSendTerminal: !confirmed && sentUnknownPastDeadline
         ? { terminalState: 'HELD_UNRESOLVED', reason: 'SENT_UNKNOWN_DEADLINE' }
         : undefined,
+      pastDeadline: deadlinePassed,
+      deadlineTerminal: sentUnknownPastDeadline
+        ? { terminalState: 'HELD_UNRESOLVED', reason: 'SENT_UNKNOWN_DEADLINE' }
+        : undefined,
     });
-    if (outcome === null) return null;
     outcomes.push(outcome);
   }
-  return { packs: outcomes };
+  return outcomes.some(outcome => outcome === null) ? null : { packs: outcomes };
 }

@@ -66,6 +66,7 @@ const POST_TERMINAL_RECORD_KINDS = new Set([
   'stage-attempt-not-sent',
   'stage-attempt-reprepared',
   'stage-attempt-response-recorded',
+  'stage-attempt-deadline-anchored',
   'stage-attempt-reconciled',
   'chain-attempt-broadcast',
   'chain-attempt-finalized',
@@ -187,6 +188,7 @@ export const CYCLE_REPOSITORY_INTERFACE = Object.freeze([
   'markStageAttemptSentUnknown',
   'markStageAttemptNotSent',
   'recordStageAttemptResponse',
+  'anchorOperationalStageDeadline',
   'reconcileStageAttempt',
   'prepareChainTransactionAttempt',
   'recordSignedTransaction',
@@ -3531,6 +3533,8 @@ export class CycleRepository {
           responseEvidence: null,
           reconciliationEvidence: null,
           sentAtMs: null,
+          respondedAtMs: null,
+          deadlineAnchorMs: null,
           failed: false,
         });
       } else if (entry.kind === 'stage-attempt-sent-unknown') {
@@ -3568,20 +3572,46 @@ export class CycleRepository {
           responseEvidence: null,
           reconciliationEvidence: null,
           sentAtMs: null,
+          respondedAtMs: null,
+          deadlineAnchorMs: null,
           failed: false,
         });
       } else if (entry.kind === 'stage-attempt-response-recorded') {
         const previous = operationalAttempts.get(entry.payload.stage);
         const attempt = assertProviderMutationAttempt(entry.payload.attempt, 'stored provider mutation attempt');
+        const respondedAtMs = Object.hasOwn(entry.payload, 'respondedAtMs') ? entry.payload.respondedAtMs : null;
         if (!previous || !['PREPARED', 'SENT_UNKNOWN'].includes(previous.attempt.state)
           || attempt.state !== 'RESPONSE_RECORDED' || attempt.cycleId !== cycleId
           || attempt.stage !== entry.payload.stage || attempt.requestDigest !== previous.attempt.requestDigest) {
           throw new Error('stored provider mutation response transition is invalid');
         }
+        if (respondedAtMs !== null && (!Number.isSafeInteger(respondedAtMs) || respondedAtMs < 0)) {
+          throw new Error('stored provider mutation response timestamp is invalid');
+        }
         operationalAttempts.set(attempt.stage, {
           ...previous,
           attempt,
+          respondedAtMs,
           responseEvidence: cloneEvidence(entry.payload.evidence, 'stored provider response evidence'),
+        });
+      } else if (entry.kind === 'stage-attempt-deadline-anchored') {
+        const previous = operationalAttempts.get(entry.payload.stage);
+        const attempt = assertProviderMutationAttempt(entry.payload.attempt, 'stored provider mutation attempt');
+        const { requestDigest, anchoredAtMs } = entry.payload;
+        if (!previous || !['SENT_UNKNOWN', 'RESPONSE_RECORDED'].includes(previous.attempt.state)
+          || attempt.state !== previous.attempt.state || attempt.cycleId !== cycleId
+          || attempt.stage !== entry.payload.stage
+          || canonicalJson(attempt) !== canonicalJson(previous.attempt)
+          || requestDigest !== previous.attempt.requestDigest
+          || previous.sentAtMs !== null || previous.respondedAtMs !== null
+          || previous.deadlineAnchorMs !== null
+          || !Number.isSafeInteger(anchoredAtMs) || anchoredAtMs < 0) {
+          throw new Error('stored provider mutation deadline anchor is invalid');
+        }
+        operationalAttempts.set(attempt.stage, {
+          ...previous,
+          attempt,
+          deadlineAnchorMs: anchoredAtMs,
         });
       } else if (entry.kind === 'stage-attempt-reconciled') {
         const previous = operationalAttempts.get(entry.payload.stage);
@@ -6067,7 +6097,15 @@ export class CycleRepository {
             }
           },
         });
-        return { attempt, responseEvidence: null, reconciliationEvidence: null, failed: false };
+        return {
+          attempt,
+          responseEvidence: null,
+          reconciliationEvidence: null,
+          sentAtMs: null,
+          respondedAtMs: null,
+          deadlineAnchorMs: null,
+          failed: false,
+        };
       }
       if (canonicalJson(current.attempt) !== canonicalJson(attempt)) {
         throw new Error(`cycle-repository prepareStageAttempt: stage "${stage}" already has an operational attempt`);
@@ -6082,10 +6120,18 @@ export class CycleRepository {
         }
       },
     });
-    return { attempt, responseEvidence: null, reconciliationEvidence: null, failed: false };
+    return {
+      attempt,
+      responseEvidence: null,
+      reconciliationEvidence: null,
+      sentAtMs: null,
+      respondedAtMs: null,
+      deadlineAnchorMs: null,
+      failed: false,
+    };
   }
 
-  /** @returns {Promise<{attempt: object, responseEvidence: unknown, reconciliationEvidence: unknown, failed: boolean}|null>} */
+  /** @returns {Promise<{attempt: object, responseEvidence: unknown, reconciliationEvidence: unknown, sentAtMs: number|null, respondedAtMs: number|null, deadlineAnchorMs: number|null, failed: boolean}|null>} */
   async readOperationalStageAttempt(cycleId, stage) {
     assertStageName(stage);
     const state = await this.#replay(cycleId);
@@ -7023,6 +7069,43 @@ export class CycleRepository {
     return { ...current, attempt, sentAtMs };
   }
 
+  async anchorOperationalStageDeadline(cycleId, stage, { nowMs } = {}) {
+    assertStageName(stage);
+    if (!Number.isSafeInteger(nowMs) || nowMs < 0) {
+      throw new Error('cycle-repository anchorOperationalStageDeadline nowMs is invalid');
+    }
+    const state = await this.#replay(cycleId);
+    const current = state.operationalAttempts.get(stage);
+    if (!current) {
+      throw new Error(`cycle-repository anchorOperationalStageDeadline: no attempt for "${stage}"`);
+    }
+    if (current.sentAtMs !== null || current.respondedAtMs !== null || current.deadlineAnchorMs !== null) {
+      return structuredClone(current);
+    }
+    if (!['SENT_UNKNOWN', 'RESPONSE_RECORDED'].includes(current.attempt.state)) {
+      throw new Error(`cycle-repository anchorOperationalStageDeadline: "${stage}" must be sent or response-recorded`);
+    }
+    await this.#append(cycleId, 'stage-attempt-deadline-anchored', {
+      stage,
+      attempt: current.attempt,
+      requestDigest: current.attempt.requestDigest,
+      anchoredAtMs: nowMs,
+    }, {
+      operation: 'anchorOperationalStageDeadline',
+      assertState: currentState => {
+        const latest = currentState.operationalAttempts.get(stage);
+        if (!latest
+          || canonicalJson(latest.attempt) !== canonicalJson(current.attempt)
+          || latest.sentAtMs !== null
+          || latest.respondedAtMs !== null
+          || latest.deadlineAnchorMs !== null) {
+          throw new Error(`cycle-repository anchorOperationalStageDeadline: "${stage}" changed while anchoring`);
+        }
+      },
+    });
+    return { ...current, deadlineAnchorMs: nowMs };
+  }
+
   /** Records a pre-call failure; the identical request may be prepared again without reconciliation. */
   async markStageAttemptNotSent(cycleId, stage) {
     assertStageName(stage);
@@ -7059,7 +7142,10 @@ export class CycleRepository {
     }
     const responseDigest = evidenceDigest('hookemon.provider-mutation-response.v1', cycleId, stage, responseEvidence);
     const attempt = transitionProviderMutationAttempt(current.attempt, 'RESPONSE_RECORDED', { responseDigest });
-    await this.#append(cycleId, 'stage-attempt-response-recorded', { stage, attempt, evidence: responseEvidence }, {
+    const respondedAtMs = currentRepositoryTime(this.#now);
+    await this.#append(cycleId, 'stage-attempt-response-recorded', {
+      stage, attempt, evidence: responseEvidence, respondedAtMs,
+    }, {
       assertState: currentState => {
         const latest = currentState.operationalAttempts.get(stage);
         if (!latest || canonicalJson(latest.attempt) !== canonicalJson(current.attempt)) {
@@ -7067,7 +7153,7 @@ export class CycleRepository {
         }
       },
     });
-    return { ...current, attempt, responseEvidence };
+    return { ...current, attempt, responseEvidence, respondedAtMs };
   }
 
   async reconcileStageAttempt(cycleId, stage, evidence) {

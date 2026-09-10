@@ -998,6 +998,10 @@ function cardReconciliationRepository(cycleRepository, context) {
     const record = leaseFencedReadMethod(cycleRepository, 'recordPackOrderReconciliation', context.assertLease);
     if (record) repository.recordPackOrderReconciliation = record;
   }
+  if (context.stage === 'open') {
+    const anchor = leaseFencedReadMethod(cycleRepository, 'anchorOperationalStageDeadline', context.assertLease);
+    if (anchor) repository.anchorOperationalStageDeadline = anchor;
+  }
   if (CUSTODY_LEDGER_RECONCILIATION_STAGES.has(context.stage)) {
     const recordCustodyLedger = leaseFencedReadMethod(cycleRepository, 'recordCustodyLedger', context.assertLease);
     if (recordCustodyLedger) repository.recordCustodyLedger = recordCustodyLedger;
