@@ -21,6 +21,16 @@ import {
 } from "./operator-locale";
 import { formatNativeAmount } from "../../lib/native-accounting.mjs";
 import type { ActiveCycle, DashboardCard, HeldPosition, ManualApproval } from "./operator-types";
+import {
+  buildCommandEnvelope,
+  classifyDecisionOutcome,
+  MAX_RECOVERY_ATTEMPTS,
+  reservePendingCommand,
+  nextRecoveryDelayMs,
+  parsePendingCommand,
+  PENDING_COMMAND_STORAGE_KEY,
+  serializePendingCommand,
+} from "./command-lifecycle.mjs";
 import styles from "./operator.module.css";
 
 type Role = "viewer" | "operator";
@@ -194,6 +204,9 @@ type AuditResponse = {
 
 type DecisionResponse = {
   code?: string;
+  commandState?: string;
+  replayed?: boolean;
+  receipt?: unknown;
 };
 
 // Matches DECISION_TYPES in packages/dashboard/src/contracts/operator-contracts.mjs exactly.
@@ -236,6 +249,20 @@ type FormState = {
   note: string;
 };
 
+type CommandEnvelope = {
+  requestId: string;
+  expectedVersion: number;
+  command: Command;
+  note?: string;
+};
+
+type CommandRun = {
+  requestId: string;
+  phase: "running" | "prepared" | "success" | "failure" | "uncertain";
+  code: string | null;
+  attempts: number;
+};
+
 // intervalMinutes 5..1440 and maxBoostersPerCycle's floor of 1 are the protocol-level bounds from
 // state-schema.mjs itself (not a per-deployment hard cap), so they are safe fixed defaults.
 const EMPTY_FORM: FormState = {
@@ -257,10 +284,12 @@ export default function OperatorControlPanel() {
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [pendingCommand, setPendingCommand] = useState<CommandEnvelope | null>(null);
   const [auditBusy, setAuditBusy] = useState(false);
   const [message, setMessage] = useState("Private Steuerung wird geladen…");
   const [error, setError] = useState<string | null>(null);
   const [dashboardError, setDashboardError] = useState<string | null>(null);
+  const [commandRun, setCommandRun] = useState<CommandRun | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
 
   const loadAudit = useCallback(async (cursor?: string) => {
@@ -316,9 +345,86 @@ export default function OperatorControlPanel() {
     }
   }, []);
 
+  const readOnly = bootstrap?.identity.role !== "operator";
+  const controlsDisabled = loading || busy || pendingCommand !== null || readOnly || !bootstrap;
+  const dashboardPlaceholder = dashboardError ? "Nicht verfügbar" : "Wird geladen…";
+  const hasUnsavedChanges = bootstrap
+    ? configurationSnapshotFromForm(form) !== configurationSnapshotFromState(bootstrap.state)
+    : false;
+
+  const runCommandEnvelope = useCallback(async (envelope: CommandEnvelope, successMessage: string) => {
+    reservePendingCommand(window.sessionStorage, envelope);
+    setPendingCommand(envelope);
+    setBusy(true);
+    setError(null);
+    setMessage("Entscheidung wird protokolliert…");
+    setCommandRun({ requestId: envelope.requestId, phase: "running", code: null, attempts: 0 });
+    for (let attempt = 0; ; attempt += 1) {
+      let outcome;
+      try {
+        const response = await fetch("/operator/api/decisions", {
+          method: "POST",
+          cache: "no-store",
+          headers: {
+            "content-type": "application/json",
+            "x-hookemon-request": "operator-control",
+          },
+          body: serializePendingCommand(envelope),
+        });
+        let body: DecisionResponse | null = null;
+        try { body = await readJson<DecisionResponse>(response); } catch { /* classify the status */ }
+        outcome = classifyDecisionOutcome({ status: response.status, body, requestId: envelope.requestId });
+      } catch {
+        outcome = classifyDecisionOutcome({ status: null, body: null, requestId: envelope.requestId });
+      }
+      setCommandRun({
+        requestId: envelope.requestId,
+        phase: outcome.phase,
+        code: outcome.code,
+        attempts: attempt + 1,
+      });
+      if (outcome.phase === "success") {
+        window.sessionStorage.removeItem(PENDING_COMMAND_STORAGE_KEY);
+        setPendingCommand(null);
+        await Promise.all([
+          loadBootstrap({ replaceForm: envelope.command.type === "update-configuration" }),
+          loadAudit(),
+          loadDashboard(),
+        ]);
+        setMessage(outcome.replayed ? `${successMessage} (bereits angewendet)` : successMessage);
+        break;
+      }
+      if (outcome.phase === "failure") {
+        window.sessionStorage.removeItem(PENDING_COMMAND_STORAGE_KEY);
+        setPendingCommand(null);
+        await loadBootstrap({ replaceForm: false });
+        setError(stableMessage(outcome.code ?? undefined));
+        setMessage("Entscheidung wurde nicht angenommen.");
+        break;
+      }
+      if (attempt >= MAX_RECOVERY_ATTEMPTS) {
+        setCommandRun({
+          requestId: envelope.requestId,
+          phase: "uncertain",
+          code: outcome.code,
+          attempts: attempt + 1,
+        });
+        await Promise.all([loadBootstrap({ replaceForm: false }), loadAudit(), loadDashboard()]);
+        setMessage(`Ergebnis unbestimmt – Zustand wurde neu geladen; Anfrage ${envelope.requestId} im Audit prüfen.`);
+        break;
+      }
+      setMessage(`Ergebnis noch unbestimmt – ursprüngliche Anfrage wird erneut geprüft… (${envelope.requestId})`);
+      await new Promise((resolve) => window.setTimeout(resolve, nextRecoveryDelayMs(attempt)));
+    }
+    setBusy(false);
+  }, [loadAudit, loadBootstrap, loadDashboard]);
+
   useEffect(() => {
     const initialLoad = window.setTimeout(() => {
-      void Promise.all([loadBootstrap(), loadAudit(), loadDashboard()]);
+      void Promise.all([loadBootstrap(), loadAudit(), loadDashboard()]).then(() => {
+        const pending = parsePendingCommand(window.sessionStorage.getItem(PENDING_COMMAND_STORAGE_KEY));
+        if (pending) void runCommandEnvelope(pending, "Wiederhergestellte Entscheidung wurde abgeschlossen.");
+      });
     }, 0);
     const clock = window.setInterval(() => setNowMs(Date.now()), 1_000);
     const refresh = window.setInterval(() => void loadDashboard(), 10_000);
@@ -327,53 +433,20 @@ export default function OperatorControlPanel() {
       window.clearInterval(clock);
       window.clearInterval(refresh);
     };
-  }, [loadAudit, loadBootstrap, loadDashboard]);
+  }, [loadAudit, loadBootstrap, loadDashboard, runCommandEnvelope]);
 
-  const readOnly = bootstrap?.identity.role !== "operator";
-  const controlsDisabled = loading || busy || readOnly || !bootstrap;
-  const dashboardPlaceholder = dashboardError ? "Nicht verfügbar" : "Wird geladen…";
-  const hasUnsavedChanges = bootstrap
-    ? configurationSnapshotFromForm(form) !== configurationSnapshotFromState(bootstrap.state)
-    : false;
-
-  async function submitCommand(command: Command, successMessage: string) {
+  function submitCommand(command: Command, successMessage: string) {
     if (!bootstrap || controlsDisabled) return;
-    setBusy(true);
-    setError(null);
-    setMessage("Entscheidung wird protokolliert…");
-    try {
-      const response = await fetch("/operator/api/decisions", {
-        method: "POST",
-        cache: "no-store",
-        headers: {
-          "content-type": "application/json",
-          "x-hookemon-request": "operator-control",
-        },
-        body: JSON.stringify({
-          requestId: crypto.randomUUID(),
-          expectedVersion: bootstrap.state.version,
-          command,
-          ...(form.note.trim() ? { note: form.note.trim() } : {}),
-        }),
-      });
-      const body = await readJson<DecisionResponse>(response);
-      if (!response.ok) throw new Error(stableMessage(body.code));
-      // The refresh below sets its own transient "wird geladen"/"ist geladen" status message;
-      // setting the command's own success message afterwards keeps it as the one the operator
-      // actually sees, instead of it flashing for a moment and then being overwritten.
-      await Promise.all([
-        loadBootstrap({ replaceForm: command.type === "update-configuration" }),
-        loadAudit(),
-        loadDashboard(),
-      ]);
-      setMessage(successMessage);
-    } catch (commandError) {
-      setError(errorMessage(commandError));
-      await loadBootstrap({ replaceForm: false });
-      setMessage("Entscheidung wurde nicht angenommen.");
-    } finally {
-      setBusy(false);
-    }
+    const envelope = buildCommandEnvelope({
+      requestId: crypto.randomUUID(),
+      expectedVersion: bootstrap.state.version,
+      command,
+      note: form.note.trim() || undefined,
+    }) as CommandEnvelope;
+    try { reservePendingCommand(window.sessionStorage, envelope); }
+    catch { setError("Eine offene Anfrage muss zuerst wiederhergestellt werden."); return; }
+    setPendingCommand(envelope);
+    void runCommandEnvelope(envelope, successMessage);
   }
 
   function saveConfiguration(event: FormEvent<HTMLFormElement>) {
@@ -540,6 +613,18 @@ export default function OperatorControlPanel() {
 
       <div className={styles.feedback} aria-live="polite">
         <span>{busy ? "Wird verarbeitet…" : message}</span>
+        {pendingCommand ? (
+          <button className={styles.secondaryButton} type="button" disabled={busy || readOnly}
+            onClick={() => void runCommandEnvelope(pendingCommand, "Ursprüngliche Entscheidung wurde abgeschlossen.")}>
+            Ursprüngliche Anfrage erneut prüfen
+          </button>
+        ) : null}
+        {commandRun ? (
+          <span>
+            Befehlsstatus: {commandPhaseLabel(commandRun.phase)} · Anfrage {commandRun.requestId}
+            {commandRun.code ? ` · ${commandRun.code}` : ""}
+          </span>
+        ) : null}
         {error ? (
           <span className={styles.error} role="alert">
             {error} <button type="button" onClick={() => void loadBootstrap()}>Erneut versuchen</button>
@@ -1077,6 +1162,16 @@ function StatusCard({ label, value, tone }: { label: string; value: string; tone
       <strong>{value}</strong>
     </div>
   );
+}
+
+function commandPhaseLabel(phase: CommandRun["phase"]) {
+  return {
+    running: "Läuft",
+    prepared: "Vorbereitet",
+    success: "Erfolgreich",
+    failure: "Abgelehnt",
+    uncertain: "Unbestimmt",
+  }[phase];
 }
 
 function CurrentValue({ label, value }: { label: string; value: string }) {

@@ -15,17 +15,22 @@ test("keeps German configuration controls separate from canonical decision paylo
   assert.doesNotMatch(source, /abort-active-cycle|cancel-active-cycle/);
 
   const submitCommandBody = source.slice(
-    source.indexOf("async function submitCommand"),
+    source.indexOf("function submitCommand"),
     source.indexOf("function saveConfiguration"),
   );
-  assert.match(
-    submitCommandBody,
-    /await Promise\.all\(\[\s*loadBootstrap[\s\S]*?\]\);\s*setMessage\(successMessage\);/,
+  const runCommandBody = source.slice(
+    source.indexOf("const runCommandEnvelope"),
+    source.indexOf("useEffect(() =>"),
   );
   assert.match(
-    submitCommandBody,
-    /await loadBootstrap\(\{ replaceForm: false \}\);\s*setMessage\("Entscheidung wurde nicht angenommen\."\);/,
+    runCommandBody,
+    /await Promise\.all\(\[\s*loadBootstrap[\s\S]*?\]\);\s*setMessage\(/,
   );
+  assert.match(
+    runCommandBody,
+    /await loadBootstrap\(\{ replaceForm: false \}\);[\s\S]*?setMessage\("Entscheidung wurde nicht angenommen\."\);/,
+  );
+  assert.match(submitCommandBody, /reservePendingCommand\(window\.sessionStorage, envelope\)/);
 });
 
 test("uses the authenticated operator proxy instead of a browser-side control service", async () => {
@@ -38,6 +43,16 @@ test("uses the authenticated operator proxy instead of a browser-side control se
   assert.match(panel, /\/operator\/api\/decisions/);
   assert.match(panel, /expectedVersion/);
   assert.match(panel, /crypto\.randomUUID\(\)/);
+  assert.equal((panel.match(/crypto\.randomUUID\(\)/g) ?? []).length, 1);
+  assert.match(panel, /buildCommandEnvelope/);
+  assert.match(panel, /reservePendingCommand\(window\.sessionStorage, envelope\)/);
+  assert.match(panel, /serializePendingCommand\(envelope\)/);
+  assert.match(panel, /runCommandEnvelope\(envelope/);
+  assert.match(panel, /MAX_RECOVERY_ATTEMPTS/);
+  assert.match(panel, /Ergebnis noch unbestimmt/);
+  assert.match(panel, /parsePendingCommand\(window\.sessionStorage\.getItem\(PENDING_COMMAND_STORAGE_KEY\)\)/);
+  assert.match(panel, /status: null/);
+  assert.doesNotMatch(panel, /status: null[\s\S]{0,500}Entscheidung wurde nicht angenommen/);
   assert.match(panel, /cache:\s*["']no-store["']/);
   assert.match(proxy, /OPERATOR_CONTROL_SERVICE_URL/);
   assert.match(proxy, /OPERATOR_CONTROL_PROXY_CREDENTIAL/);
@@ -63,4 +78,13 @@ test("renders held cards and approvals with operator-only commands and unavailab
   assert.match(source, /Nicht verfügbar/);
   assert.match(source, /!readOnly \?/);
   assert.match(source, /!approval\.approved && !readOnly/);
+});
+
+
+test("unresolved command disables new actions and offers recovery of the same envelope", async () => {
+  const source = await readFile(new URL("../app/operator/OperatorControlPanel.tsx", import.meta.url), "utf8");
+  assert.match(source, /const controlsDisabled = .*pendingCommand !== null/);
+  assert.match(source, /onClick=\{\(\) => void runCommandEnvelope\(pendingCommand,/);
+  const exhaustion = source.slice(source.indexOf("if (attempt >= MAX_RECOVERY_ATTEMPTS)"), source.indexOf("setBusy(false)", source.indexOf("if (attempt >= MAX_RECOVERY_ATTEMPTS)")));
+  assert.doesNotMatch(exhaustion, /removeItem|setPendingCommand\(null\)/);
 });

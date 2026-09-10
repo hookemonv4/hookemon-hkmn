@@ -77,6 +77,11 @@ reasons on rejection. A standalone listener without those seams retains the lega
 - The owner page retains a request ID across lost responses, reloads, `PREPARED`, and `UNCERTAIN`
   results. It clears that key only after `APPLIED` or a deterministic `REJECTED` result, so an
   unresolved effect cannot be retried under a new request ID.
+- The browser stores the complete command envelope in session storage before dispatch. It retries
+  `PREPARED` and uncertain responses with the identical envelope using bounded exponential backoff
+  (eight recovery attempts maximum). `APPLIED` clears the envelope; `REJECTED` clears it and
+  reports the deterministic refusal; an exhausted uncertain command remains stored for the next
+  mount and is shown with its request ID for audit investigation.
 - Audit reservations and terminal appends take a short process-local queue slot and a cross-process
   audit-log file lock. Authority effects execute after the reservation lock is released, so one slow
   or failed effect cannot block a later audit append.
@@ -146,6 +151,9 @@ same request ID reports that state without another invocation. If a process ends
 record, do not rerun its effect locally. Verify runner state before intentionally issuing a new
 request ID. Do not construct a local cycle store as a fallback. Rebuild SQLite from the verified
 audit log if its projection is missing or stale.
+
+The operator page labels `PREPARED` and `UNCERTAIN` as unresolved rather than rejected. Keep the
+original request envelope and inspect the audit entry before issuing any new command.
 
 - OPEN FACT: The dashboard can show that required safety telemetry is unavailable, but composition
   does not yet provide a read-only persistent canary-alert feed. Resolve it by exposing a typed,

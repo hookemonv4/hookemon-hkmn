@@ -559,6 +559,36 @@ test('a duplicate request writes one pre-effect audit receipt, one terminal rece
   assert.ok(records.every(record => record.requestId === 'pause-once'));
 });
 
+test('a concurrent identical request observes preparation and later replays the terminal result', async (t) => {
+  const server = await buildTestServer(t);
+  let effectCalls = 0;
+  let releaseEffect;
+  const effectReleased = new Promise(resolve => { releaseEffect = resolve; });
+  server.ctx.operatorControl.execute = async () => {
+    effectCalls += 1;
+    await effectReleased;
+    return { action: 'pause', revision: 1, configuration: configuration({ paused: true, executionPaused: true }) };
+  };
+  const request = { requestId: 'pause-concurrent', expectedVersion: 0, command: { type: 'pause' } };
+  const firstPromise = server.post('/operator/api/decisions', request, AUTH);
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const records = await readAllAuditEntries(server.ctx.auditLogPath);
+    if (records.some(record => record.requestId === request.requestId && record.commandState === 'PREPARED')) break;
+    await new Promise(resolve => setTimeout(resolve, 5));
+  }
+  const concurrent = await server.post('/operator/api/decisions', request, AUTH);
+  assert.equal(concurrent.status, 202);
+  assert.equal(concurrent.body.code, 'COMMAND_PREPARED');
+  assert.equal(concurrent.body.commandState, 'PREPARED');
+  releaseEffect();
+  const first = await firstPromise;
+  assert.equal(first.status, 200);
+  const replay = await server.post('/operator/api/decisions', request, AUTH);
+  assert.equal(replay.status, 200);
+  assert.equal(replay.body.replayed, true);
+  assert.equal(effectCalls, 1);
+});
+
 test('an unresolved command stays uncertain on retry instead of becoming a replayed success', async (t) => {
   let effects = 0;
   const server = await buildTestServer(t);
@@ -636,6 +666,12 @@ test('the HTTP control path records cap-plus-one and stale-revision refusals as 
   assert.equal(stale.status, 409, stale.diagnostics);
   assert.equal(stale.body.code, 'COMMAND_REJECTED');
   assert.equal(stale.body.commandState, 'REJECTED');
+  const staleReplay = await server.post('/operator/api/decisions', {
+    requestId: 'stale-revision', expectedVersion: 1, command: { type: 'pause' },
+  }, AUTH);
+  assert.equal(staleReplay.status, 409, staleReplay.diagnostics);
+  assert.equal(staleReplay.body.commandState, 'REJECTED');
+  assert.equal(staleReplay.body.replayed, true);
   assert.equal((await readOperatorState(statePath)).configuration.paused, false);
   assert.deepEqual(
     (await readAllAuditEntries(server.ctx.auditLogPath)).map(entry => entry.commandState),

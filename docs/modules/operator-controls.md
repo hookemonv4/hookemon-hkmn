@@ -63,6 +63,10 @@ creates a local cycle store, signer, or provider effect.
   revision, and owner choice before it reaches the repository authority.
 - The service does not append audit records or deduplicate request IDs. Its caller persists the
   dispatch receipt before an effect and returns the stored receipt for a duplicate request.
+- The dashboard caller stores the original request envelope before dispatch and reuses its request
+  ID, expected revision, command, and note for recovery. A `PREPARED` or `UNCERTAIN` response is
+  not a rejection: the browser retries the same envelope with bounded backoff and retains it in
+  session storage if recovery is exhausted.
 
 ## State transitions
 
@@ -96,6 +100,9 @@ node --test --test-timeout=120000 packages/runner/test/operator/control.test.mjs
 
 - On a stale revision, read `status()` again and submit a fresh request ID with the current
   revision.
+- For `UNCERTAIN`, do not click a replacement command or mint a new request ID until the audit
+  record and authority state have been checked. The page exposes the original request ID and
+  response code in its command-status line.
 - When safety telemetry is unavailable, use pause or kill if needed, restore the accounting reader,
   and verify its status before resuming an exposure-increasing action.
 - Reconcile an interrupted provider or chain attempt from the repository before requesting
@@ -116,3 +123,5 @@ Active operator monetary controls use USD micro-units (`*MicroUsd`). Cycle reser
 Native principal and gas never enter a USD cap field without authenticated valuation.
 
 The managed claim path uses the durable [Process USD budget](process-usd-budget.md). `processClaimLimit6hMicroUsd` defaults to USD25,000, accepts zero, and is owner-adjustable up to USD50,000; it does not replace the other spend controls.
+
+Unresolved browser commands retain their exact request envelope after automatic recovery exhausts its attempts. New commands remain disabled until a matching durable APPLIED or REJECTED receipt resolves that envelope. Explicit recovery reuses the original request ID, expected version and command. Authentication failures, malformed responses and unreceipted conflicts preserve uncertainty; an HTTP success alone never clears the recovery identity.
