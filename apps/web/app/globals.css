@@ -1334,12 +1334,12 @@ h1 span {
 }
 
 .treasury-bar {
-  width: 13.333%;
+  width: 10%;
   background: var(--color-pack);
 }
 
 .project-bar {
-  width: 80%;
+  width: 83.333%;
   background: linear-gradient(90deg, var(--color-pikachu), var(--color-pack));
 }
 

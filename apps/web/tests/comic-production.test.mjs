@@ -57,7 +57,7 @@ test("keeps the approved product description and conditional outcome language", 
 
 test("states the gross-volume fee without a trading interface or deployment addresses", () => {
   assert.ok(html.includes("3,00 % auf Brutto‑Volumen"));
-  for (const amount of ["0,20", "0,40", "2,40"]) assert.ok(html.includes(`${amount} %`));
+  for (const amount of ["0,20", "0,30", "2,50"]) assert.ok(html.includes(`${amount} %`));
   assert.doesNotMatch(html, /3\.00% fee on the USDG side/i);
   assert.doesNotMatch(html, /0x[a-f\d]{40}/i);
   assert.doesNotMatch(html, /(?:href|action)="\/swap(?:[?#/"])/);

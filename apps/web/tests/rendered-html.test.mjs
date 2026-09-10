@@ -222,7 +222,7 @@ test("keeps public claims tied to variable proceeds and verified data", async ()
 test("states the gross-volume fee and its complete split", async () => {
   const html = await (await render()).text();
   assert.ok(html.includes("3,00 % auf Brutto‑Volumen"));
-  for (const amount of ["0,20 %", "0,40 %", "2,40 %"]) assert.ok(html.includes(amount));
+  for (const amount of ["0,20 %", "0,30 %", "2,50 %"]) assert.ok(html.includes(amount));
   for (const recipient of ["Programmable", "Treasury", "Card packs"]) assert.ok(html.includes(recipient));
   assert.doesNotMatch(html, /fee on the USDG side|97%[^<]*continues into the pool swap/i);
   assert.doesNotMatch(html, /data-w="97"/);
