@@ -223,7 +223,7 @@ test('authority mutations appear in the next bootstrap view and its durable audi
 
   const configured = await server.post('/operator/api/decisions', {
     requestId: 'config-status',
-    expectedVersion: 1,
+    expectedVersion: 0,
     command: { type: 'update-configuration', configuration: { intervalMinutes: 30, requestedOrders: 2 } },
   }, AUTH);
   assert.equal(configured.status, 200);
@@ -306,6 +306,183 @@ test('owner dashboard projects cycles and custody from an authority built with a
   assert.equal(result.body.cycles[0].cycleId, cycleId);
   assert.equal(result.body.custody.buckets[0].cycleId, cycleId);
   assert.equal(result.body.custody.buckets[0].buckets.claimed.amountAtomic, '0');
+});
+
+test('dashboard exposes held positions and manual approvals and forwards native held decisions', async (t) => {
+  const positionId = `held:${'a'.repeat(64)}`;
+  const evidenceDigest = `sha256:${'b'.repeat(64)}`;
+  const cycleDigest = `sha256:${'c'.repeat(64)}`;
+  const executed = [];
+  const server = await buildTestServer(t, {
+    operatorControl: {
+      async status() {
+        return {
+          ...status(0, configuration({ manualApprovalCycles: 1 })),
+          activeCycleId: 'cycle-held',
+          cycles: [],
+          heldPositions: [{
+            positionId,
+            cycleId: 'cycle-held',
+            costMicroUsd: '7',
+            insuredValue: null,
+            reason: 'HELD_UNAVAILABLE',
+            terminalState: 'OPEN',
+            evidenceDigest,
+            openedAtMs: Date.UTC(2026, 0, 1),
+            positionRevision: 0,
+            ownerDecision: null,
+          }],
+          manualApprovals: [{
+            cycleId: 'cycle-held',
+            cycleDigest,
+            mode: 'production',
+            ordinal: 1,
+            releaseCostMicroUsd: '7',
+            openedAtMs: Date.UTC(2026, 0, 1),
+            approved: false,
+            approvedAtMs: null,
+          }],
+        };
+      },
+      async execute(input) {
+        executed.push(input);
+        return { action: input.command.type, revision: 1, configuration: configuration() };
+      },
+    },
+    readLifetimeTotals: async () => ({
+      units: 'micro-usdg',
+      cyclesScanned: 0,
+      terminalCycles: 0,
+      totals: {
+        totalCycleFundingMicroUsdg: null,
+        totalCollectorSpendMicroUsdg: null,
+        totalBuybacksReturnedMicroUsdg: null,
+        totalBridgedBackMicroUsdg: null,
+        totalRewardsPaidMicroUsdg: null,
+        totalRewardsDeferredMicroUsdg: null,
+        totalQuotedOperatingCostsMicroUsdg: null,
+        latestRetainedReserveMicroUsdg: null,
+        latestCycleReserveTargetMicroUsdg: null,
+      },
+      counts: { openedPacks: 0, skippedCycles: 0, completedCycles: 0 },
+      completeness: {
+        totalCycleFundingMicroUsdg: false,
+        totalCollectorSpendMicroUsdg: false,
+        totalBuybacksReturnedMicroUsdg: false,
+        totalBridgedBackMicroUsdg: false,
+        totalRewardsPaidMicroUsdg: false,
+        totalRewardsDeferredMicroUsdg: false,
+        totalQuotedOperatingCostsMicroUsdg: false,
+        latestRetainedReserveMicroUsdg: false,
+        latestCycleReserveTargetMicroUsdg: false,
+        openedPacks: false,
+        skippedCycles: false,
+      },
+      perCycle: [],
+    }),
+    cardHistory: async () => ({ cards: [], complete: true }),
+  });
+  const dashboard = await server.get('/operator/api/dashboard', AUTH);
+  assert.equal(dashboard.status, 200, dashboard.diagnostics);
+  assert.equal(dashboard.body.heldPositions[0].positionId, positionId);
+  assert.equal(dashboard.body.manualApprovals[0].approved, false);
+  assert.equal(dashboard.body.completeness.heldPositions, true);
+  assert.equal(dashboard.body.completeness.manualApprovals, true);
+
+  const decision = await server.post('/operator/api/decisions', {
+    requestId: 'held-route-request',
+    expectedVersion: 0,
+    command: {
+      type: 'held-owner-decision',
+      positionId,
+      heldEvidenceDigest: evidenceDigest,
+      expectedPositionRevision: 0,
+      choice: 'sell',
+    },
+  }, AUTH);
+  assert.equal(decision.status, 200, decision.diagnostics);
+  assert.equal(decision.body.code, 'HELD_OWNER_DECISION_RECORDED');
+  assert.deepEqual(executed[0].command, {
+    type: 'held-owner-decision',
+    positionId,
+    heldEvidenceDigest: evidenceDigest,
+    expectedPositionRevision: 0,
+    choice: 'sell',
+  });
+
+  const approval = await server.post('/operator/api/decisions', {
+    requestId: 'manual-approval-route-request',
+    expectedVersion: 1,
+    command: {
+      type: 'manual-approval',
+      cycleId: 'cycle-held',
+      cycleDigest,
+    },
+  }, AUTH);
+  assert.equal(approval.status, 200, approval.diagnostics);
+  assert.equal(approval.body.code, 'MANUAL_APPROVAL_RECORDED');
+  assert.deepEqual(executed[1].command, {
+    type: 'manual-approval',
+    cycleId: 'cycle-held',
+    cycleDigest,
+  });
+});
+
+test('dashboard preserves unavailable held and manual inventory sources', async (t) => {
+  const server = await buildTestServer(t, {
+    operatorControl: {
+      async status() {
+        return {
+          ...status(0, configuration()),
+          activeCycleId: null,
+          cycles: [],
+          heldPositions: null,
+          manualApprovals: null,
+        };
+      },
+      async execute() {
+        throw new Error('not expected');
+      },
+    },
+    readLifetimeTotals: async () => ({
+      units: 'micro-usdg',
+      cyclesScanned: 0,
+      terminalCycles: 0,
+      totals: {
+        totalCycleFundingMicroUsdg: null,
+        totalCollectorSpendMicroUsdg: null,
+        totalBuybacksReturnedMicroUsdg: null,
+        totalBridgedBackMicroUsdg: null,
+        totalRewardsPaidMicroUsdg: null,
+        totalRewardsDeferredMicroUsdg: null,
+        totalQuotedOperatingCostsMicroUsdg: null,
+        latestRetainedReserveMicroUsdg: null,
+        latestCycleReserveTargetMicroUsdg: null,
+      },
+      counts: { openedPacks: null, skippedCycles: null, completedCycles: 0 },
+      completeness: {
+        totalCycleFundingMicroUsdg: false,
+        totalCollectorSpendMicroUsdg: false,
+        totalBuybacksReturnedMicroUsdg: false,
+        totalBridgedBackMicroUsdg: false,
+        totalRewardsPaidMicroUsdg: false,
+        totalRewardsDeferredMicroUsdg: false,
+        totalQuotedOperatingCostsMicroUsdg: false,
+        latestRetainedReserveMicroUsdg: false,
+        latestCycleReserveTargetMicroUsdg: false,
+        openedPacks: false,
+        skippedCycles: false,
+      },
+      perCycle: [],
+    }),
+    cardHistory: async () => ({ cards: [], complete: true }),
+  });
+  const dashboard = await server.get('/operator/api/dashboard', AUTH);
+  assert.equal(dashboard.status, 200, dashboard.diagnostics);
+  assert.equal(dashboard.body.heldPositions, null);
+  assert.equal(dashboard.body.manualApprovals, null);
+  assert.equal(dashboard.body.completeness.heldPositions, false);
+  assert.equal(dashboard.body.completeness.manualApprovals, false);
 });
 
 test('the dashboard route table has one mutation endpoint', async () => {

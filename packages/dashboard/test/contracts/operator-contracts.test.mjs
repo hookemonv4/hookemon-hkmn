@@ -41,8 +41,30 @@ test('reads a digest-bound manual approval', () => {
 });
 
 test('reads a held owner decision bound to the held evidence and cycle revision', () => {
+  const positionId = `held:${'c'.repeat(64)}`;
   const result = readDecisionRequest({
     requestId: 'held-decision-1',
+    expectedVersion: 3,
+    command: {
+      type: 'held-owner-decision',
+      positionId,
+      heldEvidenceDigest: `sha256:${'b'.repeat(64)}`,
+      expectedPositionRevision: 9,
+      choice: 'keep-holding',
+    },
+  });
+  assert.deepEqual(result.command, {
+    type: 'held-owner-decision',
+    positionId,
+    heldEvidenceDigest: `sha256:${'b'.repeat(64)}`,
+    expectedPositionRevision: 9,
+    choice: 'keep-holding',
+  });
+});
+
+test('rejects legacy held decision keys and malformed held position ids', () => {
+  assert.throws(() => readDecisionRequest({
+    requestId: 'held-decision-legacy',
     expectedVersion: 3,
     command: {
       type: 'held-owner-decision',
@@ -51,14 +73,18 @@ test('reads a held owner decision bound to the held evidence and cycle revision'
       expectedCycleRevision: 9,
       choice: 'keep-holding',
     },
-  });
-  assert.deepEqual(result.command, {
-    type: 'held-owner-decision',
-    cycleId: 'cycle-42',
-    heldEvidenceDigest: `sha256:${'b'.repeat(64)}`,
-    expectedCycleRevision: 9,
-    choice: 'keep-holding',
-  });
+  }));
+  assert.throws(() => readDecisionRequest({
+    requestId: 'held-decision-invalid',
+    expectedVersion: 3,
+    command: {
+      type: 'held-owner-decision',
+      positionId: 'held:not-a-position',
+      heldEvidenceDigest: `sha256:${'b'.repeat(64)}`,
+      expectedPositionRevision: 9,
+      choice: 'keep-holding',
+    },
+  }));
 });
 
 test('reads a refused payout retry request without granting execution authority', () => {

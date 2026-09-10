@@ -13,7 +13,7 @@ creates a local cycle store, signer, or provider effect.
   functions.
 - `status()` returns the configuration revision, active and known repository cycles, canonical
   lifecycle stages, provider requests, typed chain transaction evidence, custody buckets, cap
-  usage, telemetry-source availability, alerts, and payout state.
+  usage, telemetry-source availability, alerts, payout state, held positions, and manual approvals.
 - Each cycle exposes its repository `version`, `heldEvidenceDigest`, and `ownerDecision` exactly
   when the repository supplies them.
 - `execute({ expectedRevision, requestId, command })` accepts `pause`, `resume`, `kill`,
@@ -55,8 +55,12 @@ creates a local cycle store, signer, or provider effect.
   `rewardSelection`; historical cycles expose null and retain all-holder semantics.
 - `pause` sets both `paused` and `executionPaused`. `kill` additionally sets `killSwitch`.
   `resume` clears only the two pause fields and never clears a kill switch.
-- A held-owner decision binds cycle ID, held-evidence digest, request ID, expected cycle revision,
-  and owner choice before it reaches the repository authority.
+- `manualApprovals` is null when configuration is unavailable. Otherwise it contains the pending
+  manual-approval ledger entries (terminal cycles excluded), sorted by cycle ID with each entry's
+  same-mode ordinal, release cost, durable approval state, and approval timestamp. A digest-bound
+  approval with a mismatched cycle ID remains unapproved.
+- A held-owner decision binds `positionId`, held-evidence digest, request ID, expected position
+  revision, and owner choice before it reaches the repository authority.
 - The service does not append audit records or deduplicate request IDs. Its caller persists the
   dispatch receipt before an effect and returns the stored receipt for a duplicate request.
 
@@ -65,7 +69,16 @@ creates a local cycle store, signer, or provider effect.
 - Configuration commands use the operator-state revision as their compare-and-swap value.
 - Pause, resume, kill, and configuration updates persist the next configuration before returning.
 - Manual approval persists through the policy engine. A held-owner decision persists through the
-  repository. Recovery and tick commands return the result of their one injected authority call.
+  repository. The accepted command shapes are:
+
+  ```js
+  { type: 'manual-approval', cycleId, cycleDigest }
+  { type: 'held-owner-decision', positionId, heldEvidenceDigest,
+    expectedPositionRevision, choice: 'sell' | 'keep-holding' }
+  ```
+
+  Recovery and tick commands return the result of their one injected authority call. The dashboard
+  `restart-request` alias invokes the existing `resume-cycle` command.
 - Reconcile reads repository state only. It never invokes a tick, recovery callback, signer, or
   provider mutation.
 

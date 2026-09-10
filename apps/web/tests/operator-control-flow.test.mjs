@@ -44,3 +44,23 @@ test("uses the authenticated operator proxy instead of a browser-side control se
   assert.match(proxy, /cf-access-jwt-assertion/);
   assert.doesNotMatch(panel, /DatabaseSync|DurableOperatorControlStore|createBindingOperatorControlHandler/);
 });
+
+test("renders held cards and approvals with operator-only commands and unavailable null states", async () => {
+  const source = await readFile(new URL("../app/operator/OperatorControlPanel.tsx", import.meta.url), "utf8");
+
+  assert.match(source, /Gehaltene Karten/);
+  assert.match(source, /Manuelle Freigaben/);
+  assert.match(source, /Verkaufen/);
+  assert.match(source, /Weiter halten/);
+  assert.match(source, /Zyklus fortsetzen/);
+  assert.match(source, /positionId:\s*position\.positionId/);
+  assert.match(source, /heldEvidenceDigest:\s*position\.evidenceDigest/);
+  assert.match(source, /expectedPositionRevision:\s*position\.positionRevision/);
+  assert.match(source, /choice,\s*\},\s*choice === "sell"/);
+  assert.match(source, /onClick=\{\(\) => decideHeld\(position, "sell"\)\}/);
+  assert.match(source, /type:\s*"manual-approval"/);
+  assert.match(source, /type:\s*"restart-request"/);
+  assert.match(source, /Nicht verfügbar/);
+  assert.match(source, /!readOnly \?/);
+  assert.match(source, /!approval\.approved && !readOnly/);
+});

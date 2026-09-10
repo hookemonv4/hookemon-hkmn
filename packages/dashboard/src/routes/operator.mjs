@@ -94,6 +94,8 @@ function unavailable(res, error) {
 
 function receiptResultCode(command, authorityStatus) {
   if (command.type === 'run-cycle-now') return 'TICK_TRIGGERED';
+  if (command.type === 'held-owner-decision') return 'HELD_OWNER_DECISION_RECORDED';
+  if (command.type === 'manual-approval') return 'MANUAL_APPROVAL_RECORDED';
   if (command.type === 'resume-cycle') {
     return authorityStatus.activeCycleId === null ? 'RECOVERY_NO_ACTIVE_CYCLE' : 'RECOVERY_DISPATCHED';
   }
@@ -111,6 +113,7 @@ function auditCommandHttpStatus(commandState) {
 function isDeterministicAuthorityRejection(error) {
   if (!error || typeof error.message !== 'string') return false;
   return error.message === 'stale operator state revision'
+    || error.message === 'cycle-repository recordHeldOwnerDecision: stale position revision'
     || /^operator configuration (maxBoostersPerCycle|maxUnitPriceMicroUsdg?|maxCycleBudgetMicroUsdg?|max24HourBudgetMicroUsdg?) exceeds the fixed hard cap$/.test(error.message);
 }
 
@@ -182,6 +185,14 @@ export function createDashboardHandler(ctx) {
           ctx.onError?.('operator-cycle-allocations', error);
         }
       }
+      let schedulerView = null;
+      if (typeof ctx.getSchedulerView === 'function') {
+        try {
+          schedulerView = ctx.getSchedulerView();
+        } catch (error) {
+          ctx.onError?.('operator-scheduler-view', error);
+        }
+      }
       const body = buildDashboardReadModel({
         authorityStatus,
         now: ctx.now,
@@ -189,6 +200,7 @@ export function createDashboardHandler(ctx) {
         lifetimeTotals,
         cardHistory,
         latestCycleAllocations,
+        schedulerView,
       });
       sendJson(res, 200, assertDashboardResponse(body));
     } catch (error) {

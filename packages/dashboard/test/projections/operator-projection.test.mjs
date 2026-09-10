@@ -163,6 +163,39 @@ test('schema 8 projects native lifetime metrics and allocations without historic
   assert.equal(Object.hasOwn(dashboard.latestCycle, 'paidMicroUsdg'), false);
   assert.equal(dashboard.latestCycleTopAllocations[0].allocatedWei, '70');
   assertDashboardResponse(dashboard);
+
+  dashboard.heldPositions = null;
+  dashboard.manualApprovals = null;
+  dashboard.completeness.heldPositions = false;
+  dashboard.completeness.manualApprovals = false;
+  assertDashboardResponse(dashboard);
+
+  const positionId = `held:${'a'.repeat(64)}`;
+  dashboard.heldPositions = [{
+    positionId,
+    cycleId: 'native-cycle',
+    costMicroUsd: '7',
+    insuredValue: { chainId: '4663', assetId: 'native', decimals: 18, units: '9' },
+    reason: 'HELD_UNAVAILABLE',
+    terminalState: 'OPEN',
+    evidenceDigest: `sha256:${'b'.repeat(64)}`,
+    openedAt: new Date(1_000).toISOString(),
+    positionRevision: 0,
+    ownerDecision: null,
+  }];
+  dashboard.manualApprovals = [{
+    cycleId: 'native-cycle',
+    cycleDigest: `sha256:${'c'.repeat(64)}`,
+    mode: 'production',
+    ordinal: 1,
+    releaseCostMicroUsd: '7',
+    openedAt: new Date(1_000).toISOString(),
+    approved: false,
+    approvedAt: null,
+  }];
+  dashboard.completeness.heldPositions = true;
+  dashboard.completeness.manualApprovals = true;
+  assertDashboardResponse(dashboard);
 });
 
 
@@ -199,6 +232,7 @@ test('the first active native cycle is visible before terminal accounting exists
       revision: 3, configuration: null, activeCycleId: 'first-native-cycle',
       cycles: [{ cycleId: 'first-native-cycle', terminalState: null,
         stages: [{ stage: 'purchase', status: 'PREPARED' }], payout: null }],
+      heldPositions: [], manualApprovals: [],
       cap: { offChain24Hour: null, onChainRemainingCapacity: null },
       custody: { buckets: [] }, alerts: [],
     },

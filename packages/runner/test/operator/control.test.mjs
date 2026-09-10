@@ -665,6 +665,87 @@ test('status exposes held-position limit usage and the open positions', async t 
   assert.deepEqual(status.heldPositions, [position]);
 });
 
+test('status projects pending, approved, mismatched and non-terminal manual approvals', async t => {
+  const statePath = await temporaryState(t);
+  const firstDigest = hash('a');
+  const secondDigest = hash('b');
+  const thirdDigest = hash('c');
+  const terminalDigest = hash('d');
+  await seedConfiguration(statePath, configuration({
+    manualApprovalCycles: 2,
+    cycleLedger: [
+      { cycleId: 'cycle-z', cycleDigest: firstDigest, mode: 'production', openedAtMs: nowMs, releaseCostMicroUsd: '10', releaseAmountWei: '10' },
+      { cycleId: 'cycle-a', cycleDigest: secondDigest, mode: 'production', openedAtMs: nowMs + 1, releaseCostMicroUsd: '20', releaseAmountWei: '20' },
+      { cycleId: 'cycle-b', cycleDigest: thirdDigest, mode: 'rehearsal', openedAtMs: nowMs + 2, releaseCostMicroUsd: '30', releaseAmountWei: '30' },
+      { cycleId: 'cycle-terminal', cycleDigest: terminalDigest, mode: 'rehearsal', openedAtMs: nowMs + 3, releaseCostMicroUsd: '40', releaseAmountWei: '40' },
+    ],
+    approvalsByCycleDigest: {
+      [firstDigest]: { cycleId: 'cycle-z', approvedAtMs: nowMs + 10 },
+      [secondDigest]: { cycleId: 'wrong-cycle', approvedAtMs: nowMs + 11 },
+      [terminalDigest]: { cycleId: 'cycle-terminal', approvedAtMs: nowMs + 12 },
+    },
+  }));
+  const descriptions = new Map([
+    ['cycle-terminal', { terminalState: 'COMPLETED', terminalAtMs: nowMs + 20 }],
+  ]);
+  const { createOperatorControl } = await controlModule();
+  const control = createOperatorControl({
+    statePath,
+    cycleRepository: createRepository({
+      activeCycleId: null,
+      knownCycleIds: ['cycle-z', 'cycle-a', 'cycle-b', 'cycle-terminal'],
+      descriptions,
+    }),
+    policyEngine: { recordManualApproval: async () => { throw new Error('not used'); } },
+  });
+  const status = await control.status();
+  assert.deepEqual(status.manualApprovals, [
+    {
+      cycleId: 'cycle-a',
+      cycleDigest: secondDigest,
+      mode: 'production',
+      ordinal: 2,
+      releaseCostMicroUsd: '20',
+      openedAtMs: nowMs + 1,
+      approved: false,
+      approvedAtMs: null,
+    },
+    {
+      cycleId: 'cycle-b',
+      cycleDigest: thirdDigest,
+      mode: 'rehearsal',
+      ordinal: 1,
+      releaseCostMicroUsd: '30',
+      openedAtMs: nowMs + 2,
+      approved: false,
+      approvedAtMs: null,
+    },
+    {
+      cycleId: 'cycle-z',
+      cycleDigest: firstDigest,
+      mode: 'production',
+      ordinal: 1,
+      releaseCostMicroUsd: '10',
+      openedAtMs: nowMs,
+      approved: true,
+      approvedAtMs: nowMs + 10,
+    },
+  ]);
+});
+
+test('status returns no manual approvals when configuration is null', async t => {
+  const statePath = await temporaryState(t);
+  const { createEmptyOperatorState, mutateOperatorState } = await stateFileModule();
+  await mutateOperatorState(statePath, null, () => createEmptyOperatorState());
+  const { createOperatorControl } = await controlModule();
+  const control = createOperatorControl({
+    statePath,
+    cycleRepository: createRepository({ activeCycleId: null, knownCycleIds: [] }),
+    policyEngine: { recordManualApproval: async () => { throw new Error('not used'); } },
+  });
+  assert.equal((await control.status()).manualApprovals, null);
+});
+
 test('status marks unavailable safety telemetry with an authority alert', async t => {
   const statePath = await temporaryState(t);
   const { createOperatorControl } = await controlModule();

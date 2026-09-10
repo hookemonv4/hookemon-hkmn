@@ -472,6 +472,30 @@ function projectHeldPositionsCap(configuration, telemetry) {
   });
 }
 
+function projectManualApprovals(configuration, cycles) {
+  if (configuration === null) return null;
+  const terminalStates = new Map(cycles.map(cycle => [cycle.cycleId, cycle.terminalState]));
+  const modeOrdinals = new Map();
+  const approvals = configuration.cycleLedger.flatMap(entry => {
+    const ordinal = (modeOrdinals.get(entry.mode) ?? 0) + 1;
+    modeOrdinals.set(entry.mode, ordinal);
+    if (ordinal > configuration.manualApprovalCycles || typeof terminalStates.get(entry.cycleId) === 'string') return [];
+    const approval = configuration.approvalsByCycleDigest[entry.cycleDigest];
+    const approved = approval?.cycleId === entry.cycleId;
+    return [{
+      cycleId: entry.cycleId,
+      cycleDigest: entry.cycleDigest,
+      mode: entry.mode,
+      ordinal,
+      releaseCostMicroUsd: entry.releaseCostMicroUsd,
+      openedAtMs: entry.openedAtMs,
+      approved,
+      approvedAtMs: approved ? approval.approvedAtMs : null,
+    }];
+  });
+  return approvals.sort((left, right) => left.cycleId.localeCompare(right.cycleId));
+}
+
 function safetyTelemetryAlerts(available) {
   return available
     ? []
@@ -586,12 +610,13 @@ export function createOperatorControl({
         ? await cycleRepository.listPayoutObligations(cycleId)
         : [],
     )));
+    const configuration = state?.configuration === null || state === null ? null : structuredClone(state.configuration);
     const custodyBuckets = cycles.flatMap(cycle => cycle.custodyBuckets);
     const safetyTelemetry = await readSafetyTelemetry(readCustody);
     return deepFreeze({
       schema: 'hookemon.operator-control-status.v1',
       revision: state?.revision ?? null,
-      configuration: state?.configuration === null || state === null ? null : structuredClone(state.configuration),
+      configuration,
       activeCycleId: activeCycle,
       cycles,
       cap: {
@@ -602,6 +627,7 @@ export function createOperatorControl({
         onChainRemainingCapacity: safetyTelemetry.onChainRemainingCapacity,
       },
       heldPositions: safetyTelemetry.telemetry === null ? null : safetyTelemetry.telemetry.heldPositions.positions,
+      manualApprovals: projectManualApprovals(configuration, cycles),
       custody: { buckets: custodyBuckets },
       alertSources: { safetyTelemetry: safetyTelemetry.available },
       alerts: safetyTelemetryAlerts(safetyTelemetry.available),

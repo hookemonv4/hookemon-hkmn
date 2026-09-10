@@ -115,6 +115,36 @@ function alertSources(authorityStatus) {
   };
 }
 
+function projectHeldPositions(positions) {
+  if (!Array.isArray(positions)) return null;
+  return positions.map(position => ({
+    positionId: position.positionId,
+    cycleId: position.cycleId,
+    costMicroUsd: position.costMicroUsd,
+    insuredValue: position.insuredValue === null ? null : structuredClone(position.insuredValue),
+    reason: position.reason,
+    terminalState: position.terminalState,
+    evidenceDigest: position.evidenceDigest,
+    openedAt: new Date(position.openedAtMs).toISOString(),
+    positionRevision: position.positionRevision,
+    ownerDecision: position.ownerDecision === null ? null : structuredClone(position.ownerDecision),
+  }));
+}
+
+function projectManualApprovals(approvals) {
+  if (!Array.isArray(approvals)) return null;
+  return approvals.map(approval => ({
+    cycleId: approval.cycleId,
+    cycleDigest: approval.cycleDigest,
+    mode: approval.mode,
+    ordinal: approval.ordinal,
+    releaseCostMicroUsd: approval.releaseCostMicroUsd,
+    openedAt: new Date(approval.openedAtMs).toISOString(),
+    approved: approval.approved,
+    approvedAt: approval.approvedAtMs === null ? null : new Date(approval.approvedAtMs).toISOString(),
+  }));
+}
+
 /** Build the private bootstrap compatibility response from one authority snapshot. */
 export function buildBootstrap({
   authorityStatus,
@@ -144,6 +174,7 @@ export function buildDashboardReadModel({
   lifetimeTotals = null,
   cardHistory = null,
   latestCycleAllocations = null,
+  schedulerView = null,
 }) {
   const configuration = authorityStatus?.configuration ?? null;
   const current = activeCycle(authorityStatus);
@@ -207,6 +238,8 @@ export function buildDashboardReadModel({
   const schemaVersion = lifetimeTotals || cardHistory || latestCycleAllocations ? 8 : 7;
   const allocations = Array.isArray(latestCycleAllocations) ? latestCycleAllocations : [];
   const projectedCap = capProjection(authorityStatus);
+  const heldPositions = projectHeldPositions(authorityStatus?.heldPositions);
+  const manualApprovals = projectManualApprovals(authorityStatus?.manualApprovals);
   return {
     schemaVersion,
     historyComplete,
@@ -215,7 +248,15 @@ export function buildDashboardReadModel({
       completeness: {
         cyclesScanned: lifetimeTotals?.cyclesScanned ?? 0,
         ...Object.fromEntries(Object.entries(lifetimeTotals?.completeness ?? {}).map(([key, value]) => [key, value === true])),
+        heldPositions: heldPositions !== null,
+        manualApprovals: manualApprovals !== null,
       },
+    } : {}),
+    ...(schemaVersion === 8 ? {
+      activeCycleId: authorityStatus?.activeCycleId ?? null,
+      pendingReason: schedulerView?.pendingReason ?? null,
+      heldPositions,
+      manualApprovals,
     } : {}),
     generatedAt: new Date(now()).toISOString(),
     nextCycleAt: nextCycleAt(configuration, lastTick),

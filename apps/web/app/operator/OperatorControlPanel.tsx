@@ -20,7 +20,7 @@ import {
   operatorHistoryLabel,
 } from "./operator-locale";
 import { formatNativeAmount } from "../../lib/native-accounting.mjs";
-import type { ActiveCycle, DashboardCard } from "./operator-types";
+import type { ActiveCycle, DashboardCard, HeldPosition, ManualApproval } from "./operator-types";
 import styles from "./operator.module.css";
 
 type Role = "viewer" | "operator";
@@ -115,6 +115,10 @@ type Dashboard = {
   }>;
   cards: DashboardCard[];
   activeCycle: ActiveCycle | null;
+  activeCycleId: string | null;
+  pendingReason: string | null;
+  heldPositions: HeldPosition[] | null;
+  manualApprovals: ManualApproval[] | null;
   latestCycle: {
     cycleId: string;
     status: string;
@@ -199,6 +203,15 @@ type Command =
   | { type: "pause" }
   | { type: "run-cycle-now" }
   | { type: "reconcile" }
+  | { type: "restart-request" }
+  | {
+      type: "held-owner-decision";
+      positionId: string;
+      heldEvidenceDigest: string;
+      expectedPositionRevision: number;
+      choice: "sell" | "keep-holding";
+    }
+  | { type: "manual-approval"; cycleId: string; cycleDigest: string }
   | {
       type: "update-configuration";
       configuration: {
@@ -425,6 +438,28 @@ export default function OperatorControlPanel() {
     // itself trigger a fix or a new transaction (that happens automatically inside the scheduler
     // when needed). Say exactly that, not a fabricated "problem resolved" outcome.
     void submitCommand({ type: "reconcile" }, "Zustand wurde neu gelesen und protokolliert.");
+  }
+
+  function resumeCycle() {
+    void submitCommand({ type: "restart-request" }, "Der aktive Zyklus wurde zur Fortsetzung vorgemerkt.");
+  }
+
+  function decideHeld(position: HeldPosition, choice: "sell" | "keep-holding") {
+    void submitCommand({
+      type: "held-owner-decision",
+      positionId: position.positionId,
+      heldEvidenceDigest: position.evidenceDigest,
+      expectedPositionRevision: position.positionRevision,
+      choice,
+    }, choice === "sell" ? "Verkauf der gehaltenen Karte wurde protokolliert." : "Weiterhalten der Karte wurde protokolliert.");
+  }
+
+  function approveManual(approval: ManualApproval) {
+    void submitCommand({
+      type: "manual-approval",
+      cycleId: approval.cycleId,
+      cycleDigest: approval.cycleDigest,
+    }, "Manuelle Freigabe wurde protokolliert.");
   }
 
   function togglePackAllowed(packId: string) {
@@ -867,6 +902,89 @@ export default function OperatorControlPanel() {
           </section>
         </aside>
       </div>
+
+      <section className={styles.activityGrid}>
+        <div className={styles.panel}>
+          <div className={styles.panelHeading}>
+            <div>
+              <span className={styles.sectionNumber}>SICHERHEIT</span>
+              <h2>Gehaltene Karten</h2>
+            </div>
+            {dashboard?.activeCycleId ? <span>Aktiver Zyklus vorhanden</span> : null}
+          </div>
+          {dashboard?.heldPositions === null || !dashboard ? (
+            <p className={styles.empty}>Nicht verfügbar</p>
+          ) : dashboard.heldPositions.length === 0 ? (
+            <p className={styles.empty}>Keine gehaltenen Karten.</p>
+          ) : (
+            <div className={styles.payoutList}>
+              {dashboard.heldPositions.map((position) => (
+                <article key={position.positionId} className={styles.payoutList}>
+                  <div>
+                    <strong>{position.cycleId}</strong>
+                    <small>{position.reason} · {position.terminalState}</small>
+                  </div>
+                  <div>
+                    <span>Kosten: {formatGermanUsd(position.costMicroUsd)}</span>
+                    <span>Geöffnet: {formatGermanDate(position.openedAt)}</span>
+                    <span>Revision: {position.positionRevision}</span>
+                    <code>{position.evidenceDigest.slice(0, 19)}…</code>
+                  </div>
+                  <div>
+                    <span>{position.ownerDecision ? `Entscheidung: ${germanStatus(position.ownerDecision.choice)}` : "Keine Entscheidung"}</span>
+                    {!readOnly ? (
+                      <div className={styles.actionStack}>
+                        <button className={styles.secondaryButton} type="button" disabled={controlsDisabled} onClick={() => decideHeld(position, "sell")}>
+                          Verkaufen
+                        </button>
+                        <button className={styles.secondaryButton} type="button" disabled={controlsDisabled} onClick={() => decideHeld(position, "keep-holding")}>
+                          Weiter halten
+                        </button>
+                      </div>
+                    ) : null}
+                  </div>
+                </article>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className={styles.panel}>
+          <div className={styles.panelHeading}>
+            <div>
+              <span className={styles.sectionNumber}>FREIGABEN</span>
+              <h2>Manuelle Freigaben</h2>
+            </div>
+          </div>
+          {dashboard?.manualApprovals === null || !dashboard ? (
+            <p className={styles.empty}>Nicht verfügbar</p>
+          ) : dashboard.manualApprovals.length === 0 ? (
+            <p className={styles.empty}>Keine manuellen Freigaben.</p>
+          ) : (
+            <ol className={styles.payoutList}>
+              {dashboard.manualApprovals.map((approval) => (
+                <li key={approval.cycleDigest}>
+                  <span>{approval.cycleId} · {approval.mode}</span>
+                  <strong>{approval.approved ? "Erledigt" : "Ausstehend"}</strong>
+                  {!approval.approved && !readOnly ? (
+                    <button className={styles.secondaryButton} type="button" disabled={controlsDisabled} onClick={() => approveManual(approval)}>
+                      Freigeben
+                    </button>
+                  ) : null}
+                </li>
+              ))}
+            </ol>
+          )}
+          <button
+            className={styles.primaryButton}
+            type="button"
+            disabled={controlsDisabled || dashboard?.activeCycleId === null || !dashboard?.activeCycleId}
+            onClick={resumeCycle}
+          >
+            Zyklus fortsetzen
+          </button>
+        </div>
+      </section>
 
       <OperatorCardHistory
         liveCards={dashboard?.cards ?? []}
@@ -1467,6 +1585,77 @@ function decodeDashboard(value: unknown): Dashboard {
       ? null
       : decodeActiveCycle(raw.activeCycle),
     latestCycle: decodeLatestCycle(raw.latestCycle, schemaVersion),
+    activeCycleId: raw.schemaVersion === 8 ? dashboardNullableText(raw.activeCycleId) : null,
+    pendingReason: raw.schemaVersion === 8 ? dashboardNullableText(raw.pendingReason) : null,
+    heldPositions: raw.schemaVersion === 8
+      ? (raw.heldPositions === null ? null : dashboardArray(raw.heldPositions, 10_000).map(decodeHeldPosition))
+      : null,
+    manualApprovals: raw.schemaVersion === 8
+      ? (raw.manualApprovals === null ? null : dashboardArray(raw.manualApprovals, 10_000).map(decodeManualApproval))
+      : null,
+  };
+}
+
+function decodeHeldPosition(value: unknown): HeldPosition {
+  const raw = dashboardRecord(value);
+  dashboardExactKeys(raw, new Set([
+    "positionId", "cycleId", "costMicroUsd", "insuredValue", "reason", "terminalState",
+    "evidenceDigest", "openedAt", "positionRevision", "ownerDecision",
+  ]));
+  const insuredValue = raw.insuredValue === null ? null : dashboardRecord(raw.insuredValue);
+  if (insuredValue !== null) {
+    dashboardExactKeys(insuredValue, new Set(["chainId", "assetId", "units", "decimals"]));
+    dashboardText(insuredValue.chainId);
+    dashboardText(insuredValue.assetId);
+    dashboardMoney(insuredValue.units);
+    dashboardInteger(insuredValue.decimals, 0, 255);
+  }
+  let ownerDecision: HeldPosition["ownerDecision"] = null;
+  if (raw.ownerDecision !== null) {
+    const decision = dashboardRecord(raw.ownerDecision);
+    dashboardExactKeys(decision, new Set([
+      "positionId", "heldEvidenceDigest", "requestId", "expectedRevision", "choice",
+    ]));
+    ownerDecision = {
+      positionId: dashboardText(decision.positionId),
+      heldEvidenceDigest: dashboardText(decision.heldEvidenceDigest),
+      requestId: dashboardText(decision.requestId),
+      expectedRevision: dashboardInteger(decision.expectedRevision, 0),
+      choice: decision.choice === "sell" || decision.choice === "keep-holding"
+        ? decision.choice
+        : (() => { throw new Error(DASHBOARD_RESPONSE_INVALID); })(),
+    };
+  }
+  return {
+    positionId: dashboardText(raw.positionId),
+    cycleId: dashboardText(raw.cycleId),
+    costMicroUsd: dashboardMoney(raw.costMicroUsd),
+    insuredValue: insuredValue as HeldPosition["insuredValue"],
+    reason: dashboardText(raw.reason),
+    terminalState: dashboardText(raw.terminalState),
+    evidenceDigest: dashboardText(raw.evidenceDigest),
+    openedAt: dashboardTimestamp(raw.openedAt),
+    positionRevision: dashboardInteger(raw.positionRevision, 0),
+    ownerDecision,
+  };
+}
+
+function decodeManualApproval(value: unknown): ManualApproval {
+  const raw = dashboardRecord(value);
+  dashboardExactKeys(raw, new Set([
+    "cycleId", "cycleDigest", "mode", "ordinal", "releaseCostMicroUsd",
+    "openedAt", "approved", "approvedAt",
+  ]));
+  if (raw.mode !== "production" && raw.mode !== "rehearsal") throw new Error(DASHBOARD_RESPONSE_INVALID);
+  return {
+    cycleId: dashboardText(raw.cycleId),
+    cycleDigest: dashboardText(raw.cycleDigest),
+    mode: raw.mode,
+    ordinal: dashboardInteger(raw.ordinal, 1),
+    releaseCostMicroUsd: dashboardMoney(raw.releaseCostMicroUsd),
+    openedAt: dashboardTimestamp(raw.openedAt),
+    approved: dashboardBoolean(raw.approved),
+    approvedAt: raw.approvedAt === null ? null : dashboardTimestamp(raw.approvedAt),
   };
 }
 

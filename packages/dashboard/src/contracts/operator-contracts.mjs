@@ -16,6 +16,7 @@ import {
   invalidWith,
   isoTimestamp,
   money,
+  nullableAmount,
   nullableMoney,
   nullableText,
   optionalTimestamp,
@@ -91,17 +92,17 @@ function readCommand(value) {
     return { type, cycleId: source.cycleId, cycleDigest: source.cycleDigest };
   }
   if (type === 'held-owner-decision') {
-    exactKeys(source, new Set(['type', 'cycleId', 'heldEvidenceDigest', 'expectedCycleRevision', 'choice']), invalid);
-    requiredKeys(source, ['type', 'cycleId', 'heldEvidenceDigest', 'expectedCycleRevision', 'choice'], invalid);
-    if (typeof source.cycleId !== 'string' || !runnerCycleIdPattern.test(source.cycleId)) invalid();
+    exactKeys(source, new Set(['type', 'positionId', 'heldEvidenceDigest', 'expectedPositionRevision', 'choice']), invalid);
+    requiredKeys(source, ['type', 'positionId', 'heldEvidenceDigest', 'expectedPositionRevision', 'choice'], invalid);
+    if (typeof source.positionId !== 'string' || !/^held:[0-9a-f]{64}$/.test(source.positionId)) invalid();
     if (typeof source.heldEvidenceDigest !== 'string' || !cycleDigestPattern.test(source.heldEvidenceDigest)) invalid();
-    if (!Number.isSafeInteger(source.expectedCycleRevision) || source.expectedCycleRevision < 0) invalid();
+    if (!Number.isSafeInteger(source.expectedPositionRevision) || source.expectedPositionRevision < 0) invalid();
     if (source.choice !== 'sell' && source.choice !== 'keep-holding') invalid();
     return {
       type,
-      cycleId: source.cycleId,
+      positionId: source.positionId,
       heldEvidenceDigest: source.heldEvidenceDigest,
-      expectedCycleRevision: source.expectedCycleRevision,
+      expectedPositionRevision: source.expectedPositionRevision,
       choice: source.choice,
     };
   }
@@ -332,7 +333,15 @@ const DASHBOARD_KEYS = new Set([
   'cap', 'custody', 'alerts', 'payoutStatus',
 ]);
 const DASHBOARD_V6_KEYS = new Set([...DASHBOARD_KEYS, 'alertSources']);
-const DASHBOARD_V8_KEYS = new Set([...DASHBOARD_KEYS, 'completeness', 'alertSources']);
+const DASHBOARD_V8_KEYS = new Set([
+  ...DASHBOARD_KEYS,
+  'completeness',
+  'alertSources',
+  'activeCycleId',
+  'pendingReason',
+  'heldPositions',
+  'manualApprovals',
+]);
 const DASHBOARD_METRICS_KEYS = new Set([
   'cycleStartProjectPoolMicroUsdg', 'totalCycleFundingMicroUsdg', 'totalCollectorSpendMicroUsdg',
   'totalBuybacksReturnedMicroUsdg', 'totalBridgedBackMicroUsdg', 'totalRewardsPaidMicroUsdg',
@@ -345,9 +354,14 @@ const DASHBOARD_NATIVE_METRICS_KEYS = new Set([
     .map(nativeFieldName),
   'completedCycles', 'skippedCycles', 'openedPacks',
 ]);
-const ACTIVE_CYCLE_KEYS = new Set([
+const ACTIVE_CYCLE_HISTORICAL_KEYS = new Set([
   'cycleId', 'status', 'updatedAt', 'configurationRevision', 'allowedPackIds', 'requestedOrders',
   'maxBoostersPerCycle', 'maxUnitPriceMicroUsdg', 'maxCycleBudgetMicroUsdg', 'max24HourBudgetMicroUsdg',
+  'revealedCards', 'rewardRecipientLimit',
+]);
+const ACTIVE_CYCLE_NATIVE_KEYS = new Set([
+  'cycleId', 'status', 'updatedAt', 'configurationRevision', 'allowedPackIds', 'requestedOrders',
+  'maxBoostersPerCycle', 'maxUnitPriceMicroUsd', 'maxCycleBudgetMicroUsd', 'max24HourBudgetMicroUsd',
   'revealedCards', 'rewardRecipientLimit',
 ]);
 const DASHBOARD_LATEST_CYCLE_KEYS = new Set([
@@ -356,6 +370,68 @@ const DASHBOARD_LATEST_CYCLE_KEYS = new Set([
 ]);
 const DASHBOARD_NATIVE_LATEST_CYCLE_KEYS = new Set([...DASHBOARD_LATEST_CYCLE_KEYS, 'paidWei']);
 const DASHBOARD_HISTORICAL_LATEST_CYCLE_KEYS = new Set([...DASHBOARD_LATEST_CYCLE_KEYS, 'paidMicroUsdg']);
+const HELD_OWNER_DECISION_KEYS = new Set([
+  'positionId', 'heldEvidenceDigest', 'requestId', 'expectedRevision', 'choice',
+]);
+
+function assertHeldOwnerDecision(value) {
+  const decision = requiredRecord(value, invalid);
+  exactKeys(decision, HELD_OWNER_DECISION_KEYS, invalid);
+  requiredKeys(decision, [...HELD_OWNER_DECISION_KEYS], invalid);
+  if (typeof decision.positionId !== 'string' || !/^held:[0-9a-f]{64}$/.test(decision.positionId)) invalid();
+  if (typeof decision.heldEvidenceDigest !== 'string' || !cycleDigestPattern.test(decision.heldEvidenceDigest)) invalid();
+  if (typeof decision.requestId !== 'string' || !requestIdPattern.test(decision.requestId)) invalid();
+  if (!Number.isSafeInteger(decision.expectedRevision) || decision.expectedRevision < 0) invalid();
+  if (decision.choice !== 'sell' && decision.choice !== 'keep-holding') invalid();
+}
+
+function assertHeldPositions(value) {
+  if (value === null) return;
+  boundedArray(value, 10_000, invalid).forEach(position => {
+    const record = requiredRecord(position, invalid);
+    exactKeys(record, new Set([
+      'positionId', 'cycleId', 'costMicroUsd', 'insuredValue', 'reason',
+      'terminalState', 'evidenceDigest', 'openedAt', 'positionRevision', 'ownerDecision',
+    ]), invalid);
+    requiredKeys(record, [
+      'positionId', 'cycleId', 'costMicroUsd', 'insuredValue', 'reason',
+      'terminalState', 'evidenceDigest', 'openedAt', 'positionRevision', 'ownerDecision',
+    ], invalid);
+    if (typeof record.positionId !== 'string' || !/^held:[0-9a-f]{64}$/.test(record.positionId)) invalid();
+    boundedText(record.cycleId, invalid);
+    money(record.costMicroUsd, invalid);
+    nullableAmount(record.insuredValue, invalid);
+    boundedText(record.reason, invalid);
+    boundedText(record.terminalState, invalid);
+    if (typeof record.evidenceDigest !== 'string' || !cycleDigestPattern.test(record.evidenceDigest)) invalid();
+    isoTimestamp(record.openedAt, invalid);
+    if (!Number.isSafeInteger(record.positionRevision) || record.positionRevision < 0) invalid();
+    if (record.ownerDecision !== null) assertHeldOwnerDecision(record.ownerDecision);
+  });
+}
+
+function assertManualApprovals(value) {
+  if (value === null) return;
+  boundedArray(value, 10_000, invalid).forEach(approval => {
+    const record = requiredRecord(approval, invalid);
+    exactKeys(record, new Set([
+      'cycleId', 'cycleDigest', 'mode', 'ordinal', 'releaseCostMicroUsd',
+      'openedAt', 'approved', 'approvedAt',
+    ]), invalid);
+    requiredKeys(record, [
+      'cycleId', 'cycleDigest', 'mode', 'ordinal', 'releaseCostMicroUsd',
+      'openedAt', 'approved', 'approvedAt',
+    ], invalid);
+    boundedText(record.cycleId, invalid);
+    if (typeof record.cycleDigest !== 'string' || !cycleDigestPattern.test(record.cycleDigest)) invalid();
+    if (record.mode !== 'production' && record.mode !== 'rehearsal') invalid();
+    if (!Number.isSafeInteger(record.ordinal) || record.ordinal < 1) invalid();
+    money(record.releaseCostMicroUsd, invalid);
+    isoTimestamp(record.openedAt, invalid);
+    if (typeof record.approved !== 'boolean') invalid();
+    if (record.approvedAt !== null) isoTimestamp(record.approvedAt, invalid);
+  });
+}
 
 /** Validate `/operator/api/dashboard`'s response shape (readSet: apps/web/app/operator/
  * OperatorControlPanel.tsx's `Dashboard` type / `decodeDashboard`). Only checks key sets and basic
@@ -413,6 +489,11 @@ export function assertDashboardResponse(value) {
     for (const [key, value] of Object.entries(completeness)) {
       if (key !== 'cyclesScanned' && typeof value !== 'boolean') invalid();
     }
+    if (source.activeCycleId !== null) boundedText(source.activeCycleId, invalid);
+    if (source.pendingReason !== null) boundedText(source.pendingReason, invalid);
+    assertHeldPositions(source.heldPositions);
+    assertManualApprovals(source.manualApprovals);
+    if (typeof completeness.heldPositions !== 'boolean' || typeof completeness.manualApprovals !== 'boolean') invalid();
   }
   boundedArray(source.latestCycleTopAllocations, 200, invalid).forEach(allocation => {
     const value = requiredRecord(allocation, invalid);
@@ -427,9 +508,7 @@ export function assertDashboardResponse(value) {
   if (source.activeCycle !== null) {
     const activeCycle = requiredRecord(source.activeCycle, invalid);
     const nativeActiveCycle = Object.hasOwn(activeCycle, 'maxUnitPriceMicroUsd');
-    const activeCycleKeys = nativeActiveCycle
-      ? new Set([...ACTIVE_CYCLE_KEYS].map(key => key.endsWith('MicroUsdg') ? key.slice(0, -1) : key))
-      : ACTIVE_CYCLE_KEYS;
+    const activeCycleKeys = nativeActiveCycle ? ACTIVE_CYCLE_NATIVE_KEYS : ACTIVE_CYCLE_HISTORICAL_KEYS;
     exactKeys(activeCycle, activeCycleKeys, invalid);
     requiredKeys(activeCycle, activeCycleKeys, invalid);
     boundedText(activeCycle.cycleId, invalid);

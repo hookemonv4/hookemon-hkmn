@@ -10,10 +10,10 @@ or moving custody.
 ## Public interface
 
 - `GET /operator/api/bootstrap` and `GET /operator/api/dashboard` return views derived from
-  `operatorControl.status()`. The dashboard emits schema version 6 with canonical lifecycle state,
+  `operatorControl.status()`. The dashboard emits schema version 8 with canonical lifecycle state,
   per-cycle stage and request identifiers, typed transaction identifiers, cap usage, custody
-  buckets, telemetry-source availability, alerts, held-owner facts, and payout status from that
-  authority snapshot.
+  buckets, telemetry-source availability, alerts, held-owner facts, held-card inventory, manual
+  approvals, and payout status from that authority snapshot.
 - The dashboard response validator continues to accept the prior schema versions with their
   cap-only response shape. Version 6 requires loss and outstanding-custody cap usage plus
   `alertSources`.
@@ -26,6 +26,14 @@ runner supplies `readCatalog` and `readReadiness` seams. Catalog status is one o
 service ready. Readiness is the result of `assertStartReadiness` with bounded `start-readiness:`
 reasons on rejection. A standalone listener without those seams retains the legacy
 `catalog-not-loaded` fallback.
+- Schema 8 exposes `activeCycleId`, scheduler `pendingReason`, `heldPositions`, and
+  `manualApprovals`. The two arrays are bounded to 10,000 and remain `null` when their source
+  telemetry or configuration is unavailable. `completeness.heldPositions` and
+  `completeness.manualApprovals` are false for those null values; no empty list is substituted.
+- Held positions expose the durable position identity, cycle, USD cost, typed insured value,
+  quarantine reason, terminal state, evidence digest, opened timestamp, revision, and existing
+  owner decision. Manual approvals expose the durable cycle digest, mode ordinal, release cost,
+  approval state, and approval timestamp.
 - `GET /public/api/cycle-status` and `GET /public/api/community-dashboard` derive their read-only
   responses from the same authority snapshot.
 - `GET /public/api/cycle-history` returns a schema version 1, paginated, read-only page of terminal
@@ -77,6 +85,10 @@ reasons on rejection. A standalone listener without those seams retains the lega
   routes against corrupted evidence.
 - Reconcile dispatches only the runner's read-only reconcile command. It does not trigger a
   scheduler tick, recovery, signing, or provider mutation.
+- Held-owner decisions use `{ type: "held-owner-decision", positionId, heldEvidenceDigest,
+  expectedPositionRevision, choice }`; the dashboard forwards this runner-native shape unchanged.
+  Manual approvals use `{ type: "manual-approval", cycleId, cycleDigest }`. The existing
+  `restart-request` alias dispatches `resume-cycle` for an active cycle.
 - The dashboard never signs, broadcasts, deploys, spends, moves custody, or substitutes for the
   runner authority.
 - The dashboard profile defaults to `mainnet`. A supplied chain ID must match that profile before a
