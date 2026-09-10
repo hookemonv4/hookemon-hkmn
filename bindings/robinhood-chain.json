@@ -19,7 +19,7 @@
   },
   "observedAt": "2026-08-30",
   "bindingMode": "BUILD_ONLY_FAIL_CLOSED",
-  "manifestDigest": "sha256:be96048d000bf20f48f4cf5389cad755d928e32762ad1b9b88b5fc661377df08",
+  "manifestDigest": "sha256:ffe969c18a3bdf6bb1200299cf55541dd38af7a680c336553b4e5ae38d22e0c9",
   "sourceSetDigest": "sha256:35ffa674dfdbee0fceef1e64614b3291cd19c2f862fc9fb6c5a0dda7bc25b031",
   "abiSetDigest": "sha256:19419411f02f975f7dc1c62dd948017119d882787c6f5525813f1a60fd8d864e",
   "runtimeSetDigest": "sha256:a11752c21fc1d8c536e769a57ca10811ae310c5285bd1c84ed2068ec6545595e",
@@ -307,15 +307,15 @@
     "artifacts": [
       {
         "path": "packages/contracts/src/bindings/RobinhoodBindings.sol",
-        "sha256": "sha256:e8e18d027a852627b70bdb6bd10b2df7eb23a1caa664adc968e9cde15b9c8d18"
+        "sha256": "sha256:08a3192bdd8da15ce3b7004d82e6e986f5a28fc9d366d4e5a04459923559c4a9"
       },
       {
         "path": "packages/contracts/test/bindings/RobinhoodBindings.t.sol",
-        "sha256": "sha256:bfa9d0c737a27009241e0b8033b5ab8aa1f74e0165e7f64bd9ba49cfd02ace10"
+        "sha256": "sha256:083ac17f5936ce765fce65d70527b91aa0262abc49b2bcbfa4dcf272ddc656a9"
       },
       {
         "path": "packages/contracts/test/bindings/RobinhoodV4PoolManager.t.sol",
-        "sha256": "sha256:e031c101fbf1ccdee34f9a91ea4bd09dcfd9d3c8f362ee3bc3de0847413a519f"
+        "sha256": "sha256:5b7985ce7e55e54fcfa32aa1e013c607f7c6460141cca98ae3e536f580751cc9"
       },
       {
         "path": "feasibility/model.mjs",

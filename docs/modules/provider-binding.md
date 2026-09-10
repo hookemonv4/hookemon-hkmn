@@ -94,3 +94,5 @@ Commitment validators require exact field arrays and string-typed hashes, addres
 Native commitment consistency checks snapshot plain metadata and owned byte buffers before validation. Coercible paths, metadata accessors and sparse canonical arrays are rejected. This consistency check does not independently establish live runtime authority.
 
 The provisional native build record binds revision 75 and its inclusive 20/40/240 fee split to exact current input hashes. Historical freeze and approval hashes retain their original values. This build record cannot grant production readiness, provider admission or a live interface freeze.
+
+`write-robinhood-binding.mjs` regenerates the active manifest's local Solidity/test hashes and its index digest from current repository bytes. External source, ABI and runtime observations keep their recorded values and dates; this local refresh provides no native feasibility or production authority. Run the offline binding verifier after changing a tracked proof input.

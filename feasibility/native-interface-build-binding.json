@@ -8,7 +8,7 @@
   "inputHashes": {
     "architecture/interfaces.json": "562e2ae60ddfba254e22a67dc5f535c6773be41451fffe7d3f3ff48fb81b69f2",
     "architecture/provisional-interfaces.json": "556f6ef19d8af6b4d48db59e8a8c279f30ca33655c1c09a26bc81dbd2c3195e7",
-    "bindings/robinhood-chain.json": "10f7b2c02ec8d108e2bb90371adbe3a2eedc8f0f10dca8c6becfe2f3573d9f69",
+    "bindings/robinhood-chain.json": "d4ed4dd2030d7c24114d30933a96c5ef31dd486e119c0919eb231c7851b8fa8c",
     "decisions/native-eth-interface/IMPLEMENTATION-SCOPE.md": "3e307c157d987b97223ffadb8b79ebfd079d674ca79b3266430015b8fef6c59f",
     "decisions/owner-approvals/revision-67-spec-s5-approved.json": "aebdddeb596ce2f9b6cd1fed6cbd9621cbcb5897c06b911d291608f5f376ca8b",
     "decisions/owner-approvals/revision-68-spec-s5-approved.json": "38146dffe3f47df9e5cf62f03e049310bf638ee141052b24c7b1bb97c43fd1a2",
