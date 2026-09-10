@@ -118,7 +118,7 @@ contract BlindCanonicalMarketHook is BaseTestHooks, CanonicalMarketCallback {
     }
 
     function _previewTotalFee(uint256 executedUsdg) internal pure override returns (uint256) {
-        return executedUsdg * 20 / 10_000 + executedUsdg * 40 / 10_000 + executedUsdg * 240 / 10_000;
+        return executedUsdg * 20 / 10_000 + executedUsdg * 30 / 10_000 + executedUsdg * 250 / 10_000;
     }
 
     function beforeInitialize(address, PoolKey calldata, uint160)
@@ -305,8 +305,8 @@ contract BlindCanonicalMarketAdapter is IBlindCanonicalMarketSubject {
 
     function _split(uint256 executedUsdg) private pure returns (BlindFeeSplit memory fee) {
         fee.programmable = executedUsdg * 20 / 10_000;
-        fee.treasury = executedUsdg * 40 / 10_000;
-        fee.process = executedUsdg * 240 / 10_000;
+        fee.treasury = executedUsdg * 30 / 10_000;
+        fee.process = executedUsdg * 250 / 10_000;
         fee.total = fee.programmable + fee.treasury + fee.process;
     }
 
@@ -412,8 +412,8 @@ contract BlindCanonicalMarketConcreteAcceptance {
 
     function _independentSplit(uint256 gross) private pure returns (BlindFeeSplit memory fee) {
         fee.programmable = gross * 20 / BPS_DENOMINATOR;
-        fee.treasury = gross * 40 / BPS_DENOMINATOR;
-        fee.process = gross * 240 / BPS_DENOMINATOR;
+        fee.treasury = gross * 30 / BPS_DENOMINATOR;
+        fee.process = gross * 250 / BPS_DENOMINATOR;
         fee.total = fee.programmable + fee.treasury + fee.process;
     }
 

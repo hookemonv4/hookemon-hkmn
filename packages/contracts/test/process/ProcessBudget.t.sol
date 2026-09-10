@@ -254,8 +254,8 @@ contract ProcessBudgetTest {
         subject.claimProgrammable();
         VM.prank(TREASURY);
         subject.claimTreasury();
-        assert(token.balanceOf(PROGRAMMABLE) == 20);
-        assert(token.balanceOf(TREASURY) == 80);
+        assert(token.balanceOf(PROGRAMMABLE) == 40);
+        assert(token.balanceOf(TREASURY) == 60);
         assert(subject.processLiability() == 500);
         assert(token.balanceOf(address(vault)) == 0);
         assert(token.balanceOf(OPERATIONS) == 0);

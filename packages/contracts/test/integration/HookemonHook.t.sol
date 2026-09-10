@@ -526,7 +526,7 @@ contract HookemonHookTest is Test {
     }
 
     /// @dev Every live callback quadrant produces observed gross USDG fragments whose cumulative
-    ///      20/40/240-bps allocation matches an independent unsplit lifetime transition. The
+    ///      20/30/250-bps allocation matches an independent unsplit lifetime transition. The
     ///      precise 1,000/1,499 two-versus-one boundary proof lives in FeeAccounting.t.sol:
     ///      a real exact-input swap whose USDG is output can round one atomic unit below its
     ///      specified input, so those boundary values are not stable live-pool fixtures.
@@ -709,7 +709,7 @@ contract HookemonHookTest is Test {
         uint256 process;
     }
 
-    /// @dev Mirrors the independent 20/40/240-bps lifetime accumulators from observed gross
+    /// @dev Mirrors the independent 20/30/250-bps lifetime accumulators from observed gross
     ///      volume. It advances once per successful swap for each hook and never reads hook-owned
     ///      execution state to derive the expectation.
     mapping(address hook => uint256 remainder) private mirrorProgrammableRemainder;
@@ -724,10 +724,10 @@ contract HookemonHookTest is Test {
             _cumulativeIncrement(executedUsdg, 20, mirrorProgrammableRemainder[address(hook)]);
         mirrorProgrammableRemainder[address(hook)] = newProgRem;
         (uint256 treasuryInc, uint256 newTreasuryRem) =
-            _cumulativeIncrement(executedUsdg, 40, mirrorTreasuryRemainder[address(hook)]);
+            _cumulativeIncrement(executedUsdg, 30, mirrorTreasuryRemainder[address(hook)]);
         mirrorTreasuryRemainder[address(hook)] = newTreasuryRem;
         (uint256 processInc, uint256 newProcessRem) =
-            _cumulativeIncrement(executedUsdg, 240, mirrorProcessRemainder[address(hook)]);
+            _cumulativeIncrement(executedUsdg, 250, mirrorProcessRemainder[address(hook)]);
         mirrorProcessRemainder[address(hook)] = newProcessRem;
 
         expected.programmable = programmableInc;
@@ -742,8 +742,8 @@ contract HookemonHookTest is Test {
         returns (ExpectedSplit memory expected)
     {
         (expected.programmable,) = _cumulativeIncrement(gross, 20, 0);
-        (expected.treasury,) = _cumulativeIncrement(gross, 40, 0);
-        (expected.process,) = _cumulativeIncrement(gross, 240, 0);
+        (expected.treasury,) = _cumulativeIncrement(gross, 30, 0);
+        (expected.process,) = _cumulativeIncrement(gross, 250, 0);
         expected.total = expected.programmable + expected.treasury + expected.process;
     }
 
@@ -767,8 +767,8 @@ contract HookemonHookTest is Test {
         (uint256 programmable,) =
             _cumulativeIncrement(gross, 20, mirrorProgrammableRemainder[address(hook)]);
         (uint256 treasury,) =
-            _cumulativeIncrement(gross, 40, mirrorTreasuryRemainder[address(hook)]);
-        (uint256 process,) = _cumulativeIncrement(gross, 240, mirrorProcessRemainder[address(hook)]);
+            _cumulativeIncrement(gross, 30, mirrorTreasuryRemainder[address(hook)]);
+        (uint256 process,) = _cumulativeIncrement(gross, 250, mirrorProcessRemainder[address(hook)]);
         return programmable + treasury + process;
     }
 
@@ -889,14 +889,14 @@ contract HookemonHookTest is Test {
         assertGt(firstAccrual.programmable, 0);
         assertGt(firstAccrual.treasury, 0);
         assertGt(firstAccrual.process, 0);
-        assertEq(hook.processLiability(), 240);
+        assertEq(hook.processLiability(), 250);
         address programmableDestination = address(0xBEEF);
         address treasuryDestination = address(0xCAFE);
         vm.etch(PROGRAMMABLE, hex"60006000fd");
         vm.expectRevert(FeeAccounting.TokenTransferFailed.selector);
         vm.prank(PROGRAMMABLE);
         hook.claimProgrammable(PROGRAMMABLE);
-        assertEq(hook.processLiability(), 240);
+        assertEq(hook.processLiability(), 250);
         vm.etch(PROGRAMMABLE, hex"");
         vm.expectRevert(MoneyRoles.InvalidDestination.selector);
         vm.prank(PROGRAMMABLE);
@@ -937,9 +937,9 @@ contract HookemonHookTest is Test {
         vm.prank(TREASURY);
         hook.claimTreasury(treasuryDestination);
         assertEq(programmableDestination.balance, 20);
-        assertEq(treasuryDestination.balance, 40);
+        assertEq(treasuryDestination.balance, 30);
         assertEq(OPERATIONS.balance, 0);
-        assertEq(hook.processLiability(), 240);
+        assertEq(hook.processLiability(), 250);
 
         vm.recordLogs();
         _performSwap(key, true, -int256(10_001));
@@ -950,11 +950,11 @@ contract HookemonHookTest is Test {
         );
         assertEq(
             secondAccrual.treasury,
-            (firstAccrual.treasury + secondAccrual.executedUsdg * 40) % 10_000
+            (firstAccrual.treasury + secondAccrual.executedUsdg * 30) % 10_000
         );
         assertEq(
             secondAccrual.process,
-            (firstAccrual.process + secondAccrual.executedUsdg * 240) % 10_000
+            (firstAccrual.process + secondAccrual.executedUsdg * 250) % 10_000
         );
     }
 
@@ -965,8 +965,8 @@ contract HookemonHookTest is Test {
         (uint256 programmable, uint256 treasury, uint256 process) =
             hook.readFeeLiabilities(TREASURY);
         assertEq(programmable, 20);
-        assertEq(treasury, 40);
-        assertEq(process, 240);
+        assertEq(treasury, 30);
+        assertEq(process, 250);
 
         vm.prank(PROGRAMMABLE);
         vm.expectRevert(FeeAccounting.InvalidLiabilityAmount.selector);
@@ -984,8 +984,8 @@ contract HookemonHookTest is Test {
 
         (programmable, treasury, process) = hook.readFeeLiabilities(TREASURY);
         assertEq(programmable, 20);
-        assertEq(treasury, 40);
-        assertEq(process, 240);
+        assertEq(treasury, 30);
+        assertEq(process, 250);
     }
 
     function testNativeClaimsRequireSuccessfulValueCall() external {

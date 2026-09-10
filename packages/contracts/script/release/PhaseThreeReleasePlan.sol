@@ -49,8 +49,8 @@ contract PhaseThreeReleasePlan {
     uint24 public constant POOL_FEE = 0;
     int24 public constant TICK_SPACING = 60;
     uint16 public constant PROGRAMMABLE_FEE_BPS = 20;
-    uint16 public constant TREASURY_FEE_BPS = 40;
-    uint16 public constant PROCESS_FEE_BPS = 240;
+    uint16 public constant TREASURY_FEE_BPS = 30;
+    uint16 public constant PROCESS_FEE_BPS = 250;
 
     struct Draft {
         uint256 chainId;

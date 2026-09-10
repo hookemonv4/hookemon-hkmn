@@ -23,7 +23,7 @@ library RobinhoodBindings {
     uint24 internal constant STATIC_LP_FEE = 0;
     uint16 internal constant TOTAL_HOOK_FEE_BPS = 300;
     uint16 internal constant PROGRAMMABLE_FEE_BPS = 20;
-    uint16 internal constant TREASURY_FEE_BPS = 40;
+    uint16 internal constant TREASURY_FEE_BPS = 30;
     uint16 internal constant MARKET_ALLOCATION_BPS = 9_000;
     uint160 internal constant ALL_HOOK_PERMISSION_MASK = (1 << 14) - 1;
     uint160 internal constant REQUIRED_HOOK_PERMISSION_MASK = 0x20CC;

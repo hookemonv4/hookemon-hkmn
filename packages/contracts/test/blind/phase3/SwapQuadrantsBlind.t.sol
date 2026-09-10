@@ -9,7 +9,7 @@ pragma solidity 0.8.26;
 //
 // Oracle strategy: on a *freshly deployed* hook the three cumulative-remainder accumulators start
 // at 0, so for the very first swap the fee split must equal floor(gross*bps/10_000) exactly for
-// each of the 20/40/240 bps streams (see FeeAccountingBlind.t.sol for the algebraic proof). This
+// each of the 20/30/250 bps streams (see FeeAccountingBlind.t.sol for the algebraic proof). This
 // lets us check the split-math wiring for all 4 native quadrants without having to reimplement Uniswap
 // v4's tick math to independently predict `gross` itself; the two quadrants where the USDG side is
 // the *specified, exact-input* leg are additionally checked against a fully independent gross
@@ -269,8 +269,8 @@ contract SwapQuadrantsBlindTest is Test {
         (uint256 programmable, uint256 treasury, uint256 process) =
             hook.readFeeLiabilities(TREASURY);
         assertEq(programmable, (gross * 20) / 10_000, "programmable != floor(gross*20/10000)");
-        assertEq(treasury, (gross * 40) / 10_000, "treasury != floor(gross*40/10000)");
-        assertEq(process, (gross * 240) / 10_000, "process != floor(gross*240/10000)");
+        assertEq(treasury, (gross * 30) / 10_000, "treasury != floor(gross*30/10000)");
+        assertEq(process, (gross * 250) / 10_000, "process != floor(gross*250/10000)");
         assertEq(hook.totalLiability(), programmable + treasury + process);
         assertTrue(hook.isSolvent());
     }

@@ -180,7 +180,7 @@ contract NativeFundingFeasibilityTest is Test, DeployPermit2 {
         }
         assertEq(matched, 1);
         swaps++;
-        assertEq(hook.processLiability(), gross * 240 / 10000);
+        assertEq(hook.processLiability(), gross * 250 / 10000);
         assertTrue(hook.isSolvent());
     }
 

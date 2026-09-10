@@ -413,7 +413,7 @@ contract RobinhoodBindingsTest {
             poolLpFee: 0,
             totalHookFeeBasisPoints: 300,
             programmableFeeBasisPoints: 20,
-            treasuryFeeBasisPoints: 40,
+            treasuryFeeBasisPoints: 30,
             marketAllocationBasisPoints: 9_000,
             hookPermissionMask: HOOK_MASK,
             sourceSetDigest: 0x35ffa674dfdbee0fceef1e64614b3291cd19c2f862fc9fb6c5a0dda7bc25b031,

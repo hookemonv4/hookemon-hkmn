@@ -635,8 +635,8 @@ contract RobinhoodV4ArchiveForkTest is Test {
         assertEq(address(hook).balance - hookBalanceBefore, expectedFee);
         assertEq(hook.totalLiability() - liabilityBefore, expectedFee);
         assertEq(programmable, uint256(USDG_ROUTER_TRADE_AMOUNT) * 20 / 10_000);
-        assertEq(treasury, uint256(USDG_ROUTER_TRADE_AMOUNT) * 40 / 10_000);
-        assertEq(process, uint256(USDG_ROUTER_TRADE_AMOUNT) * 240 / 10_000);
+        assertEq(treasury, uint256(USDG_ROUTER_TRADE_AMOUNT) * 30 / 10_000);
+        assertEq(process, uint256(USDG_ROUTER_TRADE_AMOUNT) * 250 / 10_000);
         _assertSolvent();
     }
 
@@ -724,7 +724,7 @@ contract RobinhoodV4ArchiveForkTest is Test {
 
         (uint256 programmableLiability, uint256 treasuryLiability, uint256 processLiability) =
             hook.readFeeLiabilities(TREASURY);
-        assertEq(processLiability, 240_000, "process fee allocation mismatch");
+        assertEq(processLiability, 250_000, "process fee allocation mismatch");
         _assertClaimAuthorizationGuards(programmable, operations);
 
         _claimProgrammableAndAssert(programmableLiability / 2, programmable);
@@ -1554,13 +1554,13 @@ contract RobinhoodV4ArchiveForkTest is Test {
     function _feeAccrualForGross(uint256 gross) private pure returns (FeeAccrual memory accrual) {
         accrual.gross = gross;
         accrual.programmable = _floorFee(gross, 20);
-        accrual.treasury = _floorFee(gross, 40);
-        accrual.process = _floorFee(gross, 240);
+        accrual.treasury = _floorFee(gross, 30);
+        accrual.process = _floorFee(gross, 250);
         accrual.total = accrual.programmable + accrual.treasury + accrual.process;
         accrual.remainders = FeeRemainders({
             programmable: _feeRemainder(gross, 20),
-            treasury: _feeRemainder(gross, 40),
-            process: _feeRemainder(gross, 240)
+            treasury: _feeRemainder(gross, 30),
+            process: _feeRemainder(gross, 250)
         });
     }
 

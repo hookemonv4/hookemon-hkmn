@@ -100,8 +100,8 @@ contract RobinhoodV4ForkTest is Test {
     uint160 private constant REQUIRED_HOOK_MASK = 0x20CC;
     uint256 private constant BPS_DENOMINATOR = 10_000;
     uint256 private constant PROGRAMMABLE_FEE_BPS = 20;
-    uint256 private constant TREASURY_FEE_BPS = 40;
-    uint256 private constant PROCESS_FEE_BPS = 240;
+    uint256 private constant TREASURY_FEE_BPS = 30;
+    uint256 private constant PROCESS_FEE_BPS = 250;
     bytes32 private constant POOL_SWAP_EVENT =
         keccak256("Swap(bytes32,address,int128,int128,uint160,uint128,int24,uint24)");
 

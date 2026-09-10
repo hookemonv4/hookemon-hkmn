@@ -34,8 +34,8 @@ abstract contract BlindMarketFeesAcceptance {
     uint256 internal constant HKMN_AMOUNT = 420_690;
     uint256 internal constant EXPECTED_TOTAL_FEE = 300;
     uint256 internal constant EXPECTED_PROGRAMMABLE = 20;
-    uint256 internal constant EXPECTED_TREASURY = 40;
-    uint256 internal constant EXPECTED_PROCESS = 240;
+    uint256 internal constant EXPECTED_TREASURY = 30;
+    uint256 internal constant EXPECTED_PROCESS = 250;
 
     function test_buyExactInputWhenUsdgIsCurrency0() external {
         _assertQuadrant(
@@ -141,7 +141,7 @@ abstract contract BlindMarketFeesAcceptance {
 
         uint256 expectedTotal = uint256(executedUsdg) * 300 / 10_000;
         uint256 expectedProgrammable = uint256(executedUsdg) * 20 / 10_000;
-        uint256 expectedTreasury = uint256(executedUsdg) * 40 / 10_000;
+        uint256 expectedTreasury = uint256(executedUsdg) * 30 / 10_000;
 
         _assertEq(fee.total, expectedTotal, "fuzzed total fee differs from the exact floor formula");
         _assertEq(
