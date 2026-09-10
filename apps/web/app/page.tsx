@@ -26,9 +26,9 @@ const journeySteps = [
     id: "split",
     number: "02",
     title: "Split the 3%",
-    copy: "0.1% is reserved for Programmable, 0.4% goes to the fixed Treasury wallet, and 2.5% enters the pack engine.",
+    copy: "Buys and sells include one 3% fee: 0.2% for Programmable, 0.3% for the fixed Treasury wallet, and 2.5% for the pack engine.",
     bubble: "Three percent becomes fuel.",
-    meta: "0.1 + 0.4 + 2.5",
+    meta: "0.2 + 0.3 + 2.5",
   },
   {
     id: "bridge",
@@ -221,7 +221,7 @@ export default function Home() {
               </section>
               <section
                 className="fee-composition"
-                aria-label="3 percent Hook fee: 0.1 percent Programmable, 0.4 percent Treasury, and 2.5 percent pack engine"
+                aria-label="3 percent Hook fee: 0.2 percent Programmable, 0.3 percent Treasury, and 2.5 percent pack engine"
               >
                 <div className="fee-composition-heading">
                   <span>3% HOOK FEE</span>
@@ -234,11 +234,11 @@ export default function Home() {
                 </div>
                 <div className="fee-value-grid">
                   <div className="fee-value-card programmable-card">
-                    <strong>0.1%</strong>
+                    <strong>0.2%</strong>
                     <span>Programmable</span>
                   </div>
                   <div className="fee-value-card treasury-card">
-                    <strong>0.4%</strong>
+                    <strong>0.3%</strong>
                     <span>Treasury</span>
                   </div>
                   <div className="fee-value-card project-card">

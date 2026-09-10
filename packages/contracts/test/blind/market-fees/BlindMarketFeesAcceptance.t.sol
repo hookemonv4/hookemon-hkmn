@@ -33,8 +33,8 @@ abstract contract BlindMarketFeesAcceptance {
     uint256 internal constant EXECUTED_USDG = 10_000;
     uint256 internal constant HKMN_AMOUNT = 420_690;
     uint256 internal constant EXPECTED_TOTAL_FEE = 300;
-    uint256 internal constant EXPECTED_PROGRAMMABLE = 10;
-    uint256 internal constant EXPECTED_TREASURY = 40;
+    uint256 internal constant EXPECTED_PROGRAMMABLE = 20;
+    uint256 internal constant EXPECTED_TREASURY = 30;
     uint256 internal constant EXPECTED_PROCESS = 250;
 
     function test_buyExactInputWhenUsdgIsCurrency0() external {
@@ -128,10 +128,10 @@ abstract contract BlindMarketFeesAcceptance {
         _assertFeeAt(34, 1, 0, 0, 1);
         _assertFeeAt(249, 7, 0, 0, 7);
         _assertFeeAt(250, 7, 0, 1, 6);
-        _assertFeeAt(999, 29, 0, 3, 26);
-        _assertFeeAt(1_000, 30, 1, 4, 25);
-        _assertFeeAt(3_333, 99, 3, 13, 83);
-        _assertFeeAt(3_334, 100, 3, 13, 84);
+        _assertFeeAt(999, 29, 1, 3, 25);
+        _assertFeeAt(1_000, 30, 2, 4, 24);
+        _assertFeeAt(3_333, 99, 6, 13, 80);
+        _assertFeeAt(3_334, 100, 6, 13, 81);
     }
 
     /// forge-config: default.fuzz.runs = 100000
@@ -140,8 +140,8 @@ abstract contract BlindMarketFeesAcceptance {
         BlindFeeSplit memory fee = subject.accrueAuthenticatedQuote(uint256(executedUsdg));
 
         uint256 expectedTotal = uint256(executedUsdg) * 300 / 10_000;
-        uint256 expectedProgrammable = uint256(executedUsdg) * 10 / 10_000;
-        uint256 expectedTreasury = uint256(executedUsdg) * 40 / 10_000;
+        uint256 expectedProgrammable = uint256(executedUsdg) * 20 / 10_000;
+        uint256 expectedTreasury = uint256(executedUsdg) * 30 / 10_000;
 
         _assertEq(fee.total, expectedTotal, "fuzzed total fee differs from the exact floor formula");
         _assertEq(

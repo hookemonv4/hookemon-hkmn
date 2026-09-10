@@ -22,8 +22,8 @@ library RobinhoodBindings {
     uint16 internal constant ARCHITECTURE_REVISION = 3;
     uint24 internal constant STATIC_LP_FEE = 0;
     uint16 internal constant TOTAL_HOOK_FEE_BPS = 300;
-    uint16 internal constant PROGRAMMABLE_FEE_BPS = 10;
-    uint16 internal constant TREASURY_FEE_BPS = 40;
+    uint16 internal constant PROGRAMMABLE_FEE_BPS = 20;
+    uint16 internal constant TREASURY_FEE_BPS = 30;
     uint16 internal constant MARKET_ALLOCATION_BPS = 9_000;
     uint160 internal constant ALL_HOOK_PERMISSION_MASK = (1 << 14) - 1;
     uint160 internal constant REQUIRED_HOOK_PERMISSION_MASK = 0x20CC;
@@ -41,7 +41,7 @@ library RobinhoodBindings {
     ///      `programmableBeneficiary` does not match this exact address can never `validate()`,
     ///      so no `ImmutableLaunchBinding` deployment (the frozen preimage every production
     ///      deployment must reproduce) can ever bind to a different Programmable owner.
-    address internal constant PROGRAMMABLE_BENEFICIARY = 0x4957f49620AFf3Adbbe8195a4f633E49cc93376c;
+    address internal constant PROGRAMMABLE_BENEFICIARY = 0xD88539d3c4C460136a733A3Fd60cf6BF269079da;
     address internal constant OPERATIONS_WALLET = 0xB54AAF746eb1e80AFDb5eb0992a75b08DB2E4384;
     bytes32 internal constant SOURCE_SET_DIGEST =
         0x35ffa674dfdbee0fceef1e64614b3291cd19c2f862fc9fb6c5a0dda7bc25b031;

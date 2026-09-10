@@ -226,10 +226,10 @@ contract RobinhoodV4ForkSmokeTest is Test {
         returns (ExpectedSplit memory expected)
     {
         (uint256 programmable, uint256 newProgrammableRemainder) =
-            _cumulativeIncrement(gross, 10, mirrorProgrammableRemainder[address(hook)]);
+            _cumulativeIncrement(gross, 20, mirrorProgrammableRemainder[address(hook)]);
         mirrorProgrammableRemainder[address(hook)] = newProgrammableRemainder;
         (uint256 treasury, uint256 newTreasuryRemainder) =
-            _cumulativeIncrement(gross, 40, mirrorTreasuryRemainder[address(hook)]);
+            _cumulativeIncrement(gross, 30, mirrorTreasuryRemainder[address(hook)]);
         mirrorTreasuryRemainder[address(hook)] = newTreasuryRemainder;
         (uint256 process, uint256 newProcessRemainder) =
             _cumulativeIncrement(gross, 250, mirrorProcessRemainder[address(hook)]);

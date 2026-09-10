@@ -374,7 +374,7 @@ contract ClaimsAdversarialBlindTest is Test {
         hook.claimTreasury(1, address(actor));
 
         (, uint256 treasuryLiability,) = hook.readFeeLiabilities(address(actor));
-        assertEq(treasuryLiability, 400, "treasury liability must roll back");
+        assertEq(treasuryLiability, 300, "treasury liability must roll back");
         assertEq(token.balanceOf(address(actor)), 0);
     }
 
@@ -391,7 +391,7 @@ contract ClaimsAdversarialBlindTest is Test {
         ClaimActor(payable(PROGRAMMABLE)).claimProgrammable(hook, 1);
 
         (uint256 programmableLiability,,) = hook.readFeeLiabilities(TREASURY);
-        assertEq(programmableLiability, 100, "programmable liability must roll back");
+        assertEq(programmableLiability, 200, "programmable liability must roll back");
         assertEq(token.balanceOf(PROGRAMMABLE), 0);
     }
 
@@ -413,7 +413,7 @@ contract ClaimsAdversarialBlindTest is Test {
         assertEq(hook.processLiability(), 2_500);
         (, uint256 treasuryLiability,) = hook.readFeeLiabilities(address(operationsActor));
         assertEq(
-            treasuryLiability, 400, "cross-reentrant treasury claim must not have drained anything"
+            treasuryLiability, 300, "cross-reentrant treasury claim must not have drained anything"
         );
         assertFalse(hook.processClaimCycleUsed(CYCLE_A));
     }
@@ -438,7 +438,7 @@ contract ClaimsAdversarialBlindTest is Test {
         (uint256 programmableLiability,,) = hook.readFeeLiabilities(address(treasuryActor));
         assertEq(
             programmableLiability,
-            100,
+            200,
             "cross-reentrant programmable claim must not have drained anything"
         );
     }
@@ -451,7 +451,7 @@ contract ClaimsAdversarialBlindTest is Test {
 
     function testFormerTreasuryCanStillClaimItsPreRotationAccrualButNothingMore() external {
         ClaimsBlindHookHarness hook = _deployWithTreasury(TREASURY, 1_000, 1_000, 4, 1 days);
-        _accrue(hook, 100_000); // 40 bps of 100_000 = 400 accrued to TREASURY.
+        _accrue(hook, 100_000); // 30 bps of 100_000 = 300 accrued to TREASURY.
 
         address newTreasury = address(0xC999);
         vm.prank(TREASURY);
@@ -459,17 +459,17 @@ contract ClaimsAdversarialBlindTest is Test {
         vm.prank(newTreasury);
         hook.acceptTreasury();
 
-        _accrue(hook, 100_000); // a further 400 must now accrue to newTreasury, not TREASURY.
+        _accrue(hook, 100_000); // a further 300 must now accrue to newTreasury, not TREASURY.
 
         (, uint256 oldTreasuryLiability,) = hook.readFeeLiabilities(TREASURY);
         (, uint256 newTreasuryLiability,) = hook.readFeeLiabilities(newTreasury);
-        assertEq(oldTreasuryLiability, 400, "old treasury balance must be frozen at rotation time");
-        assertEq(newTreasuryLiability, 400, "new fees must accrue only to the current treasury");
+        assertEq(oldTreasuryLiability, 300, "old treasury balance must be frozen at rotation time");
+        assertEq(newTreasuryLiability, 300, "new fees must accrue only to the current treasury");
 
         // The old beneficiary is still able to withdraw exactly what it already earned...
         vm.prank(TREASURY);
-        hook.claimTreasury(400, TREASURY);
-        assertEq(token.balanceOf(TREASURY), 400);
+        hook.claimTreasury(300, TREASURY);
+        assertEq(token.balanceOf(TREASURY), 300);
 
         // ...but cannot claim more than that (its own ledger entry is now exhausted), even though
         // it remains a recognized treasury beneficiary address forever.

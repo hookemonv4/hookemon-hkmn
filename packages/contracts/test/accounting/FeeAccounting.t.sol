@@ -19,8 +19,8 @@ contract FeeAccountingTest {
 
     uint256 private constant QUOTE = 10_000;
     uint256 private constant TOTAL_FEE = 300;
-    uint256 private constant PROGRAMMABLE_BPS = 10;
-    uint256 private constant TREASURY_BPS = 40;
+    uint256 private constant PROGRAMMABLE_BPS = 20;
+    uint256 private constant TREASURY_BPS = 30;
     uint256 private constant PROCESS_BPS = 250;
     uint256 private constant BPS_DENOM = 10_000;
 
@@ -58,16 +58,16 @@ contract FeeAccountingTest {
         _assertSplit(accounting, 0, 0, 0, 0, 0);
         // Exactly the minimum executed quote: the whole-unit shares land with both remainders
         // returned to exactly zero, so repeating it is fully deterministic.
-        _assertSplit(accounting, 1_000, 30, 1, 4, 25);
-        _assertSplit(accounting, 1_000, 30, 1, 4, 25);
-        // The three 1,499-unit swaps carry each 10/40/250 stream independently. Their aggregate
+        _assertSplit(accounting, 1_000, 30, 2, 3, 25);
+        _assertSplit(accounting, 1_000, 30, 2, 3, 25);
+        // The three 1,499-unit swaps carry each 20/30/250 stream independently. Their aggregate
         // equals the allocation for one 4,497-unit swap.
-        _assertSplit(accounting, 1_499, 43, 1, 5, 37);
-        _assertSplit(accounting, 1_499, 44, 1, 6, 37);
-        _assertSplit(accounting, 1_499, 46, 2, 6, 38);
+        _assertSplit(accounting, 1_499, 43, 2, 4, 37);
+        _assertSplit(accounting, 1_499, 44, 3, 4, 37);
+        _assertSplit(accounting, 1_499, 46, 3, 5, 38);
         // Further swaps keep drawing on the same carried remainders rather than starting fresh.
-        _assertSplit(accounting, 3_333, 100, 3, 14, 83);
-        _assertSplit(accounting, 3_334, 101, 4, 13, 84);
+        _assertSplit(accounting, 3_333, 100, 7, 10, 83);
+        _assertSplit(accounting, 3_334, 101, 7, 10, 84);
         (uint256 total, uint256 programmableFee, uint256 treasuryFee, uint256 processFee) =
             accounting.split(type(uint256).max);
         _assertEq(
@@ -77,7 +77,7 @@ contract FeeAccountingTest {
         );
     }
 
-    /// @dev Each owner-approved 10/40/250-bps stream carries its own lifetime fractional
+    /// @dev Each owner-approved 20/30/250-bps stream carries its own lifetime fractional
     ///      numerator. Fragmenting an accepted gross quote volume cannot change any stream's
     ///      eventual whole-unit allocation.
     function test_independentLifetimeRemaindersMakeSplitAndUnsplitAllocationsEqual() external {
@@ -161,8 +161,8 @@ contract FeeAccountingTest {
         ) = unsplitFourteenNinetyNine.split(2_998);
 
         _assertEq(firstTotal, 43, "first 1,499 total is not independently rounded");
-        _assertEq(firstProgrammable, 1, "first 1,499 programmable allocation changed");
-        _assertEq(firstTreasury, 5, "first 1,499 treasury allocation changed");
+        _assertEq(firstProgrammable, 2, "first 1,499 programmable allocation changed");
+        _assertEq(firstTreasury, 4, "first 1,499 treasury allocation changed");
         _assertEq(firstProcess, 37, "first 1,499 process allocation changed");
         _assertEq(
             firstProgrammable + secondProgrammable, wholeProgrammable, "programmable split mismatch"
@@ -257,7 +257,7 @@ contract FeeAccountingTest {
     function test_revision55SwapAtMinimumQuoteSucceeds() external {
         (, FeeAccountingHarness accounting,,) = _deploy();
 
-        _assertSplit(accounting, 1_000, 30, 1, 4, 25);
+        _assertSplit(accounting, 1_000, 30, 2, 3, 25);
     }
 
     /// @dev A claim zeroes only the claimed beneficiary's liability balance; it must never touch
@@ -422,9 +422,9 @@ contract FeeAccountingTest {
         accounting.rotateTreasury(address(treasuryTwo));
         _accrue(token, accounting, QUOTE);
 
-        _assertEq(accounting.programmableLiability(address(programmable)), 20, "programmable drift");
-        _assertEq(accounting.treasuryLiability(address(treasuryOne)), 40, "old treasury rewritten");
-        _assertEq(accounting.treasuryLiability(address(treasuryTwo)), 40, "new treasury missing");
+        _assertEq(accounting.programmableLiability(address(programmable)), 40, "programmable drift");
+        _assertEq(accounting.treasuryLiability(address(treasuryOne)), 30, "old treasury rewritten");
+        _assertEq(accounting.treasuryLiability(address(treasuryTwo)), 30, "new treasury missing");
         _assertEq(accounting.processLiability(), 500, "process remainder mismatch");
         _assertEq(accounting.totalLiability(), 600, "aggregate liability mismatch");
         _assertSolvent(accounting);
@@ -442,9 +442,9 @@ contract FeeAccountingTest {
 
         _assertEq(token.balanceOf(address(accounting)), TOTAL_FEE, "collection missing");
         _assertEq(
-            accounting.programmableLiability(address(programmable)), 10, "programmable missing"
+            accounting.programmableLiability(address(programmable)), 20, "programmable missing"
         );
-        _assertEq(accounting.treasuryLiability(address(treasury)), 40, "treasury missing");
+        _assertEq(accounting.treasuryLiability(address(treasury)), 30, "treasury missing");
         _assertEq(accounting.processLiability(), 250, "process missing");
         _assertSolvent(accounting);
     }
@@ -509,7 +509,7 @@ contract FeeAccountingTest {
 
         uint256 claimed = programmable.claimProgrammable(accounting);
 
-        _assertEq(claimed, 10, "wrong claim amount");
+        _assertEq(claimed, 20, "wrong claim amount");
         _assertEq(hookBefore - token.balanceOf(address(accounting)), claimed, "wrong source delta");
         _assertEq(
             token.balanceOf(address(programmable)) - recipientBefore,
@@ -546,7 +546,7 @@ contract FeeAccountingTest {
             address(programmable),
             programmableClaimed
         );
-        _assertEq(programmableClaimed, 10, "wrong programmable claim");
+        _assertEq(programmableClaimed, 20, "wrong programmable claim");
 
         VM.recordLogs();
         uint256 treasuryClaimed = treasury.claimTreasury(accounting);
@@ -557,7 +557,7 @@ contract FeeAccountingTest {
             address(treasury),
             treasuryClaimed
         );
-        _assertEq(treasuryClaimed, 40, "wrong treasury claim");
+        _assertEq(treasuryClaimed, 30, "wrong treasury claim");
     }
 
     function test_partialBeneficiaryClaimsUseActualDestinationsAndPreserveRemainders() external {
@@ -589,7 +589,7 @@ contract FeeAccountingTest {
         _assertEq(token.balanceOf(programmableDestination), 4, "wrong programmable destination");
         _assertEq(
             accounting.programmableLiability(address(programmable)),
-            6,
+            16,
             "wrong programmable remainder"
         );
 
@@ -605,15 +605,15 @@ contract FeeAccountingTest {
         );
         _assertEq(treasuryClaimed, 15, "wrong treasury partial claim");
         _assertEq(token.balanceOf(treasuryDestination), 15, "wrong treasury destination");
-        _assertEq(accounting.treasuryLiability(address(treasury)), 25, "wrong treasury remainder");
+        _assertEq(accounting.treasuryLiability(address(treasury)), 15, "wrong treasury remainder");
 
         uint256 programmableFinal =
-            programmable.claimProgrammableAmountTo(accounting, 6, programmableDestination);
-        uint256 treasuryFinal = treasury.claimTreasuryAmountTo(accounting, 25, treasuryDestination);
-        _assertEq(programmableFinal, 6, "wrong programmable full claim");
-        _assertEq(treasuryFinal, 25, "wrong treasury full claim");
-        _assertEq(token.balanceOf(programmableDestination), 10, "wrong programmable final balance");
-        _assertEq(token.balanceOf(treasuryDestination), 40, "wrong treasury final balance");
+            programmable.claimProgrammableAmountTo(accounting, 16, programmableDestination);
+        uint256 treasuryFinal = treasury.claimTreasuryAmountTo(accounting, 15, treasuryDestination);
+        _assertEq(programmableFinal, 16, "wrong programmable full claim");
+        _assertEq(treasuryFinal, 15, "wrong treasury full claim");
+        _assertEq(token.balanceOf(programmableDestination), 20, "wrong programmable final balance");
+        _assertEq(token.balanceOf(treasuryDestination), 30, "wrong treasury final balance");
         _assertEq(hookBefore - token.balanceOf(address(accounting)), 50, "wrong total claim delta");
         _assertEq(accounting.programmableLiability(address(programmable)), 0, "programmable left");
         _assertEq(accounting.treasuryLiability(address(treasury)), 0, "treasury left");
@@ -640,9 +640,9 @@ contract FeeAccountingTest {
 
         uint256 claimed = treasuryOne.claimTreasury(accounting);
 
-        _assertEq(claimed, 40, "wrong historical treasury claim");
+        _assertEq(claimed, 30, "wrong historical treasury claim");
         _assertEq(accounting.treasuryLiability(address(treasuryOne)), 0, "old epoch not debited");
-        _assertEq(accounting.treasuryLiability(address(treasuryTwo)), 40, "new epoch changed");
+        _assertEq(accounting.treasuryLiability(address(treasuryTwo)), 30, "new epoch changed");
         _assertSolvent(accounting);
     }
 
@@ -666,10 +666,10 @@ contract FeeAccountingTest {
         treasuryThree.claimTreasury(accounting);
         treasuryFour.claimTreasury(accounting);
 
-        _assertEq(token.balanceOf(address(treasuryOne)), 40, "epoch one claim mismatch");
-        _assertEq(token.balanceOf(address(treasuryTwo)), 40, "epoch two claim mismatch");
-        _assertEq(token.balanceOf(address(treasuryThree)), 40, "epoch three claim mismatch");
-        _assertEq(token.balanceOf(address(treasuryFour)), 40, "epoch four claim mismatch");
+        _assertEq(token.balanceOf(address(treasuryOne)), 30, "epoch one claim mismatch");
+        _assertEq(token.balanceOf(address(treasuryTwo)), 30, "epoch two claim mismatch");
+        _assertEq(token.balanceOf(address(treasuryThree)), 30, "epoch three claim mismatch");
+        _assertEq(token.balanceOf(address(treasuryFour)), 30, "epoch four claim mismatch");
         _assertEq(accounting.treasuryLiability(address(treasuryOne)), 0, "epoch one remains");
         _assertEq(accounting.treasuryLiability(address(treasuryTwo)), 0, "epoch two remains");
         _assertEq(accounting.treasuryLiability(address(treasuryThree)), 0, "epoch three remains");
@@ -858,9 +858,9 @@ contract FeeAccountingTest {
 
         _assertEq(accounting.totalLiability(), totalBefore, "surplus invented liability");
         _assertEq(
-            accounting.programmableLiability(address(programmable)), 10, "programmable changed"
+            accounting.programmableLiability(address(programmable)), 20, "programmable changed"
         );
-        _assertEq(accounting.treasuryLiability(address(treasury)), 40, "treasury changed");
+        _assertEq(accounting.treasuryLiability(address(treasury)), 30, "treasury changed");
         _assertEq(accounting.solvencyMargin(), 123, "wrong surplus margin");
         _assertSolvent(accounting);
     }
@@ -1113,8 +1113,8 @@ contract FeeAccountingTest {
             );
             assert(executedUsdg == QUOTE);
             assert(totalFee == TOTAL_FEE);
-            assert(programmableFee == 10);
-            assert(treasuryFee == 40);
+            assert(programmableFee == 20);
+            assert(treasuryFee == 30);
             assert(processFee == 250);
             // QUOTE (10,000) divides BPS_DENOMINATOR exactly, so this swap leaves no carried dust.
             assert(programmableRemainderAfter == 0);

@@ -20,7 +20,7 @@ contract PhaseThreeReleasePlan {
     address public constant POOL_MANAGER = 0x8366a39CC670B4001A1121B8F6A443A643e40951;
     address public constant POSITION_MANAGER = 0x58daec3116aae6D93017bAAea7749052E8a04fA7;
     address public constant PERMIT2 = 0x000000000022D473030F116dDEE9F6B43aC78BA3;
-    address public constant PROGRAMMABLE_PLATFORM = 0x4957f49620AFf3Adbbe8195a4f633E49cc93376c;
+    address public constant PROGRAMMABLE_PLATFORM = 0xD88539d3c4C460136a733A3Fd60cf6BF269079da;
 
     bytes32 public constant TOKEN_CREATION_CODE_HASH =
         0x07c73a86681594f0605efd4caa948a53aaf05db1ca9abf2779364b3d2618c374;
@@ -29,17 +29,17 @@ contract PhaseThreeReleasePlan {
     bytes32 public constant TOKEN_ARTIFACT_SHA256 =
         0x021386a1bfe2c753c658e82add866f0c7d1e393cad71046994fd0e03f1c46d0a;
     bytes32 public constant HOOK_CREATION_CODE_HASH =
-        0xe82cda5819ee3ac8019358dcd1059b19ff5613e9586015423571e7a1db6b0ba3;
+        0xde430f9e52853d2ca810e4d95ba3937649bb4fc899def5d16521efff31459d45;
     bytes32 public constant HOOK_RUNTIME_TEMPLATE_CODE_HASH =
-        0x2a0f13f5f62c644c19223bf641fbe3ed93a6e7a2e5f02ff478a0eb7086c5f6ba;
+        0x63c854b6b52f47806b52908e3ef58490fcc204ec07f477560b6ad7a6cc5efeb9;
     bytes32 public constant HOOK_ARTIFACT_SHA256 =
-        0xc823286da7036b9a31d66d2726e0297fd60405f01f34745606fbd70aa4c3ed6b;
+        0x5a45a3342dd01623793824fa15db7cc5e8e8a217b7e8ff367e59335023ea1159;
     bytes32 public constant CUSTODY_CREATION_CODE_HASH =
         0x612740484e055828758b43eaccb7d5fdc6927423e6ab84b433221999a2ebce77;
     bytes32 public constant CUSTODY_RUNTIME_TEMPLATE_CODE_HASH =
         0xf66dd925b98becf4c6f4410abf52e0c95e31b407eb99115f19d1357b6cbf5334;
     bytes32 public constant CUSTODY_ARTIFACT_SHA256 =
-        0x943bf17d52aaf90de70640b18175430c043db9cb7e862468131da694c2fc0b3d;
+        0xa728f2ab2dd769e24ee4f1487d73a463b31d772edb30acb199f4299234267a69;
 
     uint256 public constant TOTAL_SUPPLY = 1_000_000_000e18;
     uint256 public constant POOL_ALLOCATION = TOTAL_SUPPLY;
@@ -48,8 +48,8 @@ contract PhaseThreeReleasePlan {
     int24 public constant TICK_UPPER = 887220;
     uint24 public constant POOL_FEE = 0;
     int24 public constant TICK_SPACING = 60;
-    uint16 public constant PROGRAMMABLE_FEE_BPS = 10;
-    uint16 public constant TREASURY_FEE_BPS = 40;
+    uint16 public constant PROGRAMMABLE_FEE_BPS = 20;
+    uint16 public constant TREASURY_FEE_BPS = 30;
     uint16 public constant PROCESS_FEE_BPS = 250;
 
     struct Draft {

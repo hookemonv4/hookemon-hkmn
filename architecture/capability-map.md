@@ -26,7 +26,7 @@ The hook exposes `beforeInitialize`, `beforeSwap`, `afterSwap`, and the two retu
 | `role-control` | Controls Treasury, Operations, beneficiary claims, limits, pause, and rotation. | Immutable hook runtime | None | `REQ-operations-wallet-1..3` |
 | `token-core` | Creates fixed-supply HKMN through the admitted launch path. | Token runtime | `provider-binding` | `REQ-token-core-1..4` |
 | `canonical-market` | Authenticates the canonical market, initialization, gross volume, and whole-fill swaps. | Immutable hook runtime and position custody | `token-core`, `role-control` | `REQ-canonical-market-7` |
-| `fee-accounting` | Maintains solvent 10/40/250 liabilities and lifetime remainders. | Immutable hook runtime | `canonical-market`, `role-control` | `REQ-fee-accounting-9` |
+| `fee-accounting` | Maintains solvent 20/30/250 liabilities and lifetime remainders. | Immutable hook runtime | `canonical-market`, `role-control` | `REQ-fee-accounting-9` |
 | `operations-wallet` | Releases bounded process liability to Operations, retains immutable claim history, and supports a Treasury-only delayed emergency rotation. | Immutable hook runtime and external identities | `fee-accounting`, `role-control` | `REQ-operations-wallet-1..3` |
 | `launch-orchestration` | Performs an atomic provider graph transaction and a separate retryable atomic owner-signed seed transaction. | Immutable launch runtime | `provider-binding`, `token-core`, `canonical-market`, `fee-accounting`, `operations-wallet` | `REQ-launch-orchestration-1..2` |
 | `legacy-custody-family` | Keeps the excluded legacy family frozen and non-deployed. | Frozen not deployed | None | `REQ-phase3-deployment-1` |
@@ -74,6 +74,6 @@ No callback edge can move from an offchain client into a provider of its own aut
 
 ## CONFUSION FEE-01
 
-Recorded verbatim from the approved planning record:
+Current owner selection under requirements revision 76:
 
-> **CONFUSION FEE-01:** Discovery v4 verlangt 20 bps an `0xD885…79da` (`enforcement: not-guaranteed-onchain`, Basis/Rundung/Claim `null`); Owner-Entscheidung 10 bps an `0x4957…76c` per Absprache. Optionen: (A) 10 bps bestätigt (Owner-Aussage, Nachweis via WP00b) — Plan-Default; (B) 20/40/240 in 300; (C) 20/40/250 = 310; (D) andere Route. Nur fee-/graphabhängige WPs (WP01ff.) warten auf die Bestätigung; alles andere läuft.
+> FEE-01 selects 20/30/250 bps within 300 for the assisted native launch. The platform recipient is `0xD88539d3c4C460136a733A3Fd60cf6BF269079da`. Historical acceptance of 10 bps remains historical evidence; current integration must verify the revised custom model.

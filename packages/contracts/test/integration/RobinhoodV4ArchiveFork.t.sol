@@ -298,11 +298,11 @@ contract RobinhoodV4ArchiveForkTest is Test {
     bytes32 private constant PROVIDER_GAS_TOKEN_RUNTIME_CODEHASH =
         0x9a382167c9d16ee53d22783791a11451bc24efd8333559f8041fa874e3c15293;
     bytes32 private constant PROVIDER_GAS_CUSTODY_RUNTIME_CODEHASH =
-        0x0d63637b005fc544332b142fa4debae3af6e3bc14dc7493a718b2154a70dfb87;
+        0xbcb76c463b917551467cad9b62d0c9d9dc8fb29b979dd99238429fa51e42cd98;
     bytes32 private constant PROVIDER_GAS_HOOK_RUNTIME_CODEHASH =
-        0xa37fbe091423d89aa74c9543969545f0638afc9879c0bf81dbedacdb347c9bca;
+        0x5ad20c4e7d8efe9413e81926b184b3061e563bcd35efd65361207af1e18dab5e;
     bytes32 private constant PROVIDER_GAS_GRAPH_DEPLOYMENT_HASH =
-        0x296def59471cffdc24d76560a120048892090c2ab6d4ddc93ecb1b062477a58f;
+        0xf4708339b938a04302460d35ffb8e2e681ecebfc3c77f6702602908eb4027e21;
     bytes32 private constant PROVIDER_GAS_ROUTE_NAMESPACE =
         keccak256("phase-three-provider-gas-namespace-v1");
     bytes32 private constant PROVIDER_GAS_ROUTE_NONCE =
@@ -634,8 +634,8 @@ contract RobinhoodV4ArchiveForkTest is Test {
         assertEq(route.fee, expectedFee, "router-derived USDG fee mismatch");
         assertEq(address(hook).balance - hookBalanceBefore, expectedFee);
         assertEq(hook.totalLiability() - liabilityBefore, expectedFee);
-        assertEq(programmable, uint256(USDG_ROUTER_TRADE_AMOUNT) * 10 / 10_000);
-        assertEq(treasury, uint256(USDG_ROUTER_TRADE_AMOUNT) * 40 / 10_000);
+        assertEq(programmable, uint256(USDG_ROUTER_TRADE_AMOUNT) * 20 / 10_000);
+        assertEq(treasury, uint256(USDG_ROUTER_TRADE_AMOUNT) * 30 / 10_000);
         assertEq(process, uint256(USDG_ROUTER_TRADE_AMOUNT) * 250 / 10_000);
         _assertSolvent();
     }
@@ -724,7 +724,7 @@ contract RobinhoodV4ArchiveForkTest is Test {
 
         (uint256 programmableLiability, uint256 treasuryLiability, uint256 processLiability) =
             hook.readFeeLiabilities(TREASURY);
-        assertEq(processLiability, 250_000, "process fee did not fill the six-hour cap");
+        assertEq(processLiability, 250_000, "process fee allocation mismatch");
         _assertClaimAuthorizationGuards(programmable, operations);
 
         _claimProgrammableAndAssert(programmableLiability / 2, programmable);
@@ -752,7 +752,9 @@ contract RobinhoodV4ArchiveForkTest is Test {
         }
         uint256 secondProcessLiability = hook.processLiability();
         assertEq(
-            secondProcessLiability, 1_000_000, "process liability did not reach graph capacity"
+            secondProcessLiability,
+            1_000_000, // 4 * 10_000_000 gross quote * 250 / 10_000.
+            "four trades did not accrue the revised process allocation"
         );
         vm.warp(claimTimestamp + 21_599);
         FeeSnapshot memory beforeEarlyProcessClaim = _feeSnapshot(hook);
@@ -1551,13 +1553,13 @@ contract RobinhoodV4ArchiveForkTest is Test {
 
     function _feeAccrualForGross(uint256 gross) private pure returns (FeeAccrual memory accrual) {
         accrual.gross = gross;
-        accrual.programmable = _floorFee(gross, 10);
-        accrual.treasury = _floorFee(gross, 40);
+        accrual.programmable = _floorFee(gross, 20);
+        accrual.treasury = _floorFee(gross, 30);
         accrual.process = _floorFee(gross, 250);
         accrual.total = accrual.programmable + accrual.treasury + accrual.process;
         accrual.remainders = FeeRemainders({
-            programmable: _feeRemainder(gross, 10),
-            treasury: _feeRemainder(gross, 40),
+            programmable: _feeRemainder(gross, 20),
+            treasury: _feeRemainder(gross, 30),
             process: _feeRemainder(gross, 250)
         });
     }

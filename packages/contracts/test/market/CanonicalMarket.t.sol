@@ -256,10 +256,10 @@ contract CanonicalMarketFeePolicyTest {
         bool succeeded = _trySwap(fixture, 1_000);
 
         assert(succeeded);
-        // First swap from a fresh pool: independent 10/40/250-bps streams allocate 1/4/25,
+        // First swap from a fresh pool: independent 20/30/250-bps streams allocate 2/3/25,
         // totaling 30. No prior remainder exists at this boundary.
-        assert(fixture.hook.programmableLiability() == 1);
-        assert(fixture.hook.treasuryLiability() == 4);
+        assert(fixture.hook.programmableLiability() == 2);
+        assert(fixture.hook.treasuryLiability() == 3);
         assert(fixture.hook.processLiability() == 25);
         assert(fixture.hook.totalLiability() == 30);
     }
@@ -275,8 +275,8 @@ contract CanonicalMarketFeePolicyTest {
         _assertSameAccountingOutcome(absent, arbitrary);
         assert(absent.hookUsdgBalance == 3_000);
         assert(absent.lastExecutedUsdg == 100_000);
-        assert(absent.programmableLiability == 100);
-        assert(absent.treasuryLiability == 400);
+        assert(absent.programmableLiability == 200);
+        assert(absent.treasuryLiability == 300);
         assert(absent.processLiability == 2_500);
         assert(absent.totalLiability == 3_000);
     }
@@ -295,7 +295,7 @@ contract CanonicalMarketFeePolicyTest {
         Fixture memory nonMonotoneFixture = _deploy();
         BalanceDelta nonMonotoneFinalDelta = _swapExactOutputUsdg(nonMonotoneFixture, 1_940);
 
-        // Fresh 10/40/250 remainders have two valid gross roots for net 1,940. The first is
+        // Fresh 20/30/250 remainders have two valid gross roots for net 1,940. The first is
         // 1,997 with fee 57; choosing 2,000 would over-collect three atomic units.
         assert(nonMonotoneFinalDelta.amount0() == 1_940);
         assert(nonMonotoneFixture.hook.lastRawPoolUsdgDelta() == 1_997);
@@ -305,7 +305,7 @@ contract CanonicalMarketFeePolicyTest {
 
     /// @dev The exact-output gross-up has to use the carried state from earlier swaps, rather
     ///      than a fresh flat 3% estimate. This test derives the candidate fee from independent
-    ///      10/40/250-bps arithmetic and proves that the chosen root is the first eligible gross.
+    ///      20/30/250-bps arithmetic and proves that the chosen root is the first eligible gross.
     function test_exactOutputUsesFirstGrossRootAfterCarriedRemainders() external {
         Fixture memory fixture = _deploy();
         assert(_trySwap(fixture, 1_499));
@@ -321,19 +321,19 @@ contract CanonicalMarketFeePolicyTest {
         assert(finalDelta.amount0() == 1_000);
         assert(fixture.hook.lastRawPoolUsdgDelta() == 1_032);
         assert(fixture.hook.lastExecutedUsdg() == 1_032);
-        assert(fixture.hook.programmableLiability() == 2);
-        assert(fixture.hook.treasuryLiability() == 10);
+        assert(fixture.hook.programmableLiability() == 5);
+        assert(fixture.hook.treasuryLiability() == 7);
         assert(fixture.hook.processLiability() == 63);
         assert(fixture.hook.totalLiability() == 75);
-        assert(fixture.hook.programmableRemainder() == 5_310);
-        assert(fixture.hook.treasuryRemainder() == 1_240);
+        assert(fixture.hook.programmableRemainder() == 620);
+        assert(fixture.hook.treasuryRemainder() == 5_930);
         assert(fixture.hook.processRemainder() == 2_750);
     }
 
     /// @dev Three identical 1,499-unit swaps prove the cumulative remainder carries across real
     ///      pool swaps, not just the FeeAccounting unit harness: per-swap flooring alone would
-    ///      total 3 programmable units (1 + 1 + 1) and never release the carried dust. The
-    ///      persisted accumulator releases the extra unit on the third swap instead.
+    ///      total 6 programmable units (2 + 2 + 2) and never release the carried dust. The
+    ///      persisted accumulator releases one extra unit on each of the next two swaps.
     function test_cumulativeRemainderCarriesAcrossRealSwaps() external {
         Fixture memory fixture = _deploy();
 
@@ -341,8 +341,8 @@ contract CanonicalMarketFeePolicyTest {
         assert(_trySwap(fixture, 1_499));
         assert(_trySwap(fixture, 1_499));
 
-        assert(fixture.hook.programmableLiability() == 4);
-        assert(fixture.hook.treasuryLiability() == 17);
+        assert(fixture.hook.programmableLiability() == 8);
+        assert(fixture.hook.treasuryLiability() == 13);
         assert(fixture.hook.processLiability() == 112);
         assert(fixture.hook.totalLiability() == 133);
     }
@@ -370,10 +370,10 @@ contract CanonicalMarketFeePolicyTest {
 
         assert(_trySwap(fixture, 1_499));
 
-        // Same as the second 1,499 swap in test_cumulativeRemainderCarriesAcrossRealSwaps: 1
-        // programmable unit, 6 treasury units, and 37 process units, unaffected by claims.
-        assert(fixture.hook.programmableLiability() == 1);
-        assert(fixture.hook.treasuryLiability() == 6);
+        // Same as the second 1,499 swap in test_cumulativeRemainderCarriesAcrossRealSwaps: 3
+        // programmable units, 4 treasury units, and 37 process units, unaffected by claims.
+        assert(fixture.hook.programmableLiability() == 3);
+        assert(fixture.hook.treasuryLiability() == 4);
         assert(fixture.hook.processLiability() == 74);
         assert(fixture.hook.totalLiability() == 81);
     }
@@ -481,8 +481,8 @@ contract CanonicalMarketFeePolicyTest {
         pure
         returns (uint256)
     {
-        return _independentIncrement(priorGross, gross, 10)
-            + _independentIncrement(priorGross, gross, 40)
+        return _independentIncrement(priorGross, gross, 20)
+            + _independentIncrement(priorGross, gross, 30)
             + _independentIncrement(priorGross, gross, 250);
     }
 

@@ -186,7 +186,7 @@ contract RobinhoodBindingsTest {
         assert(base.programmableBeneficiary == RobinhoodBindings.PROGRAMMABLE_BENEFICIARY);
 
         RobinhoodBindings.Binding memory binding = _clone(base);
-        address wrongBeneficiary = address(0x9999);
+        address wrongBeneficiary = 0x4957f49620AFf3Adbbe8195a4f633E49cc93376c;
         binding.programmableBeneficiary = wrongBeneficiary;
         try new ImmutableLaunchBinding(binding) {
             assert(false);
@@ -412,8 +412,8 @@ contract RobinhoodBindingsTest {
             poolId: poolId,
             poolLpFee: 0,
             totalHookFeeBasisPoints: 300,
-            programmableFeeBasisPoints: 10,
-            treasuryFeeBasisPoints: 40,
+            programmableFeeBasisPoints: 20,
+            treasuryFeeBasisPoints: 30,
             marketAllocationBasisPoints: 9_000,
             hookPermissionMask: HOOK_MASK,
             sourceSetDigest: 0x35ffa674dfdbee0fceef1e64614b3291cd19c2f862fc9fb6c5a0dda7bc25b031,

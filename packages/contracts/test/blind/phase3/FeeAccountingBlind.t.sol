@@ -153,10 +153,10 @@ contract FeeAccountingBlindTest is Test {
         assertEq(prSplit, prUnsplit, "process stream diverged across split");
         assertEq(split.totalLiability(), unsplit.totalLiability(), "total liability diverged");
 
-        // Independent oracle straight from the specification's bps constants (10 / 40 / 250 of
+        // Independent oracle straight from the specification's bps constants (20 / 30 / 250 of
         // 10_000), not read from the contract under test.
-        assertEq(pUnsplit, (total * 10) / 10_000, "programmable != floor(total*10/10000)");
-        assertEq(tUnsplit, (total * 40) / 10_000, "treasury != floor(total*40/10000)");
+        assertEq(pUnsplit, (total * 20) / 10_000, "programmable != floor(total*20/10000)");
+        assertEq(tUnsplit, (total * 30) / 10_000, "treasury != floor(total*30/10000)");
         assertEq(prUnsplit, (total * 250) / 10_000, "process != floor(total*250/10000)");
         assertEq(unsplit.totalLiability(), pUnsplit + tUnsplit + prUnsplit);
     }
@@ -181,8 +181,8 @@ contract FeeAccountingBlindTest is Test {
         assertEq(pSplit, pUnsplit);
         assertEq(tSplit, tUnsplit);
         assertEq(prSplit, prUnsplit);
-        assertEq(pUnsplit, (total * 10) / 10_000);
-        assertEq(tUnsplit, (total * 40) / 10_000);
+        assertEq(pUnsplit, (total * 20) / 10_000);
+        assertEq(tUnsplit, (total * 30) / 10_000);
         assertEq(prUnsplit, (total * 250) / 10_000);
     }
 

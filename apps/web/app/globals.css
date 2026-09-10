@@ -1328,18 +1328,18 @@ h1 span {
 }
 
 .programmable-bar {
-  width: 3.333%;
+  width: 6.667%;
   min-width: 6px;
   background: var(--color-holo);
 }
 
 .treasury-bar {
-  width: 13.333%;
+  width: 10%;
   background: var(--color-pack);
 }
 
 .project-bar {
-  width: 83.334%;
+  width: 83.333%;
   background: linear-gradient(90deg, var(--color-pikachu), var(--color-pack));
 }
 

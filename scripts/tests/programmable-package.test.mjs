@@ -1669,7 +1669,7 @@ test('phase three draft retains the owner-recorded revision-65 baseline and prov
   }
 });
 
-test('phase three source documents retain the full-pool three-call launch model', () => {
+test('phase three source documents preserve assisted zero-ETH inventory and actual caller roles', () => {
   const source = [
     'release/phase3/PROPOSAL.md',
     'release/phase3/THREAT_MODEL.md',
@@ -1678,13 +1678,18 @@ test('phase three source documents retain the full-pool three-call launch model'
     'release/phase3/launch-plan.md',
   ].map((path) => readFileSync(resolve(root, path), 'utf8')).join('\n');
 
-  assert.match(source, /three initializers run atomically in that order: `token\.allocate\(hook\)`, `custody\.configureBindingHook\(hook\)`, then `hook\.initializeGraphLaunch\(custody,sqrtPriceX96\)`/i);
-  assert.match(source, /complete one-billion HKMN stock enters the canonical market; there is no other allocation/i);
-  assert.match(source, /separate payable owner seed uses native ETH as currency0 and HKMN as currency1/i);
-  assert.match(source, /`msg\.value == amount0Max`/);
-  assert.match(source, /complete HKMN stock.*exact native debt.*refunds excess native value/i);
-  assert.match(source, /300 bps of gross native quote volume: 10 Programmable, 40 treasury and 250 process/i);
-  assert.match(source, /published provider terms differ.*inclusive fee model and separate seed; exact-request admission remains required/i);
+  assert.match(source, /`token\.allocate\(hook\)` by the token's immutable issuanceAuthority; `custody\.configureBindingHook\(hook\)` by the custody deployer; `hook\.initializeGraphLaunch\(custody, sqrtPriceX96\)` by graphInitializer; then `hook\.seedCanonicalLiquidity\(params\)` by launchAuthority with zero ETH/);
+  assert.match(source, /Deployment\/initialization and inventory transactions may be separate/);
+  assert.match(source, /without replacing the customer's authority wallet/);
+  assert.match(source, /atomic supply `1000000000000000000000000000`/);
+  assert.match(source, /Creator ETH contributed to initial liquidity is exactly zero; there is no new creator token allocation/);
+  assert.match(source, /Native ETH is currency0 and HKMN currency1/);
+  assert.match(source, /`msg\.value == amount0Max == 0`/);
+  assert.match(source, /tick spacing 60, lower tick 133500, upper tick 161220/);
+  assert.match(source, /Permanent custody retains the liquidity position and 115 atomic HKMN of rounding dust/);
+  assert.match(source, /Buys and sells include one 300-bps fee: 20 Programmable, 30 Treasury and 250 process/);
+  assert.match(source, /final runtime commitments, CREATE2 bindings, route namespaces, permits and transaction payloads remain platform supplied/);
+  assert.match(source, /No deployment, transfer, live launch request or signature is authorized by this preparation/);
 });
 
 test('phase three submission normalization removes builder notes and binds mutable recipient controls', () => {

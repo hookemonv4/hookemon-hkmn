@@ -2,7 +2,7 @@
   "schemaVersion": "hookemon.interfaces.v1",
   "source": "Owner-approved native ETH implementation, Collector Core buyback profile and configurable reward recipient selection; feasibility remains provisional",
   "productPhase": 3,
-  "requirementsRevision": 74,
+  "requirementsRevision": 76,
   "architectureRevision": 11,
   "status": "PROVISIONAL_PHASE3_PENDING_FEASIBILITY",
   "bindingManifest": "release/phase3/deployment-manifest.json",
@@ -50,12 +50,12 @@
     "streams": [
       {
         "name": "programmable",
-        "basisPoints": 10,
+        "basisPoints": 20,
         "remainder": "independent-lifetime"
       },
       {
         "name": "treasury",
-        "basisPoints": 40,
+        "basisPoints": 30,
         "remainder": "independent-lifetime"
       },
       {
@@ -69,13 +69,14 @@
     "claimsResetRemainders": false,
     "confusion": {
       "id": "FEE-01",
-      "defaultOption": "A",
-      "status": "PENDING_PROVIDER_BOUND_CONFIRMATION",
+      "defaultOption": "E",
+      "status": "OWNER_SELECTED_INCLUSIVE_20_30_250_PROVIDER_INTEGRATION_PENDING",
       "options": {
         "A": "10/40/250 within 300",
         "B": "20/40/240 within 300",
         "C": "20/40/250 totaling 310",
-        "D": "another route"
+        "D": "another route",
+        "E": "20/30/250 within 300"
       }
     }
   },
@@ -105,10 +106,9 @@
       "xmax": {
         "unit": "wei",
         "constructorField": "processClaimLimitMaxWei",
-        "value": null,
-        "status": "REQUIRED_EXPLICIT_LAUNCH_INPUT",
-        "valuationCeilingMicroUsd": "500000000000",
-        "rule": "positive integer derived conservatively from the approved launch valuation; never use the USD ceiling as wei"
+        "value": "19921747376305870540",
+        "status": "OWNER_PRESERVED_ASSISTED_LAUNCH_INPUT",
+        "rule": "fixed native wei cap, separate from the dynamic bot six-hour USD budget; no onchain USD oracle"
       },
       "pendingOperationsCancellation": "forbidden",
       "treasuryReschedule": "requires a new Treasury intent and starts a new delay"
@@ -531,7 +531,18 @@
       "historical-role-holders"
     ],
     "recipientSelection": {
-      "allowedLimits": [100, 200, 300, 400, 500, 600, 700, 800, 900, 1000],
+      "allowedLimits": [
+        100,
+        200,
+        300,
+        400,
+        500,
+        600,
+        700,
+        800,
+        900,
+        1000
+      ],
       "defaultLimit": 200,
       "freeze": "cycle identity, operator configuration revision and limit persisted atomically before stages; resumed cycles use the stored policy",
       "ranking": "positive non-excluded direct HKMN balances descending, normalized address ascending for ties, at most the frozen limit",
@@ -832,8 +843,8 @@
   },
   "nativeMigration": {
     "status": "INTEGRATED_PENDING_REQUIRED_CI_AND_RELEASE_AUTHORITY",
-    "requirementsRevision": 74,
-    "requirementsSha256": "c89397d3ece140e601f2bb494f8f13a86996faca5f5b43d013abc770abfadf5c",
+    "requirementsRevision": 76,
+    "requirementsSha256": "a2ce87d8c9db0d127355113c161bf397b89c4db7dc99d40febae3498d4cb6b4e",
     "proposalCommit": "31b7935514ebf85da805677128e2555eecc7fef5",
     "historicalBaselineCommit": "56f185e07dfafe5533df617ec1dad473ecb63f68",
     "launchEligible": false,
@@ -855,8 +866,8 @@
       "minimumGrossWei": "1000",
       "belowMinimum": "999 reverts; 1000 succeeds",
       "basisPoints": [
-        10,
-        40,
+        20,
+        30,
         250
       ],
       "rounding": "independent lifetime cumulative numerator/remainder per stream; never per-trade ceil or reset on claims",

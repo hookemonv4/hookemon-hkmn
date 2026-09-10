@@ -197,7 +197,7 @@
     "feesAndClaims": {
       "applicable": true,
       "actor": "Immutable programmable platform recipient, treasury beneficiary and bounded process claim route",
-      "valueFlow": "The hook splits the selected 300 bps gross quote-side fee into 10 bps programmable, 40 bps treasury and 250 bps process liabilities.",
+      "valueFlow": "The hook splits the selected 300 bps gross quote-side fee into 20 bps programmable, 30 bps treasury and 250 bps process liabilities.",
       "custody": "The hook holds native liabilities until successful payment to the authorized beneficiary destination.",
       "failure": "A failed claim leaves the liability intact and cannot redirect another beneficiary balance.",
       "event": "Liability accrual and claim events.",
@@ -263,11 +263,11 @@
     "rates": {
       "unit": "hundredths-of-bip",
       "selectedHundredthsOfBip": 30000,
-      "minimumEffectiveHundredthsOfBip": 1000,
+      "minimumEffectiveHundredthsOfBip": 2000,
       "effectiveHundredthsOfBip": 30000,
-      "platformHundredthsOfBip": 1000,
-      "projectHundredthsOfBip": 29000,
-      "formula": "effective=max(selected,1000);platform=1000;project=effective-1000",
+      "platformHundredthsOfBip": 2000,
+      "projectHundredthsOfBip": 28000,
+      "formula": "effective=max(selected,2000);platform=2000;project=effective-2000",
       "lpFeeExcluded": true
     },
     "basis": {
@@ -275,7 +275,7 @@
       "quoteAsset": "canonical-pool-quote-asset"
     },
     "ownership": {
-      "owner": "0x4957f49620AFf3Adbbe8195a4f633E49cc93376c",
+      "owner": "0xD88539d3c4C460136a733A3Fd60cf6BF269079da",
       "immutable": true,
       "claimAuthority": "owner-only",
       "claimAvailability": "anytime",
@@ -437,9 +437,9 @@
       "recipients": [
         {
           "role": "programmable-platform",
-          "sharePpm": 33333,
+          "sharePpm": 66667,
           "addressSource": "fixed-address",
-          "address": "0x4957f49620AFf3Adbbe8195a4f633E49cc93376c",
+          "address": "0xD88539d3c4C460136a733A3Fd60cf6BF269079da",
           "binding": "exact-address",
           "derivationRule": null,
           "mutable": false,
@@ -449,7 +449,7 @@
         },
         {
           "role": "treasury",
-          "sharePpm": 133333,
+          "sharePpm": 100000,
           "addressSource": "launch-wallet",
           "address": null,
           "binding": "launch-transaction-sender",
@@ -461,7 +461,7 @@
         },
         {
           "role": "process",
-          "sharePpm": 833334,
+          "sharePpm": 833333,
           "addressSource": "fixed-address",
           "address": "0xB54AAF746eb1e80AFDb5eb0992a75b08DB2E4384",
           "binding": "exact-address",
@@ -472,7 +472,7 @@
           "mutationEvent": "OperationsRotationExecuted"
         }
       ],
-      "ownership": "The platform recipient is immutable. The displayed ppm values normalize the three 10/40/250 bps source streams; exact accrual uses independent cumulative bps remainders. Treasury and operations roles may rotate only through their source-controlled role paths.",
+      "ownership": "The platform recipient is immutable. The displayed ppm values normalize the three 20/30/250 bps source streams; exact accrual uses independent cumulative bps remainders. Treasury and operations roles may rotate only through their source-controlled role paths.",
       "claimPolicy": "Programmable and treasury claims debit only the caller beneficiary liability for the canonical PoolId and may select a nonzero destination per claim. A process claim is callable only by current operations, must pay that same operations address, and remains subject to its 6-hour cap, maximum and cycle-id rule."
     },
     "customAccounting": {
@@ -859,7 +859,7 @@
   "authorities": [
     {
       "role": "programmable-platform-recipient",
-      "controller": "0x4957f49620AFf3Adbbe8195a4f633E49cc93376c",
+      "controller": "0xD88539d3c4C460136a733A3Fd60cf6BF269079da",
       "capabilities": [
         "claim its own accrued platform liability to a selected destination"
       ],
@@ -1736,7 +1736,7 @@
   "capabilityExtensions": [
     {
       "capabilityId": "phase-three-launch-graph",
-      "summary": "The native graph preserves complete HKMN allocation and cumulative 10/40/250 basis-point streams. Native provider admission, funding, route fields and final runtime identities remain required.",
+      "summary": "The native graph preserves complete HKMN allocation and cumulative 20/30/250 basis-point streams. Native provider admission, funding, route fields and final runtime identities remain required.",
       "interactionRefs": [
         "release/phase3/launch-inputs.json",
         "release/phase3/address-manifest.json",
@@ -1872,11 +1872,12 @@
     "Requirements revision 65 describes separate graph deployment and owner seed transactions; it does not authorize either. Provider preimage fields, graph calldata, and preflight evidence remain required before either transaction is signed.",
     "The checked-in launch profile binds one bare Standard JSON input and the full 0.8.26+commit.8a97fa7a compiler version. It remains template evidence until provider route fields materialize the graph.",
     "The provider route namespace, route nonce, topology, salts and expected CREATE2 addresses are bound only at the address-manifest checkpoint; this proposal contains no signing calldata.",
-    "The source splits the combined 290 bps project policy share into 40 bps treasury and 250 bps process liabilities. The complete HKMN supply is allocated to the canonical market; permanent custody holds only the v4 position.",
+    "The source splits the combined 280 bps project policy share into 30 bps treasury and 250 bps process liabilities. The complete HKMN supply is allocated to the canonical market; permanent custody holds only the v4 position.",
     "The quote asset is an external upgradeable dependency. Its current implementation, pause and freeze behavior require provider-bound verification before launch.",
     "The metadata icon and banner bytes, content hashes and immutable publication locations must be supplied before a public metadata artifact is bound.",
     "The 12-block reconstruction threshold is a conservative proposal policy and needs target-chain finality confirmation before indexer integration.",
-    "The unchanged inclusive 10/40/250 basis-point native model and separate seed require current provider admission; historical acceptance does not establish it.",
+    "The unchanged inclusive 20/30/250 basis-point native model and separate seed require current provider admission; historical acceptance does not establish it.",
+    "The revised inclusive 20/30/250 basis-point native model and separate seed require current provider admission; historical acceptance does not establish it.",
     "Native ETH is currency0. Seed and wei claim ceilings require reviewed per-action limits and gas reserves. Complete EUR 250 affordability proof is deferred by the owner until functional testing."
   ],
   "unresolved": [

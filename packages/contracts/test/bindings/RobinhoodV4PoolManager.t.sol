@@ -71,8 +71,8 @@ contract V4MockPermit2 {
 contract PinnedInclusiveUsdgFeeHook is BaseTestHooks {
     uint256 private constant BPS_DENOMINATOR = 10_000;
     uint256 private constant TOTAL_FEE_BPS = 300;
-    uint256 private constant PROGRAMMABLE_FEE_BPS = 10;
-    uint256 private constant TREASURY_FEE_BPS = 40;
+    uint256 private constant PROGRAMMABLE_FEE_BPS = 20;
+    uint256 private constant TREASURY_FEE_BPS = 30;
 
     IPoolManager public immutable manager;
     Currency public immutable usdg;

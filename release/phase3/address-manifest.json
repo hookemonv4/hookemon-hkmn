@@ -29,7 +29,7 @@
       "status": "OPEN_FACT",
       "localBuildInfoCount": 1,
       "sourceCount": 36,
-      "sourceContentSha256": "sha256:d9cccd70bb4199e045def57cd6d6e8457a7beb1559810def24647fd547788f97",
+      "sourceContentSha256": "sha256:c07fe0605a567a16f8c559d251dedb51845ca0baf701bba5bebcb431bc34476c",
       "reason": "Missing: address-bound constructor values and provider route fields. Resolve: materialize the provider graph after preflight and retain a fresh launch build. Verified alternative: this single pinned-profile build binds template bytecode and source content while all signable graph fields remain unset."
     },
     "solcLongVersion": "0.8.26+commit.8a97fa7a"
@@ -98,7 +98,7 @@
       "creationBytecodeHash": "0x612740484e055828758b43eaccb7d5fdc6927423e6ab84b433221999a2ebce77",
       "runtimeTemplateCodeHash": "0xf66dd925b98becf4c6f4410abf52e0c95e31b407eb99115f19d1357b6cbf5334",
       "runtimeCodeHash": null,
-      "artifactSha256": "sha256:943bf17d52aaf90de70640b18175430c043db9cb7e862468131da694c2fc0b3d",
+      "artifactSha256": "sha256:a728f2ab2dd769e24ee4f1487d73a463b31d772edb30acb199f4299234267a69",
       "libraries": []
     },
     {
@@ -124,7 +124,7 @@
         "permit2": "0x000000000022D473030F116dDEE9F6B43aC78BA3",
         "hkmn": null,
         "tickSpacing": 60,
-        "programmable": "0x4957f49620AFf3Adbbe8195a4f633E49cc93376c",
+        "programmable": "0xD88539d3c4C460136a733A3Fd60cf6BF269079da",
         "treasury": "0xfc82B0da6d487B97d7eA1AA0d51E00AfF4F3a729",
         "operations": "0xB54AAF746eb1e80AFDb5eb0992a75b08DB2E4384",
         "launchAuthority": "0xfc82B0da6d487B97d7eA1AA0d51E00AfF4F3a729",
@@ -135,8 +135,8 @@
         "processClaimMaxCount": 24,
         "operationsRotationDelay": "43200",
         "quoteCurrency": "0x0000000000000000000000000000000000000000",
-        "processClaimLimit6hWei": null,
-        "processClaimLimitMaxWei": null
+        "processClaimLimit6hWei": "9960873688152935270",
+        "processClaimLimitMaxWei": "19921747376305870540"
       },
       "initializer": {
         "function": "initializeGraphLaunch(address,uint160)",
@@ -155,10 +155,10 @@
         "decimals": 18,
         "amountAtomic": "0"
       },
-      "creationBytecodeHash": "0xe82cda5819ee3ac8019358dcd1059b19ff5613e9586015423571e7a1db6b0ba3",
-      "runtimeTemplateCodeHash": "0x2a0f13f5f62c644c19223bf641fbe3ed93a6e7a2e5f02ff478a0eb7086c5f6ba",
+      "creationBytecodeHash": "0xde430f9e52853d2ca810e4d95ba3937649bb4fc899def5d16521efff31459d45",
+      "runtimeTemplateCodeHash": "0x63c854b6b52f47806b52908e3ef58490fcc204ec07f477560b6ad7a6cc5efeb9",
       "runtimeCodeHash": null,
-      "artifactSha256": "sha256:c823286da7036b9a31d66d2726e0297fd60405f01f34745606fbd70aa4c3ed6b",
+      "artifactSha256": "sha256:5a45a3342dd01623793824fa15db7cc5e8e8a217b7e8ff367e59335023ea1159",
       "libraries": []
     }
   ],

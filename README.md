@@ -4,19 +4,19 @@ Hookemon is a clean-room project for a programmable launch on chain ID `4663`.
 
 ## Current product state
 
-Product Phase 3 is open at requirements revision `60` and architecture revision `7`. It specifies an Operations-wallet money path: the immutable hook retains the 2.5% process liability, current Operations can claim it under a bounded six-hour rolling policy, and a separate Operations Solana identity runs the external leg through a journaled policy-controlled runner.
+The active assisted-launch source is version 0.1.2, requirements revision 76 and architecture revision 11. It supersedes source submission `45ddd161-e5bb-4cb0-ad92-8f4eb044d82e` while retaining the custom Hookemon contracts and native-ETH money path.
 
-The runtime set is content-addressed. It includes the immutable token, hook, permanent launch-position custody, and the bounded external operations path. The prior vault, escrow, route, commitment, settlement, and Merkle family remains frozen source evidence and is not deployed in Phase 3.
+The inclusive swap fee is 3.00% of gross native-ETH quote volume on buys and sells: 0.20% Programmable, 0.30% Treasury and 2.50% process. Each stream retains independent cumulative remainders. Programmable's recipient is `0xD88539d3c4C460136a733A3Fd60cf6BF269079da`; Treasury is `0xfc82B0da6d487B97d7eA1AA0d51E00AfF4F3a729`.
 
-The fee design uses gross USDG quote volume across all supported swap forms, independent 10/40/250 basis-point lifetime remainders, and whole-swap reversion for partial fills. The launch path permits hook-self initialization only inside the authorized atomic transaction that initializes, mints through Permit2, settles, binds the actual position to permanent custody, and stamps launch completion.
+The production graph comprises the immutable token, hook and permanent liquidity-position custody. Initialization allocates the token to the hook, binds custody and initializes the graph, followed by inventory seeding by the launch authority with exactly zero ETH. The assisted route may split these steps across transactions without changing the authority wallet. Buyers fund the initial market; gas is manually funded separately. No automatic Treasury-to-Operations refill exists.
 
-Offchain execution has one authoritative `CycleRepository`, a policy engine, semantic transaction allowlisting, and exactly two external signing identities. A cycle follows `claim-process`, `outbound`, `purchase`, `open`, `epic-gate`, `buyback`, `return`, and `payout`. Holder eligibility freezes at a finalized block before claim; payout is direct USDG transfer from the frozen manifest after a finalized cycle-attributed return.
+Current Operations can claim accrued native process liability under the existing six-hour caps and role restrictions. The selected claim-count limit is 24 per six hours. The bot's dynamic USD budget remains separate from the fixed ETH contract caps. See [the revision handoff](decisions/assisted-launch-v012/README.md) for exact configuration, caller order and evidence boundaries.
 
-`repairMergeEligible` measures code and integration readiness. `launchEligible` additionally requires provider admission, deployment-manifest verification, operational canaries, and separately governed live prerequisites. Neither state authorizes deployment, signing, broadcast, spending, or publication.
+Local tests and source review do not establish provider admission, deployed-router integration or live readiness. Deployment, signatures, funding and launch are outside this preparation.
 
 ## Open facts
 
-FEE-01 remains open pending provider-bound confirmation of the platform recipient, rate, basis, rounding, accrual, and claim mechanism. The plan default remains the 10/40/250 split within 300 basis points; fee- and graph-dependent work waits for that confirmation. Provider bindings, launch admission, archive-log evidence, and the live insured-value field mapping remain evidence work, not assumptions.
+Programmable will supply authoritative route namespaces, runtime and binding commitments, CREATE2 deployment bindings, permits and transaction payloads, then verify the complete deployment, seeding and buyer flow. Launch time, optional purchase, live deadlines and wallet nonces remain unset. The selected fee allocation and zero-ETH inventory configuration do not depend on those later choices.
 
 ## Source boundary
 

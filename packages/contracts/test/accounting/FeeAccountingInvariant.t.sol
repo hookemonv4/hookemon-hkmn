@@ -42,7 +42,7 @@ contract FeeAccountingInvariantTest is StdInvariant {
         require(!handler.rollbackViolation(), "failed money path changed state");
     }
 
-    /// @dev Each 10/40/250-bps stream stores only the unallocated fractional numerator. Claims
+    /// @dev Each 20/30/250-bps stream stores only the unallocated fractional numerator. Claims
     ///      may clear liabilities, but can never grow, reset, or merge this lifetime state.
     function invariant_eachLifetimeRemainderStaysWithinOneBasisPointDenominator() external view {
         FeeAccountingHarness accounting = handler.accounting();

@@ -232,8 +232,8 @@ contract NativeHookTest is Test, DeployPermit2 {
         assertEq(buyerBefore - address(this).balance, 100000);
         assertEq(address(manager).balance, 97000);
         (uint256 p, uint256 t, uint256 process) = hook.readFeeLiabilities(TREASURY);
-        assertEq(p, 100);
-        assertEq(t, 400);
+        assertEq(p, 200);
+        assertEq(t, 300);
         assertEq(process, 2500);
         uint256 received = token.balanceOf(address(this));
         _swap(false, -int256(received));
@@ -441,8 +441,8 @@ contract NativeHookTest is Test, DeployPermit2 {
         assertEq(hook.totalLiability(), 0);
         _swap(true, -1000);
         (uint256 p, uint256 t, uint256 process) = hook.readFeeLiabilities(TREASURY);
-        assertEq(p, 1);
-        assertEq(t, 4);
+        assertEq(p, 2);
+        assertEq(t, 3);
         assertEq(process, 25);
     }
 
@@ -555,7 +555,7 @@ contract NativeHookTest is Test, DeployPermit2 {
         assertEq(SINK.balance, before + 123);
         assertEq(address(destination).balance, 0);
         (, uint256 remaining,) = hook.readFeeLiabilities(TREASURY);
-        assertEq(remaining, 277);
+        assertEq(remaining, 177);
         assertTrue(hook.isSolvent());
     }
 

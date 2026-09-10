@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Operations Wallet holds the 2.5 percent process share after a bounded onchain claim and provides
+Operations Wallet holds the 2.4 percent process share after a bounded onchain claim and provides
 the two external signing identities for a cycle: Operations EVM and Operations Solana. The EVM
 identity is the public Operations address and signs only policy-approved EVM work; the Solana
 identity signs only policy-approved Solana cycle work. The adapters build an Operations-self claim

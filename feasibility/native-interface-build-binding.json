@@ -1,14 +1,14 @@
 {
   "schema": "hookemon.native-interface-build-binding.v1",
   "status": "PROVISIONAL_BUILD_ONLY",
-  "requirementsRevision": 74,
+  "requirementsRevision": 76,
   "architectureRevision": 11,
   "productionReady": false,
   "historicalEvidenceScope": "HISTORICAL_ONLY_NO_NATIVE_FEASIBILITY_CREDIT",
   "inputHashes": {
-    "architecture/interfaces.json": "aefbe5d48c27dff2e6b2f931bea52be837b04d923ee1fed44eaef60f57d2379d",
+    "architecture/interfaces.json": "be2ec5ccb89947d187ad78438125124594d7be7606ef7434745dfe65f4b52a57",
     "architecture/provisional-interfaces.json": "556f6ef19d8af6b4d48db59e8a8c279f30ca33655c1c09a26bc81dbd2c3195e7",
-    "bindings/robinhood-chain.json": "10f7b2c02ec8d108e2bb90371adbe3a2eedc8f0f10dca8c6becfe2f3573d9f69",
+    "bindings/robinhood-chain.json": "16e0a7b36e70861d3c4d008bce7422811b728e18e516f68af289a757795bbc48",
     "decisions/native-eth-interface/IMPLEMENTATION-SCOPE.md": "3e307c157d987b97223ffadb8b79ebfd079d674ca79b3266430015b8fef6c59f",
     "decisions/owner-approvals/revision-67-spec-s5-approved.json": "aebdddeb596ce2f9b6cd1fed6cbd9621cbcb5897c06b911d291608f5f376ca8b",
     "decisions/owner-approvals/revision-68-spec-s5-approved.json": "38146dffe3f47df9e5cf62f03e049310bf638ee141052b24c7b1bb97c43fd1a2",
@@ -20,7 +20,7 @@
     "feasibility/phase3-offchain-interface-amendment.json": "3e91a11ca644f1664f670979a772628690caf4f3eeda53e0ecb2722f91daa6b0",
     "packages/contracts/foundry.toml": "08b1caa2387cf1800162893b5612c32f6bc2fc1cd4e80e59fd796639ff18f597",
     "packages/contracts/remappings.txt": "1c4a68fb5b2e49b88df6bfbd52d85b24bc899aaf3cbb4367a680e2d455d02341",
-    "product/dependency-pins.json": "484bfda7519b3814e6fb61ba52936478de6e89154e60973dfd500cbf1d3befe3",
-    "specs/requirements.json": "c89397d3ece140e601f2bb494f8f13a86996faca5f5b43d013abc770abfadf5c"
+    "product/dependency-pins.json": "7fdf431591e414c0fc1fed2e734edff1c59ffb41b762dd5912832ec3f9cc445e",
+    "specs/requirements.json": "a2ce87d8c9db0d127355113c161bf397b89c4db7dc99d40febae3498d4cb6b4e"
   }
 }

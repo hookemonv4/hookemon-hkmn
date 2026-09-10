@@ -1,54 +1,77 @@
-# Native mainnet test handoff
+# Assisted-launch preparation and platform handoff
 
-Status: preparation for review; no signable launch transaction is present. This handoff covers one complete cycle, followed by a second cycle only after the first is reconciled. The owner prioritizes functional evidence and will fund the wallets separately. The decision in `decisions/owner-approvals/mainnet-test-priority-20260908.json` defers proof that EUR 250 covers the complete process. It does not select a seed amount, increase transaction limits, change fees or authorize a signature.
+Status: source and compiler artifacts prepared for integration; no signable launch transaction is present. Revision 0.1.2 supersedes `45ddd161-e5bb-4cb0-ad92-8f4eb044d82e` in the same Hookemon / HKMN lineage. The approved current scope is `decisions/assisted-launch-v012/README.md`. No deployment, funding transfer, live launch request or wallet signature is requested. Launch time and any optional initial purchase will be selected after integration and are not preparation requirements.
 
-## Review inputs
+## Fixed review inputs
 
-| Item | Bound value or present state |
+| Item | Selected value |
 | --- | --- |
-| Chain | Robinhood, chain ID 4663; native ETH at 18 decimals |
-| Launch wallet and treasury | `0xfc82B0da6d487B97d7eA1AA0d51E00AfF4F3a729` |
+| Chain | Robinhood Chain, ID 4663; native ETH |
+| Launch/Treasury and gas wallet | `0xfc82B0da6d487B97d7eA1AA0d51E00AfF4F3a729` |
 | Operations | `0xB54AAF746eb1e80AFDb5eb0992a75b08DB2E4384` |
-| Programmable recipient | `0x4957f49620AFf3Adbbe8195a4f633E49cc93376c` |
-| Stock | Exactly 1 billion HKMN at 18 decimals, entirely allocated to the canonical market |
-| Pool | Native ETH currency0, HKMN currency1; zero LP fee, spacing 60, full-range ticks -887220 through 887220 |
-| Project fee | 300 bps: 250 process, 40 treasury, 10 Programmable. The provider publishes an additional 20 bps requirement; this difference remains unadmitted. |
-| Liquidity custody | Permanent position custody; the test provides no withdrawal route |
-| Seed and process claim ceilings | Explicit wei values required before materialization; currently unset |
-| Total test funding | Owner plans EUR 250; adequacy is deliberately unproven and measured after the test |
+| Programmable recipient | `0xD88539d3c4C460136a733A3Fd60cf6BF269079da` |
+| Token | Hookemon / HKMN, 1,000,000,000 tokens, 18 decimals, atomic supply `1000000000000000000000000000` |
+| Inventory funding | Buyer-funded; creator ETH contributed to initial liquidity exactly zero; no new creator token allocation |
+| Pool | Native ETH currency0, HKMN currency1, zero LP fee, tick spacing 60 |
+| Inventory ticks | Lower 133500; upper 161220 |
+| Initial sqrtPriceX96 | `250929875796514805540091219040452` |
+| Position liquidity | `421035394154913054639875` |
+| Custody | Permanent LP position custody and 115 atomic HKMN of rounding dust |
+| Fee | 300 bps inclusive on buys and sells: 20 Programmable, 30 Treasury, 250 process; no extra surcharge or 1% buyback fee |
+| Initial six-hour native claim cap | `9960873688152935270` wei |
+| Maximum native claim cap | `19921747376305870540` wei |
+| processClaimMaxCount | 24 per rolling six hours |
+| Operations rotation delay | 43200 seconds; existing role restrictions and cap-change delays retained |
+| Bot budget | Separate dynamic rolling six-hour USD budget $25,000, adjustable up to $50,000; no onchain USD oracle |
+| Gas | Separate and manually funded; no automatic Treasury-to-Operations refill |
 
-The 0.04 ETH seed and 0.02 ETH recycled float in `feasibility/native-funding/` are local experiment inputs, not selected wallet actions. Their 32 swaps reach one expired historical bridge principal. They do not prove two complete cycles, a fresh quote, a production slippage limit or sufficient gas. USD comparisons in that evidence use a historical ratio and are not an EUR conversion.
+The unchanged curve uses $2,509.82 ETH/USD as a dated calculation reference, not a peg. Historical funded-seed experiments and affordability notes do not alter the selected zero-ETH inventory or fixed native claim caps.
 
-The EUR amount is a planned contribution, not a conversion of the earlier USD 250 spec envelope. The owner-approved revision must replace that earlier envelope before this draft becomes an executable test plan; ordinary per-action USD controls remain in force.
+## Constructor and caller mapping
 
-Signing or broadcasting requires separate owner authorization for the concrete transaction or bounded test scope, including its network, signer, operations and limits. Funding a wallet alone grants no transaction authority. This also applies to a second cycle.
+Select the production targets by both source path and contract name:
 
-## Preparation before wallet review
+- `src/launch/HKMNToken.sol:HKMNToken`: constructor `(address issuanceAuthority_, address expectedQuoteCurrency_, uint8 decimals_, uint160 launchSqrtPriceX96_)`. Use native quote address zero, decimals 18 and the fixed price above. The supplied issuanceAuthority must equal the deployment caller. Another HKMNToken in the source closure is not this target.
+- `src/bindings/RobinhoodBindings.sol:PermanentPositionCustody`: constructor `(address manager, uint256 tokenId)`. Platform mapping supplies the verified PositionManager; constructor tokenId is fixed at 0 for unbound custody before minting. The minted position ID is bound on position receipt. The contract records its deployment caller as deployer.
+- `src/HookemonHook.sol:HookemonHook`: constructor `(ConstructorConfig config)`, one tuple containing the following 18 fields in ABI order. Preserve hook permission mask `0x20cc`.
 
-1. Finish the approved source and runtime commitments, reproduce all three predicted addresses and immutable runtime code, and bind the exact source revision, compiler, roles, PoolKey and provider graph. Hashing a supplied runtime record alone does not authenticate it.
-2. Produce the complete provider request using verified official packing rules. Obtain exact-request admission of the separate native seed and inclusive fee model. Current public provider terms describe a different fee and funded-launch model; retain that difference until a concrete response resolves it.
-3. Select explicit native seed and claim limits in the review candidate. After funding, measure available ETH, Solana USD Coin and SOL independently. Obtain fresh quotes, minimum pack requirements, transaction simulations, gas/rent reserves and deadlines for the next action. Complete-process affordability is not a prerequisite; the next action must still fit its own reviewed amount and reserve.
-4. Present each unsigned transaction with chain, sender, recipient, calldata digest, native value, token approvals, maximum fees, expected state change and expiry. Missing fields remain unset. A preflight response never authorizes a signature or a create request.
+| Hook field | Configuration source |
+| --- | --- |
+| `manager` | Platform-verified PoolManager |
+| `positionManager` | Platform-verified PositionManager |
+| `permit2` | Platform-verified Permit2 |
+| `quoteCurrency` | Native ETH address zero |
+| `hkmn` | Platform-derived address of the fully qualified launch token |
+| `tickSpacing` | 60 |
+| `programmable` | Fixed Programmable recipient above |
+| `treasury` | Fixed Launch/Treasury wallet above |
+| `operations` | Fixed Operations wallet above |
+| `launchAuthority` | Unchanged customer Launch/Treasury wallet above |
+| `issuanceAuthority` | Platform mapping consistent with deployment caller and graph mode |
+| `expectedDecimals` | 18 |
+| `bindingDigest` | Authoritative platform binding commitment; unset until supplied |
+| `runtimeDigest` | Authoritative platform runtime commitment; unset until supplied |
+| `processClaimLimit6hWei` | `9960873688152935270` |
+| `processClaimLimitMaxWei` | `19921747376305870540` |
+| `processClaimMaxCount` | 24 |
+| `operationsRotationDelay` | 43200 |
 
-## Launch and first cycle
+The required call order is:
 
-| Step | Required result before continuing | Stop or recovery condition |
-| --- | --- | --- |
-| Deploy and initialize graph | Token, custody and hook match the reviewed addresses and code. Exactly `allocate`, `configureBindingHook`, then `initializeGraphLaunch` execute; graph native value is zero. | Any graph, role, code or pool mismatch stops seeding. |
-| Separate payable seed | `msg.value == amount0Max`; full HKMN stock enters the pool; native debt/refund reconcile; the permanent custodian owns the exact LP position. | A reverted seed is inspected before retry; never broaden approvals or invent a compensating withdrawal. |
-| Earn process fees | Bounded, separately simulated buys and sells reconcile actual acquired HKMN, native balances and accrued fee liabilities. | Stop at the configured gas/amount/slippage limit; no assumption that the local test's full-float buys are usable in a funded wallet. |
-| Claim and outbound bridge | Authorized claim fits earned liability and wei ceilings; Relay quote and destination are fresh; source and finalized destination amounts are attributed to this cycle. | Unknown delivery remains uncertain. Reconcile the original request before another claim or bridge. |
-| Collector purchase and reveal | Eligible pack, original instructions, payer, accounts and fees match the approved policy; actual card results are recorded. | Do not replace an ambiguous purchase or substitute a new transaction for an expired original. |
-| Sale or held-card path | Record actual buyback acceptance and proceeds, or durable held custody under the defined policy. | A random held card is not fabricated into a sale and does not prove the complete cash return path. |
-| Return and payout | Finalized return is attributed once; eligibility snapshot, recipient amounts, reserves and confirmed transfers reconcile. | Retry only through durable authorized recovery. Never re-sign or double-pay to escape an uncertain state. |
-| Close cycle | Every external effect has a reconciled receipt; remaining ETH, USD Coin, SOL and cards are accounted for. | No second cycle while the first has unresolved effects or an unexplained balance difference. |
+1. `token.allocate(hook)` by the token's immutable issuanceAuthority.
+2. `custody.configureBindingHook(hook)` by the custody's recorded deployer.
+3. `hook.initializeGraphLaunch(custody, sqrtPriceX96)` by the hook's immutable graphInitializer.
+4. `hook.seedCanonicalLiquidity(params)` by launchAuthority with zero ETH and `msg.value == amount0Max == 0`.
 
-The second cycle uses fresh observations and a new audited cycle identity. It starts only after the first closes and the next action has enough funds and gas. If the first cycle exposes a defect, preserve its journal and transaction identifiers, fix the cause, run the affected regression and review, then resume only through the supported recovery path. Do not reset custody state to make a retry appear new.
+The assisted route may use separate deployment/initialization and inventory transactions. Preserve the caller roles without changing the customer authority wallet to force one transaction. Platform mapping must match the actual constructor checks, final deployed code, graph and pool. Permits, CREATE2 bindings, route namespaces and final transaction payloads come from authoritative platform records.
 
-## Evidence and cost record
+## Integration sequence
 
-Retain the source revision, package digest, chain/block observations, redacted provider responses, unsigned intent hashes, transaction IDs, actual balance deltas, fees, rent, acquired cards, sale proceeds, recipient transfers and stop reason. Track EUR contributions separately from ETH, USD Coin and SOL units. Recycled turnover and bridge principal are not additional capital contributions. Permanent liquidity is committed capital, and unrealized card value is not spendable balance.
+1. Bind the final repository commit, focused PR, revised source package and descriptor. Reproduce exact Standard JSON input, complete inline source closure and pinned dependencies with Solidity 0.8.26+commit.8a97fa7a, Cancun, optimizer 200 runs, viaIR true, metadata.bytecodeHash none and metadata.appendCBOR false.
+2. Include ABI, creation bytecode, deployed-runtime templates, link references and compiler-emitted immutable references for all three targets. Regenerate source and artifact hashes. Compiler inputs are not an API launch request; templates are not final constructor-bound runtimes.
+3. Attach affected tests and required CI outcomes on that same commit, including fee conservation/backing/claims, both swap directions and exactness modes, zero-ETH initialization, permanent position/dust custody and role restrictions. Identify pending or failing checks explicitly.
+4. Retain the buyer-routing fixture: explicit native SETTLE, SWAP_EXACT_IN_SINGLE, then TAKE_ALL for HKMN. Actual buyer ETH must settle before the hook collects its fee. Distinguish mock-router results from actual deployed-router tests. Programmable verifies the deployed UniversalRouter and its exact ABI, complete deployment/seeding/buyer flow and authorization mapping; no platform adapter is implemented here.
+5. Keep unsupported platform values unset. If packaging or preflight produces an error, retain its exact text and request ID. Do not patch a CLI gate to manufacture a complete request. Reuse current project metadata and image.
+6. After platform integration passes, select the launch window and optional initial purchase. Prepare wallet transactions with exact addresses, actions, amounts and costs for the owner's review before signing. Live deadlines and wallet nonces remain unset until that stage.
 
-Compare actual costs after the first cycle, then after the optional second cycle. Report any further funding needed from observed balances and the next concrete action. Keep `allInBudgetProven` false until a separate complete cost calculation establishes it.
-
-The current machine-readable draft is `launch-inputs.json`; `feasibility/native-provider-admission/README.md` identifies exact missing provider fields and their official sources. Historical USDG documents under `docs/evidence/usdg-launch-preparation-20260907/` cannot authorize this native launch.
+No further customer economic decision is needed for package preparation. Platform mapping and integration remain open work with the platform; wallet review remains a separate later action. Old submissions, snapshots and their hashes stay unchanged, and historical test results retain their original source binding.
