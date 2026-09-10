@@ -2,7 +2,7 @@
   "schemaVersion": "hookemon.interfaces.v1",
   "source": "Owner-approved native ETH implementation, Collector Core buyback profile and configurable reward recipient selection; feasibility remains provisional",
   "productPhase": 3,
-  "requirementsRevision": 75,
+  "requirementsRevision": 76,
   "architectureRevision": 11,
   "status": "PROVISIONAL_PHASE3_PENDING_FEASIBILITY",
   "bindingManifest": "release/phase3/deployment-manifest.json",
@@ -55,12 +55,12 @@
       },
       {
         "name": "treasury",
-        "basisPoints": 40,
+        "basisPoints": 30,
         "remainder": "independent-lifetime"
       },
       {
         "name": "process",
-        "basisPoints": 240,
+        "basisPoints": 250,
         "remainder": "independent-lifetime"
       }
     ],
@@ -69,13 +69,14 @@
     "claimsResetRemainders": false,
     "confusion": {
       "id": "FEE-01",
-      "defaultOption": "B",
-      "status": "OWNER_SELECTED_INCLUSIVE_20_40_240_PROVIDER_INTEGRATION_PENDING",
+      "defaultOption": "E",
+      "status": "OWNER_SELECTED_INCLUSIVE_20_30_250_PROVIDER_INTEGRATION_PENDING",
       "options": {
         "A": "10/40/250 within 300",
         "B": "20/40/240 within 300",
         "C": "20/40/250 totaling 310",
-        "D": "another route"
+        "D": "another route",
+        "E": "20/30/250 within 300"
       }
     }
   },
@@ -842,8 +843,8 @@
   },
   "nativeMigration": {
     "status": "INTEGRATED_PENDING_REQUIRED_CI_AND_RELEASE_AUTHORITY",
-    "requirementsRevision": 75,
-    "requirementsSha256": "b4dc4b10fbe4ce1f39d0959e34f777f0b9524bf88342ceec8f7edbe96331bc72",
+    "requirementsRevision": 76,
+    "requirementsSha256": "a2ce87d8c9db0d127355113c161bf397b89c4db7dc99d40febae3498d4cb6b4e",
     "proposalCommit": "31b7935514ebf85da805677128e2555eecc7fef5",
     "historicalBaselineCommit": "56f185e07dfafe5533df617ec1dad473ecb63f68",
     "launchEligible": false,
@@ -866,8 +867,8 @@
       "belowMinimum": "999 reverts; 1000 succeeds",
       "basisPoints": [
         20,
-        40,
-        240
+        30,
+        250
       ],
       "rounding": "independent lifetime cumulative numerator/remainder per stream; never per-trade ceil or reset on claims",
       "conservation": "funded wei conservation and cumulative numerator arithmetic are separate unit-correct invariants"

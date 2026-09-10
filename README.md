@@ -4,9 +4,9 @@ Hookemon is a clean-room project for a programmable launch on chain ID `4663`.
 
 ## Current product state
 
-The active assisted-launch source is version 0.1.2, requirements revision 75 and architecture revision 11. It supersedes source submission `45ddd161-e5bb-4cb0-ad92-8f4eb044d82e` while retaining the custom Hookemon contracts and native-ETH money path.
+The active assisted-launch source is version 0.1.2, requirements revision 76 and architecture revision 11. It supersedes source submission `45ddd161-e5bb-4cb0-ad92-8f4eb044d82e` while retaining the custom Hookemon contracts and native-ETH money path.
 
-The inclusive swap fee is 3.00% of gross native-ETH quote volume on buys and sells: 0.20% Programmable, 0.40% Treasury and 2.40% process. Each stream retains independent cumulative remainders. Programmable's recipient is `0xD88539d3c4C460136a733A3Fd60cf6BF269079da`; Treasury is `0xfc82B0da6d487B97d7eA1AA0d51E00AfF4F3a729`.
+The inclusive swap fee is 3.00% of gross native-ETH quote volume on buys and sells: 0.20% Programmable, 0.30% Treasury and 2.50% process. Each stream retains independent cumulative remainders. Programmable's recipient is `0xD88539d3c4C460136a733A3Fd60cf6BF269079da`; Treasury is `0xfc82B0da6d487B97d7eA1AA0d51E00AfF4F3a729`.
 
 The production graph comprises the immutable token, hook and permanent liquidity-position custody. Initialization allocates the token to the hook, binds custody and initializes the graph, followed by inventory seeding by the launch authority with exactly zero ETH. The assisted route may split these steps across transactions without changing the authority wallet. Buyers fund the initial market; gas is manually funded separately. No automatic Treasury-to-Operations refill exists.
 

@@ -1,6 +1,6 @@
 # Hookemon Product Requirements
 
-Current configuration: requirements revision 75 and the [assisted-launch revision](../decisions/assisted-launch-v012/README.md) govern the native-ETH launch, including the inclusive 0.20% Programmable / 0.40% Treasury / 2.40% process split. The Phase 1 descriptions below retain their historical scope and do not override that configuration.
+Current configuration: requirements revision 76 and the [assisted-launch revision](../decisions/assisted-launch-v012/README.md) govern the native-ETH launch, including the inclusive 0.20% Programmable / 0.30% Treasury / 2.50% process split. The Phase 1 descriptions below retain their historical scope and do not override that configuration.
 
 > "Phase 1", "Phase 2", and "Phase 3" in this document always mean Product Phase 1/2/3 — the delivery scopes — not the v4 process phases (spec, architecture, feasibility, redteam, tasks, build, ship), which chain automatically per AGENTS.md.
 

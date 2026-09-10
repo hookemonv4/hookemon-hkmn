@@ -29,7 +29,7 @@ function fixture(t) {
 }
 test('native build binding preserves historical scope and cannot report launch readiness', t => {
   const f = fixture(t); const result = f.run();
-  assert.equal(result.requirementsRevision, 75);
+  assert.equal(result.requirementsRevision, 76);
   assert.equal(result.historicalRequirementsRevision, 65);
   assert.equal(result.productionReady, false);
   assert.equal(result.nativeFeasibilityProven, false);
@@ -40,7 +40,7 @@ test('unrefreshed interface evidence fails closed', t => {
   f.write('architecture/interfaces.json', x); assert.throws(f.run, /input hash mismatch/);
 });
 for (const [name, path, mutate, expected] of [
-  ['different requirements', 'specs/requirements.json', x => { x.revision = 76; }, /requirements outside implementation scope/],
+  ['different requirements', 'specs/requirements.json', x => { x.revision = 77; }, /requirements outside implementation scope/],
   ['rewritten historical freeze', 'feasibility/interface-freeze.json', x => { x.requirementsRevision = 71; }, /historical freeze changed/],
   ['additional platform fee', 'architecture/interfaces.json', x => { x.feeContract.streams[0].basisPoints = 30; }, /pinned snapshot changed: architecture\/interfaces.json/],
   ['custody withdrawal authority', 'architecture/interfaces.json', x => { x.launch.positionCustody.withdraw = true; }, /pinned snapshot changed: architecture\/interfaces.json/],

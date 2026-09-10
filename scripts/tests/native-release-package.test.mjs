@@ -81,7 +81,8 @@ test('native review disclosures remove obsolete seed instructions and remain ide
   submission.disclosures.push('Native ETH is currency0. An obsolete complete-budget prerequisite.');
   const normalized = normalizePhaseThreeSubmissionDraft(submission, { native: true });
   assert.deepEqual(normalizePhaseThreeSubmissionDraft(normalized, { native: true }), normalized);
-  assert.deepEqual(normalized.hook.feeMechanism.recipients.map(({sharePpm}) => sharePpm), [66667, 133333, 800000]);
+  assert.deepEqual(normalized.hook.feeMechanism.recipients.map(({sharePpm}) => sharePpm), [66667, 100000, 833333]);
+  assert.doesNotMatch(JSON.stringify(normalized), /20\/40\/240|40 bps treasury|240 bps process/);
   assert.equal(normalized.hook.feeMechanism.recipients[0].address, '0xD88539d3c4C460136a733A3Fd60cf6BF269079da');
   assert.deepEqual(normalized.programmableFee.rates, {
     unit: 'hundredths-of-bip', selectedHundredthsOfBip: 30000,

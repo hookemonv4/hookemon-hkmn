@@ -31,7 +31,7 @@ export function verifyNativeReleaseIdentities({ commitments, derived, ...derivat
   const economics = {
     name: 'Hookemon', symbol: 'HKMN', decimals: '18', totalSupplyAtomic: launchInputs.pool.hkmnAtomic,
     marketAllocationBps: '10000', quoteAsset: 'native', tickSpacing: String(launchInputs.pool.tickSpacing),
-    lpFee: String(launchInputs.pool.fee), totalFeeBps: '300', programmableFeeBps: '20', treasuryFeeBps: '40',
+    lpFee: String(launchInputs.pool.fee), totalFeeBps: '300', programmableFeeBps: '20', treasuryFeeBps: '30',
     hookPermissionMask: '8396', processClaimLimit6hWei: launchInputs.hookConstructorConfig.processClaimLimit6hWei,
     processClaimLimitMaxWei: launchInputs.hookConstructorConfig.processClaimLimitMaxWei,
     processClaimMaxCount: String(launchInputs.hookConstructorConfig.processClaimMaxCount),

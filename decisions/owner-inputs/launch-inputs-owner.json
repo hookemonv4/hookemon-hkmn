@@ -5,7 +5,7 @@
   "chainId": 4663,
   "treasury": {
     "address": "0xfc82B0da6d487B97d7eA1AA0d51E00AfF4F3a729",
-    "role": "treasury beneficiary (0.40% stream), process-claim limit authority",
+    "role": "treasury beneficiary (0.30% stream), process-claim limit authority",
     "custody": "Rabby browser wallet, dedicated account (owner statement 2026-09-04; no hardware wallet)",
     "verification": {
       "checksum": "EIP-55 valid",
@@ -113,8 +113,8 @@
     "feeBps": {
       "total": 300,
       "programmable": 20,
-      "treasury": 40,
-      "process": 240
+      "treasury": 30,
+      "process": 250
     },
     "programmableRecipient": "0xD88539d3c4C460136a733A3Fd60cf6BF269079da",
     "processClaimLimit6hWei": "9960873688152935270",
@@ -142,6 +142,7 @@
     "optionalInitialPurchase": null,
     "liveDeadline": null,
     "walletNonce": null,
-    "authority": "Owner preparation request dated 2026-09-10 authorizes the bounded fee revision and preserving these launch economics; no live action is authorized. This revision supersedes earlier USDG launch inputs above for native assisted launch."
+    "authority": "Owner preparation request dated 2026-09-10 authorizes the bounded fee revision and preserving these launch economics; no live action is authorized. This revision supersedes earlier USDG launch inputs above for native assisted launch. The latest owner correction selects Treasury 30 bps and process 250 bps with platform 20 and total 300 unchanged; it discards the hypothetical 1% buyback.",
+    "requirementsRevision": 76
   }
 }

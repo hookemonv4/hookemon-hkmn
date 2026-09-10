@@ -10,7 +10,7 @@
 
 ## Deployment model
 
-Phase 3 deploys one immutable token runtime, one immutable hook runtime, and one permanent position-custody runtime. The 2.4% process share is claimed by the current Operations EVM identity under the hook's bounded claim policy. A distinct Operations Solana identity performs the Solana leg. The content-addressed deployment manifest is authoritative for this runtime set.
+Phase 3 deploys one immutable token runtime, one immutable hook runtime, and one permanent position-custody runtime. The 2.5% process share is claimed by the current Operations EVM identity under the hook's bounded claim policy. A distinct Operations Solana identity performs the Solana leg. The content-addressed deployment manifest is authoritative for this runtime set.
 
 The legacy custody family is frozen source evidence, not a Phase 3 runtime. It includes the former vault-coordination, per-cycle escrow, route, on-chain commitment, settlement, and Merkle components. The manifest must reject every member of that family.
 
@@ -26,7 +26,7 @@ The hook exposes `beforeInitialize`, `beforeSwap`, `afterSwap`, and the two retu
 | `role-control` | Controls Treasury, Operations, beneficiary claims, limits, pause, and rotation. | Immutable hook runtime | None | `REQ-operations-wallet-1..3` |
 | `token-core` | Creates fixed-supply HKMN through the admitted launch path. | Token runtime | `provider-binding` | `REQ-token-core-1..4` |
 | `canonical-market` | Authenticates the canonical market, initialization, gross volume, and whole-fill swaps. | Immutable hook runtime and position custody | `token-core`, `role-control` | `REQ-canonical-market-7` |
-| `fee-accounting` | Maintains solvent 20/40/240 liabilities and lifetime remainders. | Immutable hook runtime | `canonical-market`, `role-control` | `REQ-fee-accounting-9` |
+| `fee-accounting` | Maintains solvent 20/30/250 liabilities and lifetime remainders. | Immutable hook runtime | `canonical-market`, `role-control` | `REQ-fee-accounting-9` |
 | `operations-wallet` | Releases bounded process liability to Operations, retains immutable claim history, and supports a Treasury-only delayed emergency rotation. | Immutable hook runtime and external identities | `fee-accounting`, `role-control` | `REQ-operations-wallet-1..3` |
 | `launch-orchestration` | Performs an atomic provider graph transaction and a separate retryable atomic owner-signed seed transaction. | Immutable launch runtime | `provider-binding`, `token-core`, `canonical-market`, `fee-accounting`, `operations-wallet` | `REQ-launch-orchestration-1..2` |
 | `legacy-custody-family` | Keeps the excluded legacy family frozen and non-deployed. | Frozen not deployed | None | `REQ-phase3-deployment-1` |
@@ -74,6 +74,6 @@ No callback edge can move from an offchain client into a provider of its own aut
 
 ## CONFUSION FEE-01
 
-Recorded verbatim from the approved planning record:
+Current owner selection under requirements revision 76:
 
-> FEE-01 selects 20/40/240 bps within 300 for the assisted native launch. The platform recipient is `0xD88539d3c4C460136a733A3Fd60cf6BF269079da`. Historical acceptance of 10 bps remains historical evidence; current integration must verify the revised custom model.
+> FEE-01 selects 20/30/250 bps within 300 for the assisted native launch. The platform recipient is `0xD88539d3c4C460136a733A3Fd60cf6BF269079da`. Historical acceptance of 10 bps remains historical evidence; current integration must verify the revised custom model.

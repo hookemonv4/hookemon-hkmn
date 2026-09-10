@@ -16,7 +16,7 @@ The repository ships no default wallets; every address below has to be supplied.
 
 | Role | Variable | Chain | Holds keys on the runner machine? | Purpose |
 | --- | --- | --- | --- | --- |
-| Treasury | `HOOKEMON_TREASURY_ADDRESS` | Robinhood (EVM) | No. | Receives the 0.40% Treasury fee. Gas funding is separate and manual; no automatic Treasury-to-Operations refill. |
+| Treasury | `HOOKEMON_TREASURY_ADDRESS` | Robinhood (EVM) | No. | Receives the 0.30% Treasury fee. Gas funding is separate and manual; no automatic Treasury-to-Operations refill. |
 | Vault | `HOOKEMON_VAULT_ADDRESS` | Robinhood (EVM) | No, contract. | Per-cycle custody, outbound/return, Merkle payout root. |
 | Hook | `HOOKEMON_HOOK_ADDRESS` | Robinhood (EVM) | No, contract. | Deployed Uniswap v4 hook. |
 | HKMN token | `HOOKEMON_HKMN_ADDRESS`, `HOOKEMON_HKMN_DEPLOY_BLOCK` | Robinhood (EVM) | No, contract. | Holder snapshot source (`Transfer` logs from the deploy block). |
