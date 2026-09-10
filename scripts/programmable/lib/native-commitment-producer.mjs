@@ -5,16 +5,16 @@ import { envelope, sha256 } from './native-issuance-commitments.mjs';
 import { buildNativeSourceBundle } from './native-source-bundle.mjs';
 import { assertObservedNativeRuntime } from './native-runtime-observer.mjs';
 
-const REQUIREMENTS_SHA256 = '0xc89397d3ece140e601f2bb494f8f13a86996faca5f5b43d013abc770abfadf5c';
+const REQUIREMENTS_SHA256 = '0xb4dc4b10fbe4ce1f39d0959e34f777f0b9524bf88342ceec8f7edbe96331bc72';
 // Official solc 0.8.26 macosx-amd64 distribution, independently captured by the coordinator.
 // https://binaries.soliditylang.org/macosx-amd64/list.json
 const COMPILER_SHA256 = '0x0ff016aef2396b12d1fc65429d8ea6cf53c2ee4b041bb8925644615ee1c30ab9';
 const KEYS = new Set(['root', 'compilerPath', 'standardInputPath', 'sourceRoot', 'sourceBundleManifest', 'excludedOutputPaths', 'observedRuntime']);
 
-/** Reads the frozen revision-74 bytes; this check supplies no runtime or launch authority. */
+/** Reads the frozen revision-75 bytes; this check supplies no runtime or launch authority. */
 export function readNativeRequirementsBytes(root) {
   // Production calls follow the collector, which checks every root component. This fixed
-  // file is separate from the provider bundle and must match frozen revision 74.
+  // file is separate from the provider bundle and must match frozen revision 75.
   const directory = resolve(root, 'specs');
   const path = resolve(directory, 'requirements.json');
   const parent = lstatSync(directory), file = lstatSync(path);
@@ -26,7 +26,7 @@ export function readNativeRequirementsBytes(root) {
     const opened = fstatSync(fd);
     if (!opened.isFile() || opened.dev !== file.dev || opened.ino !== file.ino) throw new TypeError('native commitment inputs: requirements file rebound');
     const bytes = readFileSync(fd);
-    if (sha256(bytes) !== REQUIREMENTS_SHA256) throw new TypeError('native commitment inputs: frozen revision-74 requirements mismatch');
+    if (sha256(bytes) !== REQUIREMENTS_SHA256) throw new TypeError('native commitment inputs: frozen revision-75 requirements mismatch');
     return bytes;
   } finally { closeSync(fd); }
 }

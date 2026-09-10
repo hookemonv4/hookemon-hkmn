@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Provider Binding records external facts and local derivations for the Phase 3 Programmable route on chain 4663. The active native interface is provisional revision 72, architecture 11; retained historical evidence keeps its original revision. The module turns provider data into content-bound evidence and does not confer authority to request, sign, fund, deploy, or broadcast a launch.
+Provider Binding records external facts and local derivations for the Phase 3 Programmable route on chain 4663. The active native interface is provisional revision 75, architecture 11; retained historical evidence keeps its original revision. The module turns provider data into content-bound evidence and does not confer authority to request, sign, fund, deploy, or broadcast a launch.
 
 ## Public interface
 
@@ -83,7 +83,7 @@ When an approved implementation changes a bound input, review its diff and updat
 
 `native-universal-router-reproduction.mjs` recompiles a fixed closed official source input with the pinned native compiler. It checks the exact output digest and substitutes all seventeen immutables from independently recorded constructor values and the chain-specific EIP-712 domain. Every runtime byte must equal the observed deployment before its compiled ABI enters the runtime observation; its compiler and input/output digests are retained. The permit authority ABI includes the verified Safe singleton and compatibility fallback functions, with the fallback ABI also retained separately. This source reproduction replaces an unavailable source-service lookup only for the fixed UniversalRouter role; it establishes neither provider admission nor launch authority.
 
-`readNativeRequirementsBytes(root)` reads only the exact frozen revision-74 requirements and refuses changed bytes or a linked requirements file or specs directory. Revision 74 applies the owner-approved recipient-restoration delta after native revision 73; the approval is retained in `docs/proposals/reward-recipient-restoration/owner-approval.md`. This byte check grants no runtime or launch authority.
+`readNativeRequirementsBytes(root)` reads only the exact frozen revision-75 requirements and refuses changed bytes or a linked requirements file or specs directory. Revision 75 applies the inclusive fee revision; historical revision 74 applied the owner-approved recipient-restoration delta after native revision 73; the approval is retained in `docs/proposals/reward-recipient-restoration/owner-approval.md`. This byte check grants no runtime or launch authority.
 
 `prepareNativeCommitmentInputs` checks the exact approved requirements bytes and pinned compiler distribution, collects supplied build bytes and derives the authenticated observation's runtime commitment. It returns the provider manifest digest and canonical content-byte digest through `buildNativeSourceBundle`, but no constructor binding or route coordinates. Complete inventory and compiler-output reproduction must precede independent token/custody derivation with the checksum-verified official provider modules. The native content digest includes the base64 bytes of each verified bundle member under `programmable.source-bundle-content.v1`; the manifest digest separately retains the official domain-framed manifest preimage. Extra compiler closure files do not silently become provider bundle members. Neither digest establishes provider admission.
 
@@ -92,3 +92,5 @@ When an approved implementation changes a bound input, review its diff and updat
 Commitment validators require exact field arrays and string-typed hashes, addresses and unsigned decimals. Release verification snapshots launch inputs before recomputation and requires own artifact entries in the committed byte map.
 
 Native commitment consistency checks snapshot plain metadata and owned byte buffers before validation. Coercible paths, metadata accessors and sparse canonical arrays are rejected. This consistency check does not independently establish live runtime authority.
+
+The provisional native build record binds revision 75 and its inclusive 20/40/240 fee split to exact current input hashes. Historical freeze and approval hashes retain their original values. This build record cannot grant production readiness, provider admission or a live interface freeze.

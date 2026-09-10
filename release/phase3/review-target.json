@@ -907,7 +907,7 @@
       "bytes": 11654,
       "kind": "dependency-lock",
       "path": "product/dependency-pins.json",
-      "sha256": "6f7c2ad601c356723607cd33253fe0f26f82f3daf23d1d4d0d4ea1abc28bc9b5"
+      "sha256": "60d1e677d5219d55b78551bf78bbb17e4e8f66199445f831975dee3e233d0f90"
     },
     {
       "bytes": 2673,
@@ -2421,7 +2421,7 @@
     }
   ],
   "javascriptImportResolutions": [],
-  "reviewTargetHash": "sha256:00929e4768f63800453b27e3829a738eba00adae0596d8016b52d8710790abaf",
+  "reviewTargetHash": "sha256:1e134bb4ba6c99506630366683c6b42fca42ae136cc12683f6500e7fd2ea9c85",
   "schemaVersion": 1,
   "standardVersion": "1.5.0",
   "submissionHash": "sha256:89a6dc4ae10f0ade25b5049db510c1378d5b9cb604207fd5d2f193e3185f904e"

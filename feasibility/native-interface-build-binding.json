@@ -1,12 +1,12 @@
 {
   "schema": "hookemon.native-interface-build-binding.v1",
   "status": "PROVISIONAL_BUILD_ONLY",
-  "requirementsRevision": 74,
+  "requirementsRevision": 75,
   "architectureRevision": 11,
   "productionReady": false,
   "historicalEvidenceScope": "HISTORICAL_ONLY_NO_NATIVE_FEASIBILITY_CREDIT",
   "inputHashes": {
-    "architecture/interfaces.json": "aefbe5d48c27dff2e6b2f931bea52be837b04d923ee1fed44eaef60f57d2379d",
+    "architecture/interfaces.json": "562e2ae60ddfba254e22a67dc5f535c6773be41451fffe7d3f3ff48fb81b69f2",
     "architecture/provisional-interfaces.json": "556f6ef19d8af6b4d48db59e8a8c279f30ca33655c1c09a26bc81dbd2c3195e7",
     "bindings/robinhood-chain.json": "10f7b2c02ec8d108e2bb90371adbe3a2eedc8f0f10dca8c6becfe2f3573d9f69",
     "decisions/native-eth-interface/IMPLEMENTATION-SCOPE.md": "3e307c157d987b97223ffadb8b79ebfd079d674ca79b3266430015b8fef6c59f",
@@ -20,7 +20,7 @@
     "feasibility/phase3-offchain-interface-amendment.json": "3e91a11ca644f1664f670979a772628690caf4f3eeda53e0ecb2722f91daa6b0",
     "packages/contracts/foundry.toml": "08b1caa2387cf1800162893b5612c32f6bc2fc1cd4e80e59fd796639ff18f597",
     "packages/contracts/remappings.txt": "1c4a68fb5b2e49b88df6bfbd52d85b24bc899aaf3cbb4367a680e2d455d02341",
-    "product/dependency-pins.json": "484bfda7519b3814e6fb61ba52936478de6e89154e60973dfd500cbf1d3befe3",
-    "specs/requirements.json": "c89397d3ece140e601f2bb494f8f13a86996faca5f5b43d013abc770abfadf5c"
+    "product/dependency-pins.json": "60d1e677d5219d55b78551bf78bbb17e4e8f66199445f831975dee3e233d0f90",
+    "specs/requirements.json": "b4dc4b10fbe4ce1f39d0959e34f777f0b9524bf88342ceec8f7edbe96331bc72"
   }
 }

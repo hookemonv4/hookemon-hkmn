@@ -1,5 +1,7 @@
 # Production environment checklist
 
+Scope: the environment names below include the retained external-runner and legacy vault adapter interfaces. For the native assisted launch, use the current [revision handoff](../../decisions/assisted-launch-v012/README.md); this checklist does not define its contract graph or initialization order.
+
 Every variable below is read by `packages/adapters/src/app/environment.mjs` (allow-listed; an
 unknown `HOOKEMON_*` variable fails startup). Values are configuration, never derived. Keep the
 file outside the repository (for example `~/hookemon-production.env`) and `source` it before
@@ -14,7 +16,7 @@ The repository ships no default wallets; every address below has to be supplied.
 
 | Role | Variable | Chain | Holds keys on the runner machine? | Purpose |
 | --- | --- | --- | --- | --- |
-| Treasury | `HOOKEMON_TREASURY_ADDRESS` | Robinhood (EVM) | No. Hardware wallet. | Fee beneficiary of the hook (2.5 % swap fee), excluded from the holder snapshot, refills the operator wallets. |
+| Treasury | `HOOKEMON_TREASURY_ADDRESS` | Robinhood (EVM) | No. | Receives the 0.40% Treasury fee. Gas funding is separate and manual; no automatic Treasury-to-Operations refill. |
 | Vault | `HOOKEMON_VAULT_ADDRESS` | Robinhood (EVM) | No, contract. | Per-cycle custody, outbound/return, Merkle payout root. |
 | Hook | `HOOKEMON_HOOK_ADDRESS` | Robinhood (EVM) | No, contract. | Deployed Uniswap v4 hook. |
 | HKMN token | `HOOKEMON_HKMN_ADDRESS`, `HOOKEMON_HKMN_DEPLOY_BLOCK` | Robinhood (EVM) | No, contract. | Holder snapshot source (`Transfer` logs from the deploy block). |

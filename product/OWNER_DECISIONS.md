@@ -166,3 +166,9 @@ Requirements revision 57 opens only the approved local Phase 2 manual cycle-cont
 Concrete provider addresses, interfaces, runtime hashes, deployment actions, signing, broadcasts, launches, and spending require their separately defined evidence or authorization.
 
 Future product choices that do not affect Phase 1 are recorded outside the normative Phase 1 artifacts and remain closed until their phase opens explicitly.
+
+## Assisted-launch fee revision, 10 September 2026
+
+The owner requested a bounded revision on Robinhood Chain 4663: an inclusive 300-basis-point fee with 20 for Programmable, 40 for Treasury and 240 for process on buys and sells. The Programmable beneficiary is `0xD88539d3c4C460136a733A3Fd60cf6BF269079da`. The existing native supply, price curve, fixed ETH caps, custody, roles and buyer-funded inventory remain unchanged; creator ETH for initial liquidity is exactly zero, with separate manual gas funding and no automatic Treasury-to-Operations refill.
+
+The coordinator confirms `processClaimMaxCount = 24` per six hours for revision 0.1.2, resolving the previously open 1–64 range using the recorded suggestion. This does not alter the separate bot-side rolling USD budget. The owner also requested consistent active documentation, workflow and website fee information. Earlier dated decisions remain historical records; current preparation follows requirements revision 75 and the assisted-launch handoff. No deployment, funding transfer, live launch request or signature is authorized by this revision.

@@ -18,7 +18,7 @@ const word = value => value.replace(/^0x/, '').toLowerCase().padStart(64, '0');
 const selector = signature => `0x${Buffer.from(keccak256(Buffer.from(signature))).toString('hex').slice(0, 8)}`;
 const files = bytes => Object.keys(bytes).sort().map(path => ({ path, sha256: sha256(bytes[path]) }));
 
-function fixture() {
+function fixture(programmableFeeBps = '20') {
   const inputDirectory = mkdtempSync(join(tmpdir(), 'native-release-identities-'));
   const launchInputs = structuredClone(fixtureInput);
   const sourceBytes = Object.fromEntries(Object.entries(fixtureArtifacts).map(([path, artifact]) => {
@@ -40,7 +40,7 @@ function fixture() {
     roles: Object.fromEntries(Object.entries(launchInputs.roles).map(([role, address]) => [role === 'manager' ? 'poolManager' : role, address.toLowerCase()])),
     economics: { name: 'Hookemon', symbol: 'HKMN', decimals: '18', totalSupplyAtomic: launchInputs.pool.hkmnAtomic,
       marketAllocationBps: '10000', quoteAsset: 'native', tickSpacing: '60', lpFee: '0', totalFeeBps: '300',
-      programmableFeeBps: '10', treasuryFeeBps: '40', hookPermissionMask: '8396',
+      programmableFeeBps, treasuryFeeBps: '40', hookPermissionMask: '8396',
       processClaimLimit6hWei: launchInputs.hookConstructorConfig.processClaimLimit6hWei,
       processClaimLimitMaxWei: launchInputs.hookConstructorConfig.processClaimLimitMaxWei,
       processClaimMaxCount: String(launchInputs.hookConstructorConfig.processClaimMaxCount),
@@ -94,5 +94,12 @@ test('native final identities bind constructor commitments, artifacts and the co
     delete sourceBytes['token.json'];
     assert.throws(() => verifyNativeReleaseIdentities({ ...f, commitments: { ...f.commitments, sourceBytes } }), /closure bytes differ/);
     assert.throws(() => verifyNativeReleaseIdentities({ ...f, launchInputs: { ...f.launchInputs, schemaVersion: 'hookemon.phase3.launch-inputs.v1' } }), /native launch schema/);
+  } finally { rmSync(f.inputDirectory, { recursive: true, force: true }); }
+});
+
+test('native release economics rejects the superseded 10-bps platform allocation', () => {
+  const f = fixture('10');
+  try {
+    assert.throws(() => verifyNativeReleaseIdentities(f), /economics programmableFeeBps/);
   } finally { rmSync(f.inputDirectory, { recursive: true, force: true }); }
 });

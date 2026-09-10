@@ -5,12 +5,12 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { prepareNativeCommitmentInputs, readNativeRequirementsBytes } from '../programmable/lib/native-commitment-producer.mjs';
 
-test('requirements binding accepts the approved revision 74 and refuses changed bytes', (t) => {
+test('requirements binding accepts the approved revision 75 and refuses changed bytes', (t) => {
   const root = mkdtempSync(join(tmpdir(), 'native-requirements-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   mkdirSync(join(root, 'specs'));
   const approved = readFileSync(new URL('../../specs/requirements.json', import.meta.url));
-  assert.equal(JSON.parse(approved).revision, 74);
+  assert.equal(JSON.parse(approved).revision, 75);
   const target = join(root, 'specs/requirements.json');
   writeFileSync(target, approved);
   assert.deepEqual(readNativeRequirementsBytes(root), approved);
@@ -18,9 +18,9 @@ test('requirements binding accepts the approved revision 74 and refuses changed 
   const changed = JSON.parse(approved);
   changed.requirements[0].statement += ' Changed input.';
   writeFileSync(target, JSON.stringify(changed));
-  assert.throws(() => readNativeRequirementsBytes(root), /frozen revision-74 requirements mismatch/);
+  assert.throws(() => readNativeRequirementsBytes(root), /frozen revision-75 requirements mismatch/);
   writeFileSync(target, Buffer.concat([approved, Buffer.from('\n')]));
-  assert.throws(() => readNativeRequirementsBytes(root), /frozen revision-74 requirements mismatch/);
+  assert.throws(() => readNativeRequirementsBytes(root), /frozen revision-75 requirements mismatch/);
 });
 
 test('requirements binding refuses linked files and linked specs directories', (t) => {

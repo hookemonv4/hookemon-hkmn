@@ -188,13 +188,13 @@
     },
     "controlDependencyVerifier": {
       "path": "scripts/verify-control-dependencies.mjs",
-      "expectedSha256": "99103916f0748ec640d0bc7fdfa1bd3fd29cb258cd41fcffa44bd3b4d7acd6a6",
-      "actualSha256": "99103916f0748ec640d0bc7fdfa1bd3fd29cb258cd41fcffa44bd3b4d7acd6a6",
+      "expectedSha256": "b6c8d3b4de78aee49cc2ee5a0909851e8d8653e9255aa67502c5a8ab9e926f95",
+      "actualSha256": "b6c8d3b4de78aee49cc2ee5a0909851e8d8653e9255aa67502c5a8ab9e926f95",
       "closure": [
         {
           "path": "scripts/verify-control-dependencies.mjs",
-          "sha256": "99103916f0748ec640d0bc7fdfa1bd3fd29cb258cd41fcffa44bd3b4d7acd6a6",
-          "actualSha256": "99103916f0748ec640d0bc7fdfa1bd3fd29cb258cd41fcffa44bd3b4d7acd6a6"
+          "sha256": "b6c8d3b4de78aee49cc2ee5a0909851e8d8653e9255aa67502c5a8ab9e926f95",
+          "actualSha256": "b6c8d3b4de78aee49cc2ee5a0909851e8d8653e9255aa67502c5a8ab9e926f95"
         },
         {
           "path": "scripts/lib/util.mjs",
@@ -273,7 +273,7 @@
     "schema": "hookemon.control-gate-pin-bump.v2",
     "approvalToken": "OWNER APPROVED",
     "basePinsSha256": "484bfda7519b3814e6fb61ba52936478de6e89154e60973dfd500cbf1d3befe3",
-    "candidatePinsSha256": "6f7c2ad601c356723607cd33253fe0f26f82f3daf23d1d4d0d4ea1abc28bc9b5",
+    "candidatePinsSha256": "60d1e677d5219d55b78551bf78bbb17e4e8f66199445f831975dee3e233d0f90",
     "baseChecker": {
       "path": "scripts/verify-control-dependencies.mjs",
       "blobId": "d5ae88e0f36cce3d3efa185c940236fd8e7ad94f"
@@ -292,7 +292,7 @@
       {
         "path": "scripts/verify-control-dependencies.mjs",
         "previousSha256": "fbb53af1521686b8fb35dcdec587f311e6195156cb28d857ae4dd5a49dc086ed",
-        "sha256": "99103916f0748ec640d0bc7fdfa1bd3fd29cb258cd41fcffa44bd3b4d7acd6a6"
+        "sha256": "b6c8d3b4de78aee49cc2ee5a0909851e8d8653e9255aa67502c5a8ab9e926f95"
       }
     ]
   }

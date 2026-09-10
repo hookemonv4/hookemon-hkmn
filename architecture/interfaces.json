@@ -2,7 +2,7 @@
   "schemaVersion": "hookemon.interfaces.v1",
   "source": "Owner-approved native ETH implementation, Collector Core buyback profile and configurable reward recipient selection; feasibility remains provisional",
   "productPhase": 3,
-  "requirementsRevision": 74,
+  "requirementsRevision": 75,
   "architectureRevision": 11,
   "status": "PROVISIONAL_PHASE3_PENDING_FEASIBILITY",
   "bindingManifest": "release/phase3/deployment-manifest.json",
@@ -530,7 +530,18 @@
       "historical-role-holders"
     ],
     "recipientSelection": {
-      "allowedLimits": [100, 200, 300, 400, 500, 600, 700, 800, 900, 1000],
+      "allowedLimits": [
+        100,
+        200,
+        300,
+        400,
+        500,
+        600,
+        700,
+        800,
+        900,
+        1000
+      ],
       "defaultLimit": 200,
       "freeze": "cycle identity, operator configuration revision and limit persisted atomically before stages; resumed cycles use the stored policy",
       "ranking": "positive non-excluded direct HKMN balances descending, normalized address ascending for ties, at most the frozen limit",
@@ -831,8 +842,8 @@
   },
   "nativeMigration": {
     "status": "INTEGRATED_PENDING_REQUIRED_CI_AND_RELEASE_AUTHORITY",
-    "requirementsRevision": 74,
-    "requirementsSha256": "c89397d3ece140e601f2bb494f8f13a86996faca5f5b43d013abc770abfadf5c",
+    "requirementsRevision": 75,
+    "requirementsSha256": "b4dc4b10fbe4ce1f39d0959e34f777f0b9524bf88342ceec8f7edbe96331bc72",
     "proposalCommit": "31b7935514ebf85da805677128e2555eecc7fef5",
     "historicalBaselineCommit": "56f185e07dfafe5533df617ec1dad473ecb63f68",
     "launchEligible": false,

@@ -2,13 +2,13 @@ import { createHash } from 'node:crypto';
 import { lstatSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-const implementationScopeRequirementsSha256 = 'c89397d3ece140e601f2bb494f8f13a86996faca5f5b43d013abc770abfadf5c';
+const implementationScopeRequirementsSha256 = 'b4dc4b10fbe4ce1f39d0959e34f777f0b9524bf88342ceec8f7edbe96331bc72';
 const historicalFreezeSha256 = 'e5b6fade85bd5ef9c0ae0cefaeffbf23ae7926460f21ccea52debd8484f1818d';
 const scopeSha256 = '3e307c157d987b97223ffadb8b79ebfd079d674ca79b3266430015b8fef6c59f';
 const pinnedSnapshotHashes = Object.freeze({
   "decisions/owner-approvals/revision-73-collector-core-approved.json": "ccbe59f99addffc8e7e64e8dc243fdd722352ee2c8d58c357c430b2b16ff169d",
   "decisions/owner-approvals/revision-72-native-commitments-approved.json": "eef9e64fbd86db39d4a825dc4fc2f8b532931b997eb7f6903abd574d95c62cef",
-  "architecture/interfaces.json": "aefbe5d48c27dff2e6b2f931bea52be837b04d923ee1fed44eaef60f57d2379d",
+  "architecture/interfaces.json": "562e2ae60ddfba254e22a67dc5f535c6773be41451fffe7d3f3ff48fb81b69f2",
   "feasibility/phase3-offchain-interface-amendment.json": "3e91a11ca644f1664f670979a772628690caf4f3eeda53e0ecb2722f91daa6b0",
   "decisions/owner-approvals/revision-67-spec-s5-approved.json": "aebdddeb596ce2f9b6cd1fed6cbd9621cbcb5897c06b911d291608f5f376ca8b",
   "decisions/owner-approvals/revision-68-spec-s5-approved.json": "38146dffe3f47df9e5cf62f03e049310bf638ee141052b24c7b1bb97c43fd1a2",
@@ -57,7 +57,7 @@ export function validateNativeInterfaceBuildBinding({ projectRoot, frozen, freez
   assert(record.schema === 'hookemon.native-interface-build-binding.v1', 'unsupported record');
   assert(record.status === 'PROVISIONAL_BUILD_ONLY' && record.productionReady === false,
     'record cannot grant production readiness');
-  assert(record.requirementsRevision === 74 && record.architectureRevision === 11, 'revision mismatch');
+  assert(record.requirementsRevision === 75 && record.architectureRevision === 11, 'revision mismatch');
   assert(JSON.stringify(Object.keys(record.inputHashes).sort()) === JSON.stringify([...nativeBuildInputs].sort()),
     'input set mismatch');
   for (const file of nativeBuildInputs) {
@@ -77,17 +77,17 @@ export function validateNativeInterfaceBuildBinding({ projectRoot, frozen, freez
     'supplied historical freeze differs from bound bytes');
   assert(JSON.stringify(manifest) === JSON.stringify(JSON.parse(bytes(projectRoot, 'bindings/robinhood-chain.json'))),
     'supplied provider manifest differs from bound bytes');
-  assert(frozen.productPhase === 3 && frozen.requirementsRevision === 74 && frozen.architectureRevision === 11,
+  assert(frozen.productPhase === 3 && frozen.requirementsRevision === 75 && frozen.architectureRevision === 11,
     'interface revision mismatch');
   assert(frozen.status === 'PROVISIONAL_PHASE3_PENDING_FEASIBILITY'
     && frozen.bindingManifestDigest === null && frozen.nativeMigration?.launchEligible === false,
   'provisional boundary changed');
-  assert(frozen.nativeMigration.requirementsRevision === 74
+  assert(frozen.nativeMigration.requirementsRevision === 75
     && frozen.nativeMigration.requirementsSha256 === implementationScopeRequirementsSha256, 'migration requirements mismatch');
   assert(frozen.nativeMigration.nativePaymentBindingSha256 === null, 'runtime authority requires release verification');
   assert(frozen.feeContract.basis === 'GROSS_NATIVE_ETH_QUOTE_VOLUME'
     && JSON.stringify(frozen.feeContract.streams.map(({ name, basisPoints }) => [name, basisPoints]))
-      === JSON.stringify([['programmable', 10], ['treasury', 40], ['process', 250]]), 'native fee model changed');
+      === JSON.stringify([['programmable', 20], ['treasury', 40], ['process', 240]]), 'native fee model changed');
   assert(JSON.stringify(Object.keys(frozen.launch.positionCustody).sort()) === JSON.stringify(['approval', 'operator', 'withdraw'])
     && Object.values(frozen.launch.positionCustody).every(value => value === false), 'custody authority changed');
   const quote = frozen.nativeMigration.quoteCurrency;
@@ -99,7 +99,7 @@ export function validateNativeInterfaceBuildBinding({ projectRoot, frozen, freez
     'historical evidence promoted');
   return {
     status: record.status,
-    requirementsRevision: 74,
+    requirementsRevision: 75,
     architectureRevision: 11,
     historicalRequirementsRevision: freeze.requirementsRevision,
     historicalEvidenceScope: record.historicalEvidenceScope,
