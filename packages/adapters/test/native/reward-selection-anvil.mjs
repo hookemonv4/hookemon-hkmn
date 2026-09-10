@@ -94,7 +94,7 @@ for (const count of (process.env.REWARD_SELECTION_TEST_COUNTS ?? '100,200,300,40
     const pool = BigInt(count) * 1000n + 1n;
     const plan = compileDirectPayoutPlan({ cycleId, eligibilityManifest, finalizedReturn: native(pool), previousDust: native(0),
       returnBinding: { operations, assetId: 'native', evidenceDigest: `sha256:${'ff'.repeat(32)}` } });
-    assert.equal(plan.schema, 'hookemon.direct-payout-plan.v3');
+    assert.equal(plan.schema, 'hookemon.direct-payout-plan.v4');
     assert.equal(plan.eligibility.selection.eligibleCount, count + 17);
     assert.equal(plan.eligibility.selection.selectedCount, count);
     assert.equal(plan.eligibility.selection.excludedBalanceTotal.amountAtomic, '10');

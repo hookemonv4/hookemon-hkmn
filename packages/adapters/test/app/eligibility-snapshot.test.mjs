@@ -894,6 +894,21 @@ for (const limit of [100,200,300,400,500,600]) {
       finalizedReturn: createNativePayoutAmount({ assetId: 'native', amountAtomic: String(limit + 1) }),
       previousDust: createNativePayoutAmount({ assetId: 'native', amountAtomic: '0' }),
       returnBinding: { operations: OPERATIONS, assetId: 'native', evidenceDigest: `sha256:${'e'.repeat(64)}` } });
+    const legacyPlan = compileDirectPayoutPlan({
+      cycleId: cycle.cycleId,
+      eligibilityManifest: evidence,
+      finalizedReturn: createNativePayoutAmount({ assetId: 'native', amountAtomic: String(limit + 1) }),
+      previousDust: createNativePayoutAmount({ assetId: 'native', amountAtomic: '0' }),
+      returnBinding: { operations: OPERATIONS, assetId: 'native', evidenceDigest: `sha256:${'e'.repeat(64)}` },
+      legacyPlanSchema: 'hookemon.direct-payout-plan.v3',
+    });
+    assert.equal(legacyPlan.schema, 'hookemon.direct-payout-plan.v3');
+    assert.doesNotThrow(() => createDirectPayoutState({
+      plan: legacyPlan,
+      operations: OPERATIONS,
+      assetId: 'native',
+      firstNonce: '0',
+    }));
     const payout = createDirectPayoutState({ plan, operations: OPERATIONS, assetId: 'native', firstNonce: '0' });
     await restarted.persistPagedPayoutState(cycle.cycleId, 'payout', payout);
     const reopened = await CycleRepository.open(directory, () => 3000);
@@ -906,6 +921,96 @@ for (const limit of [100,200,300,400,500,600]) {
     await assert.rejects(freezeEligibilityBeforeClaim({ adapters: dualSourceAdapters(client), config, context: { cycleId: cycle.cycleId, rewardSelection: cycle.rewardSelection } }), /feasibility/);
   });
 }
+
+test('persists and reopens a selected 250,000-holder snapshot and bounded v4 payout through the real cycle repository', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'selected-250000-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const repository = await CycleRepository.open(directory);
+  const cycle = await repository.createCycle({
+    cycleId: 'selected-250000',
+    releaseAmount: '1',
+    mode: 'production',
+    rewardRecipientLimit: 1000,
+    configurationRevision: 1,
+  });
+  const holders = Array.from({ length: 250_000 }, (_, index) => `0x1${index.toString(16).padStart(39, '0')}`);
+  const client = fakeRpc({
+    latest: 10n,
+    finalized: 10n,
+    logs: [
+      ...holders.map((holder, index) => rawTransfer({
+        blockNumber: 1,
+        logIndex: index,
+        from: ZERO_ADDRESS,
+        to: holder,
+        value: 1,
+      })),
+      rawTransfer({
+        blockNumber: 1,
+        logIndex: holders.length,
+        from: ZERO_ADDRESS,
+        to: OPERATIONS,
+        value: 9,
+      }),
+    ],
+  });
+  const configBase = baseConfig();
+  const config = baseConfig({
+    eligibilitySnapshot: {
+      ...configBase.eligibilitySnapshot,
+      launchManifest: {
+        ...configBase.eligibilitySnapshot.launchManifest,
+        supply: { chainId: '4663', assetId: TOKEN, decimals: 18, amountAtomic: '250009' },
+      },
+      feasibility: {
+        ...configBase.eligibilitySnapshot.feasibility,
+        maxRecipientCount: 1000,
+        maxTransactionCount: 1000,
+        nativeBalanceWei: '2000000000',
+      },
+      logPageSize: '300000',
+    },
+  });
+  config.eligibilitySnapshot.launchManifestDigest = launchManifestDigest(config.eligibilitySnapshot.launchManifest);
+
+  const evidence = await freezeEligibilityBeforeClaim({
+    adapters: dualSourceAdapters(client),
+    config,
+    context: { cycleId: cycle.cycleId, rewardSelection: cycle.rewardSelection },
+  });
+  assert.equal(evidence.selection.eligibleCount, 250_000);
+  assert.equal(evidence.selection.selectedCount, 1000);
+  await repository.prepareStage(cycle.cycleId, 'eligibility-snapshot');
+  await repository.completeStage(cycle.cycleId, 'eligibility-snapshot', evidence);
+
+  const stageDirectory = join(directory, 'stage-evidence', encodeURIComponent(cycle.cycleId), encodeURIComponent('eligibility-snapshot'));
+  const pagedManifest = JSON.parse(await readFile(join(stageDirectory, 'manifest.json'), 'utf8'));
+  assert.equal(pagedManifest.schema, 'hookemon.durable-cycle-store.paged-stage-evidence-manifest.v1');
+  const reopened = await CycleRepository.open(directory);
+  const persisted = await reopened.readStage(cycle.cycleId, 'eligibility-snapshot');
+  assert.equal(persisted.status, 'COMPLETE');
+  assert.deepEqual(persisted.evidence, evidence);
+  const plan = compileDirectPayoutPlan({
+    cycleId: cycle.cycleId,
+    eligibilityManifest: persisted.evidence,
+    finalizedReturn: createNativePayoutAmount({ assetId: 'native', amountAtomic: '1000' }),
+    previousDust: createNativePayoutAmount({ assetId: 'native', amountAtomic: '0' }),
+    returnBinding: { operations: OPERATIONS, assetId: 'native', evidenceDigest: `sha256:${'e'.repeat(64)}` },
+  });
+  assert.equal(plan.schema, 'hookemon.direct-payout-plan.v4');
+  assert.equal(Object.hasOwn(plan.eligibility.selection, 'holderSnapshot'), false);
+  await reopened.persistPagedPayoutState(cycle.cycleId, 'payout', createDirectPayoutState({
+    plan,
+    operations: OPERATIONS,
+    assetId: 'native',
+    firstNonce: '0',
+  }));
+  const payoutReopened = await CycleRepository.open(directory);
+  const payoutState = await payoutReopened.readPagedPayoutState(cycle.cycleId, 'payout');
+  assert.equal(payoutState.plan.schema, 'hookemon.direct-payout-plan.v4');
+  assert.equal(Object.hasOwn(payoutState.plan.eligibility.selection, 'holderSnapshot'), false);
+  assert.doesNotThrow(() => assertPayoutManifestUnchanged(payoutState, plan));
+});
 
 for (const count of [100, 200, 300, 400, 500, 600]) {
 test(`capacity matrix accepts ${count} recipients through the actual eligibility gate`, async t => {

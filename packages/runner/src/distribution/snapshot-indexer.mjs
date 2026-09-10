@@ -30,6 +30,15 @@ export const SNAPSHOT_CANDIDATE_SCHEMA = 'hookemon.input-bound-hkmn-snapshot-can
 export const SNAPSHOT_CANDIDATE_AUTHORITY = 'INPUT_BOUND_CANDIDATE_NOT_AUTHENTICATED';
 export const TRANSFER_LOG_REPLAY_SCHEMA = 'hookemon.hkmn-transfer-log-replay.v1';
 export const ELIGIBILITY_HOLDER_SET_SCHEMA = 'hookemon.eligibility-holder-set.v1';
+export const HOLDER_SNAPSHOT_LIMITS = Object.freeze({
+  directBalances: 250_000,
+  canonical: Object.freeze({
+    objects: 2 * 250_000 + 4_096,
+    arrays: 16_384,
+    arrayItems: 250_000,
+    aggregateBytes: 268_435_456,
+  }),
+});
 
 const ADDRESS = /^0x[0-9a-f]{40}$/;
 const BLOCK_HASH = /^0x[0-9a-f]{64}$/;
@@ -283,6 +292,9 @@ export function buildHolderSnapshot(input) {
     totalHolderBalance += balance;
     directBalances.push({ recipient: address, directHkmnBalance: balance.toString() });
   }
+  if (directBalances.length > HOLDER_SNAPSHOT_LIMITS.directBalances) {
+    throw new Error(`holder snapshot direct balances exceed the limit of ${HOLDER_SNAPSHOT_LIMITS.directBalances}`);
+  }
   directBalances.sort((a, b) => compareAddresses(a.recipient, b.recipient));
 
   const excludedAddresses = [...excludedByAddress.entries()]
@@ -356,7 +368,7 @@ export function assertHolderSnapshot(value) {
   const directBalances = assertBoundedArray(
     snapshot.directBalances,
     'holder snapshot direct balances',
-    {},
+    { max: HOLDER_SNAPSHOT_LIMITS.directBalances },
   );
   let totalHolderBalance = 0n;
   let previousRecipient = null;
@@ -488,15 +500,23 @@ export function toSnapshotCandidate(holderSnapshot, { directBalances } = {}) {
 
 /** Selects finalized direct balances; evidence retains the complete authenticated holder snapshot. */
 export function selectEligibilityRecipients({ holderSnapshot, supply, rewardSelection }) {
-  assertBoundedCanonicalValue(holderSnapshot, 'reward selection holder snapshot', { objects: 200_000, arrays: 10_000, arrayItems: 10_000, aggregateBytes: 33_554_432 });
+  assertBoundedCanonicalValue(holderSnapshot, 'reward selection holder snapshot', HOLDER_SNAPSHOT_LIMITS.canonical);
   const snapshot = assertHolderSnapshot(holderSnapshot);
   assertRewardSelectionSnapshot(rewardSelection);
   assertTypedHkmnAmount(supply, 'reward selection supply', { chainId: snapshot.chainId, tokenAddress: snapshot.tokenAddress, decimals: supply?.decimals });
   if (supply.amountAtomic !== snapshot.totalSupply || BigInt(snapshot.totalHolderBalance) + BigInt(snapshot.totalExcludedBalance) !== BigInt(snapshot.totalSupply)) throw new Error('reward selection full supply does not reconcile');
-  const selected = [...snapshot.directBalances].sort((a, b) => {
-    const difference = BigInt(b.directHkmnBalance) - BigInt(a.directHkmnBalance);
-    return difference < 0n ? -1 : difference > 0n ? 1 : compareAddresses(a.recipient, b.recipient);
-  }).slice(0, rewardSelection.rewardRecipientLimit).sort((a, b) => compareAddresses(a.recipient, b.recipient));
+  const ranked = snapshot.directBalances.map(entry => ({
+    entry,
+    balance: BigInt(entry.directHkmnBalance),
+  }));
+  ranked.sort((left, right) => {
+    const difference = right.balance - left.balance;
+    return difference < 0n ? -1 : difference > 0n ? 1 : compareAddresses(left.entry.recipient, right.entry.recipient);
+  });
+  const selected = ranked
+    .slice(0, rewardSelection.rewardRecipientLimit)
+    .map(({ entry }) => entry)
+    .sort((a, b) => compareAddresses(a.recipient, b.recipient));
   const amount = amountAtomic => ({ ...supply, amountAtomic });
   const entries = selected.map(({ recipient, directHkmnBalance }) => ({ recipient, hkmnBalance: amount(directHkmnBalance) }));
   const selectedTotal = selected.reduce((sum, entry) => sum + BigInt(entry.directHkmnBalance), 0n);
@@ -522,4 +542,72 @@ export function assertEligibilitySelection(selection, manifest) {
   if (snapshot.blockNumber !== manifest.snapshotBlock || snapshot.blockHash !== manifest.snapshotHash || snapshot.holderSnapshotDigest !== manifest.holderSnapshotDigest || snapshotDigest(snapshot.excludedAddresses) !== snapshotDigest(manifest.exclusions)) throw new Error('reward selection holder snapshot does not match manifest');
   if (snapshotDigest(expected.selection) !== snapshotDigest(selection) || snapshotDigest(expected.entries) !== snapshotDigest(manifest.entries)) throw new Error('reward selection evidence or selected entries mismatch');
   return expected.selection;
+}
+
+export function summarizeEligibilitySelection(selection) {
+  assertExactShape(selection, ['schema', 'rewardSelection', 'holderSnapshot', 'eligibleCount', 'selectedCount', 'selectedBalanceTotal', 'unselectedEligibleBalanceTotal', 'excludedBalanceTotal', 'digest'], 'reward selection evidence');
+  if (selection.schema !== 'hookemon.reward-selection-evidence.v1') throw new Error('reward selection evidence schema is invalid');
+  assertHolderSnapshot(selection.holderSnapshot);
+  assertRewardSelectionSnapshot(selection.rewardSelection);
+  if (typeof selection.digest !== 'string' || !/^sha256:[0-9a-f]{64}$/.test(selection.digest)) {
+    throw new Error('reward selection evidence digest is invalid');
+  }
+  return {
+    schema: 'hookemon.reward-selection-summary.v1',
+    rewardSelection: structuredClone(selection.rewardSelection),
+    holderSnapshotDigest: selection.holderSnapshot.holderSnapshotDigest,
+    eligibleCount: selection.eligibleCount,
+    selectedCount: selection.selectedCount,
+    selectedBalanceTotal: structuredClone(selection.selectedBalanceTotal),
+    unselectedEligibleBalanceTotal: structuredClone(selection.unselectedEligibleBalanceTotal),
+    excludedBalanceTotal: structuredClone(selection.excludedBalanceTotal),
+    digest: selection.digest,
+  };
+}
+
+export function assertEligibilitySelectionSummary(summary, manifest) {
+  assertExactShape(summary, ['schema', 'rewardSelection', 'holderSnapshotDigest', 'eligibleCount', 'selectedCount', 'selectedBalanceTotal', 'unselectedEligibleBalanceTotal', 'excludedBalanceTotal', 'digest'], 'reward selection summary');
+  if (summary.schema !== 'hookemon.reward-selection-summary.v1') throw new Error('reward selection summary schema is invalid');
+  assertRewardSelectionSnapshot(summary.rewardSelection, { cycleId: manifest.cycleId });
+  if (summary.holderSnapshotDigest !== manifest.holderSnapshotDigest) throw new Error('reward selection summary holder snapshot does not match manifest');
+  if (typeof summary.digest !== 'string' || !/^sha256:[0-9a-f]{64}$/.test(summary.digest)) {
+    throw new Error('reward selection summary digest is invalid');
+  }
+  for (const [field, value] of [
+    ['eligibleCount', summary.eligibleCount],
+    ['selectedCount', summary.selectedCount],
+  ]) {
+    if (!Number.isSafeInteger(value) || value < 0) throw new Error(`reward selection summary ${field} is invalid`);
+  }
+  if (summary.selectedCount !== manifest.entries.length || summary.selectedCount > summary.eligibleCount) {
+    throw new Error('reward selection summary selected count does not match manifest');
+  }
+  const selectedBalanceTotal = assertTypedHkmnAmount(
+    summary.selectedBalanceTotal,
+    'reward selection summary selectedBalanceTotal',
+    { chainId: manifest.supply.chainId, tokenAddress: manifest.supply.assetId, decimals: manifest.supply.decimals },
+  );
+  const unselectedEligibleBalanceTotal = assertTypedHkmnAmount(
+    summary.unselectedEligibleBalanceTotal,
+    'reward selection summary unselectedEligibleBalanceTotal',
+    { chainId: manifest.supply.chainId, tokenAddress: manifest.supply.assetId, decimals: manifest.supply.decimals },
+  );
+  const excludedBalanceTotal = assertTypedHkmnAmount(
+    summary.excludedBalanceTotal,
+    'reward selection summary excludedBalanceTotal',
+    { chainId: manifest.supply.chainId, tokenAddress: manifest.supply.assetId, decimals: manifest.supply.decimals },
+  );
+  const selectedFromEntries = manifest.entries.reduce((sum, entry) => sum + BigInt(entry.hkmnBalance.amountAtomic), 0n);
+  if (selectedFromEntries !== BigInt(selectedBalanceTotal.amountAtomic)) {
+    throw new Error('reward selection summary selected balance does not match manifest');
+  }
+  if (
+    selectedFromEntries
+      + BigInt(unselectedEligibleBalanceTotal.amountAtomic)
+      + BigInt(excludedBalanceTotal.amountAtomic)
+      !== BigInt(manifest.supply.amountAtomic)
+  ) {
+    throw new Error('reward selection summary balances do not reconcile to manifest supply');
+  }
+  return summary;
 }
