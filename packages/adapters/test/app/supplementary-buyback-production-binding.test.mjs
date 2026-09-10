@@ -27,7 +27,7 @@ import {
 } from '../../src/solana-rpc.mjs';
 import { createStageDriver } from '../../src/app/stage-driver.mjs';
 import { prepareSupplementaryReturnRequest } from '../../src/app/stages/supplementary-money.mjs';
-import { createSupplementaryBuybackHandler } from '../../src/app/stages/supplementary-buyback.mjs';
+import { createSupplementaryBuybackHandler, heldPositionOpenEvidence } from '../../src/app/stages/supplementary-buyback.mjs';
 import { createTestProfileMutationAuthority } from '../../../runner/src/cycle/preflight.mjs';
 import { digest } from '../../../runner/src/cycle/journal.mjs';
 import {
@@ -241,6 +241,7 @@ function heldPosition(overrides = {}) {
     openedAtMs: 1_000,
     positionRevision: 1,
     ownerDecision: { choice: 'sell' },
+    identity: null,
     resolution: null,
     ...overrides,
   };
@@ -606,6 +607,83 @@ test('reconcile refuses a held position with no finalized original open stage at
   }));
   assert.equal(result, undefined);
   assert.equal(cycleRepository.advances.length, 0);
+});
+
+test('reconcile refuses a null-mint held position without recovered identity even when open mint is null', async () => {
+  const cycleRepository = fakeChainAttemptRepository({
+    openPacks: [{ packIndex: 0, memo: MEMO, decision: 'held', mint: null }],
+  });
+  const config = productionConfig();
+  const { client: rpc } = rpcClient();
+  let providerCalls = 0;
+  const collectorCrypt = {
+    async getBuybackCheck() { return { exists: false }; },
+    async getBuybackAvailable() { return { available: true, amount: { ...settlementAsset(), amountAtomic: OFFER_ATOMIC } }; },
+    async buyback() { providerCalls += 1; throw new Error('must not be called without recovered identity'); },
+  };
+  const handler = createSupplementaryBuybackHandler();
+  await assert.rejects(() => handler.reconcile(reconcileInput({
+    adapters: { collectorCrypt, solana: { client: rpc } },
+    signerClient: { solana: { role: 'operator-solana', sign: async () => { throw new Error('must not sign'); } } },
+    config,
+    cycleRepository,
+    position: heldPosition({ mint: null, cardRef: MEMO, identity: undefined }),
+    settlement: settlementFixture(),
+  })), /requires a verified card identity/);
+  assert.equal(providerCalls, 0);
+  assert.equal(cycleRepository.attempts.size, 0);
+});
+
+test('held-position open binding refuses null/null mint evidence without identity binding', async () => {
+  const cycleRepository = fakeChainAttemptRepository({
+    openPacks: [{ packIndex: 0, memo: MEMO, decision: 'held', mint: null }],
+  });
+  await assert.rejects(
+    () => heldPositionOpenEvidence(cycleRepository, heldPosition({ mint: null, cardRef: MEMO, identity: null })),
+    /match finalized original open evidence/,
+  );
+});
+
+test('reconcile refuses a recovered identity whose open signature does not match held evidence', async () => {
+  const cycleRepository = fakeChainAttemptRepository({
+    openPacks: [{ packIndex: 0, memo: MEMO, decision: 'held', mint: null }],
+  });
+  const config = productionConfig();
+  const { client: rpc } = rpcClient();
+  let providerCalls = 0;
+  const collectorCrypt = {
+    async getBuybackCheck() { return { exists: false }; },
+    async getBuybackAvailable() { return { available: true, amount: { ...settlementAsset(), amountAtomic: OFFER_ATOMIC } }; },
+    async buyback() { providerCalls += 1; throw new Error('must not be called with mismatched identity'); },
+  };
+  const handler = createSupplementaryBuybackHandler();
+  const result = await handler.reconcile(reconcileInput({
+    adapters: { collectorCrypt, solana: { client: rpc } },
+    signerClient: { solana: { role: 'operator-solana', sign: async () => { throw new Error('must not sign'); } } },
+    config,
+    cycleRepository,
+    position: heldPosition({
+      evidence: { signature: 'held-evidence-signature' },
+      identity: {
+        mint: CARD_ASSET,
+        verifiedAtMs: 1_001,
+        evidenceDigest: `sha256:${'d'.repeat(64)}`,
+        provenance: {
+          memo: MEMO,
+          openSignature: 'different-signature',
+          packStatusMint: CARD_ASSET,
+          derivedMint: CARD_ASSET,
+          custodyOwner: OPERATOR,
+          openSignatureSource: 'held-evidence',
+          assetKind: 'mpl-core',
+        },
+      },
+    }),
+    settlement: settlementFixture(),
+  }));
+  assert.equal(result, undefined);
+  assert.equal(providerCalls, 0);
+  assert.equal(cycleRepository.attempts.size, 0);
 });
 
 test('reconcile refuses a production binding whose proceeds asset does not match the configured settlement asset', async () => {

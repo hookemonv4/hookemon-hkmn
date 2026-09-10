@@ -74,6 +74,7 @@ const POST_TERMINAL_RECORD_KINDS = new Set([
   'custody-ledger-recorded',
   'held-owner-decision-recorded',
   'held-position-owner-decision-recorded',
+  'held-position-identity-verified',
   'held-position-resolved',
   'supplementary-settlement-advanced',
   'supplementary-payout-gas-recorded',
@@ -86,6 +87,7 @@ const POST_TERMINAL_RECORD_KINDS = new Set([
 const POST_COMPLETION_RECORD_KINDS = new Set([
   'process-usd-claim-finalized',
   'held-position-owner-decision-recorded',
+  'held-position-identity-verified',
   'held-position-resolved',
   'supplementary-settlement-advanced',
   'supplementary-payout-gas-recorded',
@@ -154,6 +156,7 @@ export const CYCLE_REPOSITORY_CLIENT_INTERFACE = Object.freeze([
   'readChainTransactionAttempt',
   'readClaimPreconditions',
   'readHeldPosition',
+  'readHeldPositionEvidence',
   'listHeldPositions',
   'readSupplementarySettlement',
   'listKnownCycleIds',
@@ -181,6 +184,7 @@ export const CYCLE_REPOSITORY_INTERFACE = Object.freeze([
   'recordPackBatchRequest',
   'readPackBatchRequest',
   'recordHeldPosition',
+  'recordHeldPositionIdentity',
   'recordHeldOwnerDecision',
   'resolveHeldPosition',
   'advanceSupplementarySettlement',
@@ -498,6 +502,7 @@ function createStateDirectoryRecoveryRepository(hold) {
       });
     },
     async readHeldPosition() { return null; },
+    async readHeldPositionEvidence() { return null; },
     async listHeldPositions() { return []; },
     async readSupplementarySettlement() { return null; },
     async readSupplementarySettlementEvidence() { return null; },
@@ -2138,6 +2143,58 @@ function heldPositionEvidenceDigest(position, evidence) {
   });
 }
 
+function heldPositionIdentityEvidenceDigest(positionId, positionEvidenceDigest, mint, provenance) {
+  return digest({
+    schema: 'hookemon.held-position-identity.v1',
+    positionId,
+    positionEvidenceDigest,
+    mint,
+    provenance,
+  });
+}
+
+function assertHeldPositionIdentity(value, position, label = 'held position identity') {
+  if (value === null) return null;
+  exactObject(value, ['mint', 'verifiedAtMs', 'evidenceDigest', 'provenance'], label);
+  const mint = assertHeldPositionText(value.mint, `${label}.mint`);
+  if (!Number.isSafeInteger(value.verifiedAtMs) || value.verifiedAtMs < 0) {
+    throw new Error(`${label}.verifiedAtMs is invalid`);
+  }
+  const provenance = value.provenance;
+  const legacyProvenance = ['memo', 'openSignature', 'packStatusMint', 'derivedMint', 'custodyOwner'];
+  const currentProvenance = [...legacyProvenance, 'openSignatureSource', 'assetKind'];
+  const provenanceKeys = Object.keys(provenance ?? {});
+  const isLegacy = provenanceKeys.length === legacyProvenance.length
+    && legacyProvenance.every(field => provenanceKeys.includes(field));
+  exactObject(provenance, isLegacy ? legacyProvenance : currentProvenance, `${label}.provenance`);
+  for (const field of ['memo', 'openSignature', 'packStatusMint', 'derivedMint', 'custodyOwner']) {
+    if (typeof provenance[field] !== 'string' || provenance[field].length === 0) {
+      throw new Error(`${label}.provenance.${field} is invalid`);
+    }
+  }
+  if (!isLegacy && !['held-evidence', 'open-evidence', 'collector-finalized-send'].includes(provenance.openSignatureSource)) {
+    throw new Error(`${label}.provenance.openSignatureSource is invalid`);
+  }
+  if (!isLegacy && !['spl', 'mpl-core'].includes(provenance.assetKind)) {
+    throw new Error(`${label}.provenance.assetKind is invalid`);
+  }
+  if (position !== undefined) {
+    if (provenance.memo !== position.memo) throw new Error(`${label}.provenance.memo does not match the held position`);
+    if (provenance.packStatusMint !== mint || provenance.derivedMint !== mint) {
+      throw new Error(`${label}.provenance mint does not match the verified identity`);
+    }
+  }
+  if (typeof value.evidenceDigest !== 'string' || !digestPattern.test(value.evidenceDigest)) {
+    throw new Error(`${label}.evidenceDigest is invalid`);
+  }
+  return {
+    mint,
+    verifiedAtMs: value.verifiedAtMs,
+    evidenceDigest: value.evidenceDigest,
+    provenance: cloneEvidence(provenance, `${label}.provenance`),
+  };
+}
+
 function assertHeldPositionOwnerDecision(value, label = 'held position owner decision') {
   exactObject(value, ['positionId', 'heldEvidenceDigest', 'requestId', 'expectedRevision', 'choice'], label);
   if (typeof value.positionId !== 'string' || !heldPositionIdPattern.test(value.positionId)) {
@@ -2655,7 +2712,7 @@ function assertHeldPosition(value, label = 'held position') {
   const native = Object.hasOwn(value ?? {}, 'costMicroUsd');
   const costKey = native ? 'costMicroUsd' : 'costMicroUsdg';
   const valueKey = native ? 'valueMicroUsd' : 'valueMicroUsdg';
-  exactObject(value, [
+  const fields = [
     'positionId',
     'cycleId',
     'packId',
@@ -2672,7 +2729,9 @@ function assertHeldPosition(value, label = 'held position') {
     'positionRevision',
     'ownerDecision',
     'resolution',
-  ], label);
+  ];
+  const legacy = !Object.hasOwn(value ?? {}, 'identity');
+  exactObject(value, legacy ? fields : [...fields, 'identity'], label);
   if (typeof value.positionId !== 'string' || !heldPositionIdPattern.test(value.positionId)) {
     throw new Error(`${label}.positionId is invalid`);
   }
@@ -2732,6 +2791,9 @@ function assertHeldPosition(value, label = 'held position') {
       throw new Error(`${label}.resolution evidence digest does not bind the position`);
     }
   }
+  const identity = legacy ? null : assertHeldPositionIdentity(value.identity, {
+    memo,
+  }, `${label}.identity`);
   return {
     positionId: value.positionId,
     cycleId,
@@ -2749,6 +2811,7 @@ function assertHeldPosition(value, label = 'held position') {
     positionRevision: value.positionRevision,
     ownerDecision,
     resolution,
+    identity,
   };
 }
 
@@ -2792,6 +2855,7 @@ function heldPositionInput(cycleId, value, openedAtMs) {
     positionRevision: 0,
     ownerDecision: null,
     resolution: null,
+    identity: null,
   }, 'held position input');
   return {
     position: assertHeldPosition({
@@ -3346,6 +3410,7 @@ export class CycleRepository {
     const signOnlyInvocationLedgers = new Map();
     const custodyLedgers = new Map();
     const heldPositions = new Map();
+    const heldPositionEvidence = new Map();
     const heldPositionLedgerKeys = new Map();
     const returnLegLedgerKeys = new Map();
     const supplementarySettlements = new Map();
@@ -3380,6 +3445,7 @@ export class CycleRepository {
       signOnlyInvocationLedgers,
       custodyLedgers,
       heldPositions,
+      heldPositionEvidence,
       heldPositionLedgerKeys,
       returnLegLedgerKeys,
       supplementarySettlements,
@@ -3938,6 +4004,38 @@ export class CycleRepository {
           heldPositionLedgerKeys.set(position.positionId, custodyLedgerKey(ledger));
         }
         heldPositions.set(position.positionId, position);
+        const previousEvidence = heldPositionEvidence.get(position.positionId);
+        if (previousEvidence !== undefined && canonicalJson(previousEvidence) !== canonicalJson(entry.payload.evidence)) {
+          throw new Error('stored held position evidence conflicts with prior card custody');
+        }
+        heldPositionEvidence.set(position.positionId, cloneEvidence(entry.payload.evidence, 'stored held position evidence'));
+      } else if (entry.kind === 'held-position-identity-verified') {
+        exactObject(entry.payload, ['positionId', 'identity', 'evidence'], 'stored held position identity');
+        const previous = heldPositions.get(entry.payload.positionId) ?? null;
+        if (previous === null || previous.resolution !== null || previous.mint !== null) {
+          throw new Error('stored held position identity does not bind an unresolved null-mint position');
+        }
+        const identity = assertHeldPositionIdentity(entry.payload.identity, previous, 'stored held position identity');
+        const evidence = cloneEvidence(entry.payload.evidence, 'stored held position identity evidence');
+        if (identity.evidenceDigest !== heldPositionIdentityEvidenceDigest(
+          previous.positionId,
+          previous.evidenceDigest,
+          identity.mint,
+          identity.provenance,
+        )) {
+          throw new Error('stored held position identity evidence digest does not bind the held position');
+        }
+        if (previous.identity !== null) {
+          if (previous.identity.mint !== identity.mint || canonicalJson(previous.identity) !== canonicalJson(identity)) {
+            throw new Error('stored held position identity conflicts with prior verified identity');
+          }
+          continue;
+        }
+        const position = assertHeldPosition({
+          ...previous,
+          identity,
+        }, 'stored held position identity position');
+        heldPositions.set(position.positionId, position);
       } else if (entry.kind === 'held-position-owner-decision-recorded') {
         const fields = Object.hasOwn(entry.payload ?? {}, 'settlement')
           ? ['positionId', 'decision', 'position', 'settlement']
@@ -4297,6 +4395,7 @@ export class CycleRepository {
       signOnlyInvocationLedgers,
       custodyLedgers,
       heldPositions,
+      heldPositionEvidence,
       heldPositionLedgerKeys,
       returnLegLedgerKeys,
       supplementarySettlements,
@@ -5059,6 +5158,106 @@ export class CycleRepository {
       if (position !== null) return structuredClone(position);
     }
     return null;
+  }
+
+  async readHeldPositionEvidence(positionId) {
+    if (typeof positionId !== 'string' || !heldPositionIdPattern.test(positionId)) {
+      throw new Error('cycle-repository readHeldPositionEvidence: positionId is invalid');
+    }
+    for (const { state } of await this.#knownStates()) {
+      const evidence = state.heldPositionEvidence.get(positionId);
+      if (evidence !== undefined) return structuredClone(evidence);
+    }
+    return null;
+  }
+
+  async recordHeldPositionIdentity(positionId, input) {
+    if (typeof positionId !== 'string' || !heldPositionIdPattern.test(positionId)) {
+      throw new Error('cycle-repository recordHeldPositionIdentity: positionId is invalid');
+    }
+    exactObject(input, ['mint', 'provenance', 'evidence'], 'held position identity input');
+    const locations = await this.#knownStates();
+    const location = locations.find(({ state }) => state.heldPositions.has(positionId)) ?? null;
+    if (location === null) throw new Error('cycle-repository recordHeldPositionIdentity: held position is unknown');
+    const current = location.state.heldPositions.get(positionId);
+    if (current.resolution !== null) {
+      throw new Error('cycle-repository recordHeldPositionIdentity: held position is already resolved');
+    }
+    if (current.mint !== null) {
+      throw new Error('cycle-repository recordHeldPositionIdentity: held position already has an immutable mint');
+    }
+    if (current.identity !== null) {
+      if (current.identity.mint === input.mint) return structuredClone(current);
+      throw new Error('held position identity conflicts with a previously verified identity');
+    }
+    const mint = assertHeldPositionText(input.mint, 'held position identity input.mint');
+    const provenance = input.provenance;
+    exactObject(provenance, [
+      'memo', 'openSignature', 'packStatusMint', 'derivedMint', 'custodyOwner',
+      'openSignatureSource', 'assetKind',
+    ], 'held position identity input provenance');
+    for (const field of ['memo', 'openSignature', 'packStatusMint', 'derivedMint', 'custodyOwner']) {
+      if (typeof provenance[field] !== 'string' || provenance[field].length === 0) {
+        throw new Error(`held position identity input provenance.${field} is invalid`);
+      }
+    }
+    if (!['held-evidence', 'open-evidence', 'collector-finalized-send'].includes(provenance.openSignatureSource)) {
+      throw new Error('held position identity input provenance.openSignatureSource is invalid');
+    }
+    if (!['spl', 'mpl-core'].includes(provenance.assetKind)) {
+      throw new Error('held position identity input provenance.assetKind is invalid');
+    }
+    if (provenance.memo !== current.memo) {
+      throw new Error('held position identity input provenance.memo does not match the held position');
+    }
+    if (provenance.packStatusMint !== mint || provenance.derivedMint !== mint) {
+      throw new Error('held position identity input provenance mint does not match the verified identity');
+    }
+    const evidence = cloneEvidence(input.evidence, 'held position identity input evidence');
+    const identity = assertHeldPositionIdentity({
+      mint,
+      verifiedAtMs: currentRepositoryTime(this.#now),
+      evidenceDigest: heldPositionIdentityEvidenceDigest(
+        current.positionId,
+        current.evidenceDigest,
+        mint,
+        provenance,
+      ),
+      provenance,
+    }, current, 'held position identity');
+    try {
+      await this.#append(location.cycleId, 'held-position-identity-verified', {
+        positionId,
+        identity,
+        evidence,
+      }, {
+        // Held-card recovery outlives the original cycle; the checks below fence its identity.
+        assertState: state => {
+          const latest = state.heldPositions.get(positionId) ?? null;
+          if (latest === null || latest.resolution !== null || latest.mint !== null) {
+            throw new Error('cycle-repository recordHeldPositionIdentity: held position changed while recording identity');
+          }
+          if (latest.identity !== null) {
+            if (latest.identity.mint !== mint) {
+              throw new Error('held position identity conflicts with a previously verified identity');
+            }
+            if (canonicalJson(latest.identity) !== canonicalJson(identity)) {
+              throw new Error('cycle-repository recordHeldPositionIdentity: identity changed while recording');
+            }
+          }
+        },
+      });
+    } catch (error) {
+      if (!/stale cycle journal (?:version|head)/.test(error?.message ?? '')) throw error;
+      const latest = await this.#replay(location.cycleId);
+      const persisted = latest.heldPositions.get(positionId) ?? null;
+      if (persisted?.identity?.mint === mint) return structuredClone(persisted);
+      throw error;
+    }
+    return structuredClone({
+      ...current,
+      identity,
+    });
   }
 
   async listHeldPositions({ cycleId = undefined, includeResolved = false } = {}) {

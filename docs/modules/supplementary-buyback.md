@@ -44,13 +44,21 @@ that module's territory.
 
 - The supplementary return uses the same trusted clock as its Relay quote producer. The stage driver passes that clock separately from canonical configuration data; quote validity and USD valuation are checked after the HTTP response without extending the quote lifetime.
 
-- A held position resold here is always identified by its own immutable `memo`/`mint`, its own
+- A held position resold here is identified by its immutable `memo` and either its original `mint`
+  or an optional verified `identity` enrichment. A null-mint position is recoverable only from
+  its durable open-stage evidence: the memo-bound open signature, Collector pack-status mint,
+  transaction-derived mint, and finalized operator custody must all agree before the repository
+  records the enrichment. The enrichment never changes `positionId`, `mint`, `cardRef`, or
+  `positionRevision`; refusal remains fail-closed when evidence is missing or conflicts. Such a
+  position still requires its own
   owner `sell` decision, and its own position-scoped chain-attempt namespace
   (`buybackAttemptRequestDigest`, keyed by `positionId`/`cycleId`/`memo`) -- never the ordinary
   cycle's own buyback chain-attempt identity or its sold-pack identity.
 - The production binding path additionally requires: the held position's memo/mint to match an
   entry in the original cycle's own finalized `open` stage evidence (never trusted from the position
-  record alone); that entry's asset kind to be `mpl-core` or `spl`; the operator to be the finalized
+  record alone), with a null-mint position requiring a verified identity binding even when the
+  open entry's mint is also null; its asset kind is taken from identity provenance first and then
+  the open entry and must be `mpl-core` or `spl`; the operator to be the finalized
   MPL Core owner or hold a positive SPL balance in its independently derived card account,
   checked once before the provider is ever asked to generate a transaction and rechecked after that
   provider call returns and again immediately before signing; and the independently configured

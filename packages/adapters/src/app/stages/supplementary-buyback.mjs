@@ -62,6 +62,8 @@ import { requireLiveMutationAuthority } from '../../../../runner/src/cycle/prefl
 import { COLLECTOR_CRYPT_SETTLEMENT_ASSET } from '../../collector-crypt.mjs';
 import { assertSolanaSignerFeeEnvelope, assertSolanaSignerMoneyConfiguration } from './solana-money-controls.mjs';
 import { buildCollectorBuybackRequest } from './buyback.mjs';
+import { verifiedHeldAssetOwner } from './held-custody.mjs';
+import { recoverHeldCardIdentity } from './held-identity.mjs';
 
 export const SUPPLEMENTARY_BUYBACK_STAGE = 'supplementary-buyback';
 const SOURCE_FINALITY_SCHEMA = 'hookemon.supplementary-buyback-source-finality.v1';
@@ -172,6 +174,10 @@ function decodedBindsResale({ decoded, owner, mint, buyback, proceedsAccount }) 
   if (!hasProceedsAccount) throw new Error('supplementary buyback provider transaction does not bind the dedicated proceeds account');
 }
 
+export function effectiveHeldMint(position) {
+  return position?.mint ?? position?.identity?.mint ?? null;
+}
+
 function assertHeldPositionForResale(position) {
   if (!plainObject(position) || typeof position.positionId !== 'string' || !HELD_POSITION_ID.test(position.positionId)) {
     throw new Error('supplementary buyback requires a valid held position');
@@ -181,8 +187,8 @@ function assertHeldPositionForResale(position) {
   if (typeof position.memo !== 'string' || position.memo.length === 0) {
     throw new Error('supplementary buyback requires an immutable memo identity');
   }
-  if (typeof position.mint !== 'string' || position.mint.length === 0) {
-    throw new Error('supplementary buyback requires an immutable card mint identity');
+  if (typeof effectiveHeldMint(position) !== 'string' || effectiveHeldMint(position).length === 0) {
+    throw new Error('supplementary buyback requires a verified card identity; run held identity recovery');
   }
   return position;
 }
@@ -227,12 +233,14 @@ function buybackAttemptRequestDigest(position) {
   return digest({ schema: ATTEMPT_REQUEST_SCHEMA, positionId: position.positionId, cycleId: position.cycleId, memo: position.memo });
 }
 
-/** The held card's asset kind is not stored on the position record; it is re-derived, read-only,
- *  from the original cycle's own open-stage evidence, keyed by the position's immutable memo. */
+/** Best-effort asset-kind recovery for post-hoc reconciliation reads. */
 async function assetKindForPosition(cycleRepository, position) {
+  const identityAssetKind = position.identity?.provenance?.assetKind;
+  if (identityAssetKind === 'spl' || identityAssetKind === 'mpl-core') return identityAssetKind;
   const open = await cycleRepository.readStage(position.cycleId, 'open').catch(() => null);
   const packs = plainObject(open?.evidence) && Array.isArray(open.evidence.packs) ? open.evidence.packs : [];
-  return packs.find(entry => entry.memo === position.memo)?.assetKind ?? 'spl';
+  const packAssetKind = packs.find(entry => entry.memo === position.memo)?.assetKind;
+  return packAssetKind === 'spl' || packAssetKind === 'mpl-core' ? packAssetKind : 'spl';
 }
 
 /**
@@ -243,13 +251,26 @@ async function assetKindForPosition(cycleRepository, position) {
  * default-to-'spl' read used only for post-hoc reconciliation), a missing or mismatched entry
  * refuses outright; this is a pre-provider-mutation gate, not a lookup with a safe fallback.
  */
-async function heldPositionOpenEvidence(cycleRepository, position) {
+export async function heldPositionOpenEvidence(cycleRepository, position) {
   const open = await cycleRepository.readStage(position.cycleId, 'open');
   if (open?.status !== 'COMPLETE' || !plainObject(open.evidence) || !Array.isArray(open.evidence.packs)) {
     throw new Error('supplementary buyback production binding requires a finalized original open stage');
   }
   const pack = open.evidence.packs.find(entry => entry.memo === position.memo);
-  if (!pack || pack.mint !== position.mint) {
+  const mint = effectiveHeldMint(position);
+  const heldEvidence = position.evidence
+    ?? (typeof cycleRepository.readHeldPositionEvidence === 'function'
+      ? await cycleRepository.readHeldPositionEvidence(position.positionId)
+      : null);
+  const identityBound = position.identity !== null && position.identity !== undefined
+    && position.identity.mint === mint
+    && position.identity.provenance?.memo === position.memo
+    && (typeof pack?.signature === 'string'
+      ? position.identity.provenance.openSignature === pack.signature
+      : (typeof heldEvidence?.signature === 'string'
+        ? position.identity.provenance.openSignature === heldEvidence.signature
+        : position.identity.provenance.openSignatureSource === 'collector-finalized-send'));
+  if (!pack || (position.mint === null ? !identityBound : pack.mint !== position.mint && !identityBound)) {
     throw new Error('supplementary buyback production binding requires the held position to match finalized original open evidence');
   }
   return pack;
@@ -262,25 +283,6 @@ async function heldPositionOpenEvidence(cycleRepository, position) {
  * that provider call returns (see `signAndRecordBuyback`), so a transfer landing during the
  * ambiguous provider round-trip is caught before signing rather than trusted from a stale read.
  */
-async function verifiedHeldAssetOwner({ adapters, config, mint, assetKind }) {
-  if (assetKind === 'spl') {
-    if (adapters.solana.client.commitment !== 'finalized') {
-      throw new Error('supplementary buyback requires finalized SPL ownership evidence');
-    }
-    const account = await readAssociatedTokenAccount(adapters.solana.client, config.accounts.solana, mint);
-    if (!account.exists || account.amount <= 0n) {
-      throw new Error('supplementary buyback requires a positive finalized card balance');
-    }
-    return config.accounts.solana;
-  }
-  if (assetKind !== 'mpl-core') throw new Error('supplementary buyback cannot verify the held asset kind');
-  const owner = await readMplCoreAssetOwner(adapters.solana.client, mint, { commitment: 'finalized' });
-  if (owner !== config.accounts.solana) {
-    throw new Error('supplementary buyback production binding requires the operator to currently hold the finalized on-chain asset');
-  }
-  return owner;
-}
-
 /**
  * Reads a durable recovery context's `productionBinding` field for replay, distinguishing three
  * cases: the key is entirely absent (a genuinely historical record, persisted before this field
@@ -328,7 +330,11 @@ async function prepareHeldProductionBinding({ adapters, config, cycleRepository,
   const resolvedBinding = resolveHeldProductionBinding(config);
   if (resolvedBinding === null) return null;
   const openPack = await heldPositionOpenEvidence(cycleRepository, position);
-  await verifiedHeldAssetOwner({ adapters, config, mint: position.mint, assetKind: openPack.assetKind });
+  const assetKind = position.identity?.provenance?.assetKind ?? openPack.assetKind;
+  if (assetKind !== 'spl' && assetKind !== 'mpl-core') {
+    throw new Error('supplementary buyback production binding requires a verified card asset kind');
+  }
+  await verifiedHeldAssetOwner({ adapters, config, mint: effectiveHeldMint(position), assetKind });
   // Binds the independently configured settlement mint/decimals to the approved binding's own
   // pinned proceeds identity -- `binding.proceeds.source` is Collector's own fixed vault account
   // (the transfer's source role), never the operator's own settlement account, so it is not
@@ -343,7 +349,7 @@ async function prepareHeldProductionBinding({ adapters, config, cycleRepository,
   if (typeof prepared.settlementAccount !== 'string' || prepared.settlementAccount.length === 0) {
     throw new Error('supplementary buyback production binding requires a verified operator settlement account');
   }
-  return { resolvedBinding, assetKind: openPack.assetKind };
+  return { resolvedBinding, assetKind };
 }
 
 /** Fetches a fresh Solana blockhash/height context for the production binding factory -- never the
@@ -396,10 +402,10 @@ async function verifiedSaleForSignature({
     entries = await getFinalizedTokenBalanceChanges(adapters.solana.client, signature);
     if (assetKind === 'mpl-core') {
       const transfers = await getTransactionMplCoreTransfers(adapters.solana.client, signature, { commitment: 'finalized' });
-      leftOperator = transfers.includes(position.mint)
-        && (await readMplCoreAssetOwner(adapters.solana.client, position.mint, { commitment: 'finalized' })) !== config.accounts.solana;
+      leftOperator = transfers.includes(effectiveHeldMint(position))
+        && (await readMplCoreAssetOwner(adapters.solana.client, effectiveHeldMint(position), { commitment: 'finalized' })) !== config.accounts.solana;
     } else {
-      leftOperator = entries.filter(entry => entry.owner === config.accounts.solana && entry.mint === position.mint
+      leftOperator = entries.filter(entry => entry.owner === config.accounts.solana && entry.mint === effectiveHeldMint(position)
         && BigInt(entry.postAmount) < BigInt(entry.preAmount)).length === 1;
     }
   } catch {
@@ -460,7 +466,7 @@ export async function reconcileSupplementaryBuybackSale({ adapters, config, cycl
   } catch {
     return { status: 'DATA_UNVERIFIED', reason: 'completed buyback amount is invalid', check };
   }
-  if (check.playerWallet !== config.accounts.solana || check.nft !== position.mint
+  if (check.playerWallet !== config.accounts.solana || check.nft !== effectiveHeldMint(position)
     || typeof check.transactionSignature !== 'string' || check.transactionSignature.length === 0
     || typeof check.createdAt !== 'string' || check.createdAt.length === 0) {
     return { status: 'DATA_UNVERIFIED', reason: 'completed buyback check does not bind the memo, wallet, and card', check };
@@ -487,10 +493,10 @@ async function prepareResale({ adapters, config, position }) {
   if (proceedsAccount !== null && account.address !== proceedsAccount) {
     throw new Error('supplementary buyback dedicated proceeds account is not the verified operator settlement token account');
   }
-  const available = await adapters.collectorCrypt.getBuybackAvailable({ nft: position.mint, wallet: config.accounts.solana });
+  const available = await adapters.collectorCrypt.getBuybackAvailable({ nft: effectiveHeldMint(position), wallet: config.accounts.solana });
   if (!available?.available) return { unavailable: true };
   const offer = typedBuybackAmount(available.amount, 'supplementary buyback offer');
-  const request = buildCollectorBuybackRequest({ config, mint: position.mint });
+  const request = buildCollectorBuybackRequest({ config, mint: effectiveHeldMint(position) });
   return { unavailable: false, money, proceedsAccount, offer, request, settlementAccount: account.address };
 }
 
@@ -535,11 +541,11 @@ async function signAndRecordBuyback({
   if (productionBinding !== null) {
     // Recheck after the provider await, before signing: a transfer landing during the round-trip
     // above is caught here, not trusted from the preflight read in prepareHeldProductionBinding.
-    const verifiedOwner = await verifiedHeldAssetOwner({ adapters, config, mint: position.mint, assetKind: productionBinding.assetKind });
+    const verifiedOwner = await verifiedHeldAssetOwner({ adapters, config, mint: effectiveHeldMint(position), assetKind: productionBinding.assetKind });
     const cycleFacts = Object.freeze({
       operatorFeePayer: config.accounts.solana,
       proceedsDestination: settlementAccount,
-      openedAssetMint: position.mint,
+      openedAssetMint: effectiveHeldMint(position),
       currentOwner: verifiedOwner,
       quoteAtomic: offer.amountAtomic,
       minimumAtomic: offer.amountAtomic,
@@ -570,7 +576,7 @@ async function signAndRecordBuyback({
     throw new Error('supplementary buyback provider transaction blockhash is not valid before signing');
   }
   evaluateTransactionPolicy(buyback.policy, decoded);
-  decodedBindsResale({ decoded, owner: config.accounts.solana, mint: position.mint, buyback, proceedsAccount });
+  decodedBindsResale({ decoded, owner: config.accounts.solana, mint: effectiveHeldMint(position), buyback, proceedsAccount });
   await assertSolanaSignerFeeEnvelope({
     client: adapters.solana.client,
     owner: config.accounts.solana,
@@ -585,10 +591,10 @@ async function signAndRecordBuyback({
       role: signerClient.solana.role ?? OPERATOR_SOLANA_ROLE,
       async sign(signRequest) {
         requireSupplementaryMutationAuthority(config, preflightAuthority);
-        const refreshed = await adapters.collectorCrypt.getBuybackAvailable({ nft: position.mint, wallet: config.accounts.solana });
+        const refreshed = await adapters.collectorCrypt.getBuybackAvailable({ nft: effectiveHeldMint(position), wallet: config.accounts.solana });
         const refreshedOffer = typedBuybackAmount(refreshed.amount, 'supplementary buyback offer');
         if (!sameAmount(refreshedOffer, offer)) throw new Error('supplementary buyback offer changed before signing');
-        if (productionBinding !== null) await verifiedHeldAssetOwner({ adapters, config, mint: position.mint, assetKind: productionBinding.assetKind });
+        if (productionBinding !== null) await verifiedHeldAssetOwner({ adapters, config, mint: effectiveHeldMint(position), assetKind: productionBinding.assetKind });
         return signerClient.solana.sign(signRequest);
       },
     },
@@ -752,6 +758,9 @@ export function createSupplementaryBuybackHandler() {
   return Object.freeze({
     stage: SUPPLEMENTARY_BUYBACK_STAGE,
     async reconcile({ adapters, signerClient, config, cycleRepository, context, position, settlement, preflightAuthority }) {
+      if (position?.mint === null && position.identity === null) {
+        position = await recoverHeldCardIdentity({ adapters, config, cycleRepository, position });
+      }
       assertHeldPositionForResale(position);
       if (settlement.state !== 'PREPARED') {
         throw new Error('supplementary buyback handler requires a PREPARED settlement');

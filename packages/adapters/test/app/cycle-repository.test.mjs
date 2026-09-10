@@ -5611,7 +5611,7 @@ test('a pinned historical raw-identity held event and its v1 custody replay byte
   assert.equal(fixture.ledger.schema, 'hookemon.custody-ledger.v1');
   assert.deepEqual(after.custodyLedgers.get(`4663\u0000${SETTLEMENT_SOURCE_ASSET}`), fixture.ledger);
   assert.equal(after.custodyLedgers.size, 1);
-  assert.deepEqual(await reopened.readHeldPosition(fixture.position.positionId), fixture.position);
+  assert.deepEqual(await reopened.readHeldPosition(fixture.position.positionId), { ...fixture.position, identity: null });
 });
 
 test('a stored historical canonical-v1 held event (the real pinned-base d5bd6a3e API output, committed as a fixture) replays byte-identically under the current fix', async t => {
@@ -5639,5 +5639,5 @@ test('a stored historical canonical-v1 held event (the real pinned-base d5bd6a3e
   const after = await reopened.describeCycle(cycleId);
   assert.deepEqual(after.custodyLedgers.get(HELD_CANONICAL_KEY), fixture.ledger, 'replay must not upgrade or migrate the stored v1 row');
   assert.equal(after.custodyLedgers.size, 1, 'replay must not synthesize a second (v2) row alongside it');
-  assert.deepEqual(await reopened.readHeldPosition(fixture.position.positionId), fixture.position);
+  assert.deepEqual(await reopened.readHeldPosition(fixture.position.positionId), { ...fixture.position, identity: null });
 });
