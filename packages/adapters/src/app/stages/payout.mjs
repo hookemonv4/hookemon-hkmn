@@ -1240,6 +1240,8 @@ export function createDirectPayoutState({
       approvalContext: null,
       replacementOf: null,
       replacementHistory: [],
+      retries: [],
+      settlement: null,
     });
   }
   return {
