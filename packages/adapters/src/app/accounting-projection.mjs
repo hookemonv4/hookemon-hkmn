@@ -318,6 +318,26 @@ function finalizedRecipientAmount(recipient, expectedAsset, operationsAddress) {
   return recipientAmount;
 }
 
+function settledRecipientView(recipient) {
+  if (recipient?.state === 'FINALIZED') return recipient;
+  const retry = Array.isArray(recipient?.retries)
+    ? recipient.retries.find(candidate => candidate.state === 'FINALIZED')
+    : null;
+  if (retry) return {
+    ...recipient,
+    state: 'FINALIZED',
+    transactionHash: retry.txHash,
+    finalizedTransfer: retry.finalizedTransfer,
+  };
+  if (recipient?.settlement?.finalizedTransfer) return {
+    ...recipient,
+    state: 'FINALIZED',
+    transactionHash: recipient.settlement.finalizedTransfer.transactionHash,
+    finalizedTransfer: recipient.settlement.finalizedTransfer,
+  };
+  return recipient;
+}
+
 /**
  * Projects the payout stage's own finalized-transfer evidence (see `stages/payout.mjs`'s
  * `payoutTerminalEvidence` — durable `distributablePool`/`totalAllocated`/`dust`, each recipient's
@@ -387,7 +407,7 @@ function projectPayoutEvidence(payoutStage, cycleId, trustedPayoutContext) {
   const nonPaidRecipients = [];
   for (const recipient of evidence.recipients) {
     if (!recipient || typeof recipient !== 'object') return allNull;
-    const finalized = finalizedRecipientAmount(recipient, expectedAsset, operationsAddress);
+    const finalized = finalizedRecipientAmount(settledRecipientView(recipient), expectedAsset, operationsAddress);
     if (finalized !== null) {
       paidAtomic += BigInt(finalized.units);
       recipientCount += 1;
@@ -480,13 +500,14 @@ function projectNativePayoutEvidence(payoutStage, cycleId, trustedPayoutContext)
     const recipientKey = typeof recipient?.recipient === 'string' ? recipient.recipient.toLowerCase() : null;
     if (recipientKey === null || seenRecipients.has(recipientKey)) return allNull;
     seenRecipients.add(recipientKey);
-    if (recipient.state === 'FINALIZED') {
-      const transactionKey = typeof recipient.transactionHash === 'string' ? recipient.transactionHash.toLowerCase() : null;
+    const paidView = settledRecipientView(recipient);
+    if (paidView.state === 'FINALIZED') {
+      const transactionKey = typeof paidView.transactionHash === 'string' ? paidView.transactionHash.toLowerCase() : null;
       if (transactionKey === null || seenTransactions.has(transactionKey)) return allNull;
       seenTransactions.add(transactionKey);
     }
     if (!recipient || typeof recipient !== 'object') return allNull;
-    const finalized = finalizedRecipientAmount(recipient, expectedAsset, operationsAddress);
+    const finalized = finalizedRecipientAmount(paidView, expectedAsset, operationsAddress);
     if (finalized !== null) {
       paidAtomic += BigInt(finalized.units);
       recipientCount += 1;

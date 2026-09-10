@@ -31,6 +31,7 @@ export const DECISION_TYPES = Object.freeze([
   'kill',
   'manual-approval',
   'held-owner-decision',
+  'retry-refused-payout',
   'run-cycle-now',
   'resume-cycle',
   'reconcile',
@@ -102,6 +103,25 @@ function readCommand(value) {
       heldEvidenceDigest: source.heldEvidenceDigest,
       expectedCycleRevision: source.expectedCycleRevision,
       choice: source.choice,
+    };
+  }
+  if (type === 'retry-refused-payout') {
+    exactKeys(source, new Set([
+      'type', 'cycleId', 'planDigest', 'recipient', 'amountAtomic', 'originalTransactionHash',
+    ]), invalid);
+    requiredKeys(source, ['type', 'cycleId', 'planDigest', 'recipient', 'amountAtomic', 'originalTransactionHash'], invalid);
+    if (typeof source.cycleId !== 'string' || !runnerCycleIdPattern.test(source.cycleId)
+      || typeof source.planDigest !== 'string' || !cycleDigestPattern.test(source.planDigest)
+      || typeof source.recipient !== 'string' || !/^0x[0-9a-fA-F]{40}$/.test(source.recipient)
+      || typeof source.amountAtomic !== 'string' || !/^[1-9][0-9]*$/.test(source.amountAtomic)
+      || typeof source.originalTransactionHash !== 'string' || !/^0x[0-9a-fA-F]{64}$/.test(source.originalTransactionHash)) invalid();
+    return {
+      type,
+      cycleId: source.cycleId,
+      planDigest: source.planDigest,
+      recipient: source.recipient.toLowerCase(),
+      amountAtomic: source.amountAtomic,
+      originalTransactionHash: source.originalTransactionHash.toLowerCase(),
     };
   }
   exactKeys(source, new Set(['type']), invalid);

@@ -62,7 +62,17 @@ import {
   mutateReturn,
   reconcileLiveReturn,
 } from './stages/return.mjs';
-import { preparePayoutRequest, probePayout, mutatePayout, reconcileLivePayout } from './stages/payout.mjs';
+import {
+  preparePayoutRequest,
+  probePayout,
+  mutatePayout,
+  reconcileLivePayout,
+  retryRefusedPayoutRecipient,
+  reserveDirectPayoutWalletNonce,
+  assertDirectPayoutWalletNonce,
+  releaseDirectPayoutWalletNonce,
+  createCycleRepositoryPayoutStore,
+} from './stages/payout.mjs';
 import { assertSupplementarySettlementDispatch, assertSupplementarySettlementResult } from './stages/supplementary-settlement.mjs';
 import {
   createRehearsalSkipHandler,
@@ -234,6 +244,17 @@ const SUPPLEMENTARY_SETTLEMENT_REPOSITORY_METHODS = Object.freeze([
   'recordSupplementarySignedTransactionWithRecoveryContext',
   'recordSupplementaryBroadcast',
   'readSupplementaryChainAttemptRecoveryContext',
+]);
+const PAYOUT_RETRY_MUTATIONS = new Set([
+  'requestPayoutQuarantineRetry',
+  'recordPayoutQuarantineRetryRefusal',
+  'settlePayoutQuarantine',
+  'recordCustodyLedger',
+  'recordSupplementaryPayoutGas',
+  'persistPagedPayoutState',
+  'reserveWalletNonce',
+  'assertWalletNonce',
+  'releaseWalletNonce',
 ]);
 const EMPTY_SUPPLEMENTARY_CAPABILITIES = Object.freeze({});
 
@@ -1294,6 +1315,97 @@ export function createStageDriver({
         stage: handler.stage,
         state: checked.state,
       });
+    },
+
+    async runPayoutRetry(input) {
+      if (!input || typeof input !== 'object' || Array.isArray(input)) {
+        throw new Error('stage-driver payout retry input is invalid');
+      }
+      const { cycleId, recipient, retryId, assertLease } = input;
+      if (typeof cycleId !== 'string' || typeof recipient !== 'string' || typeof retryId !== 'string') {
+        throw new Error('stage-driver payout retry identity is invalid');
+      }
+      if (typeof assertLease !== 'function') throw new Error('stage-driver payout retry assertLease is required');
+      const lease = input.lease;
+      if (!lease || !Number.isSafeInteger(lease.acquiredAt) || !Number.isSafeInteger(lease.expiresAt)
+        || lease.acquiredAt < 0 || lease.expiresAt <= lease.acquiredAt
+        || lease.fencingToken !== input.fencingToken) {
+        throw new Error('stage-driver payout retry lease is invalid');
+      }
+      const reservation = await cycleRepository.readPayoutQuarantine(cycleId, input.planDigest, recipient);
+      const requested = reservation?.retries?.find(retry => retry.retryId === retryId);
+      if (!reservation || !requested) return Object.freeze({ status: 'PENDING', cycleId, recipient, retryId });
+      const context = Object.freeze({
+        cycleId,
+        stage: 'payout',
+        fencingToken: input.fencingToken,
+        lease,
+        leaseAcquiredAtMs: lease.acquiredAt,
+        leaseExpiresAtMs: lease.expiresAt,
+      });
+      const fencedAdapters = createLeaseFencedCapability(adapters, assertLease, () => {});
+      const fencedSignerClient = createLeaseFencedCapability(signerClient, assertLease, () => {});
+      const repository = new Proxy(cycleRepository, {
+        get(target, prop) {
+          const value = Reflect.get(target, prop, target);
+          if (typeof value !== 'function') return value;
+          return (...args) => {
+            if (PAYOUT_RETRY_MUTATIONS.has(prop)) assertLease();
+            return value.apply(target, args);
+          };
+        },
+      });
+      const payoutStore = createCycleRepositoryPayoutStore({ cycleRepository: repository, cycleId });
+      await reserveDirectPayoutWalletNonce({ cycleRepository: repository, context, config });
+      try {
+        let state = await payoutStore.load();
+        const maximumSteps = state.recipients.length * 5 + 1;
+        for (let step = 0; step < maximumSteps; step += 1) {
+          assertLease();
+          await assertDirectPayoutWalletNonce({ cycleRepository: repository, context, config });
+          const before = digest(await payoutStore.load());
+          state = await retryRefusedPayoutRecipient({
+            payoutStore,
+            cycleRepository: repository,
+            recipient,
+            requestId: requested.requestId,
+            adapters: fencedAdapters,
+            signerClient: fencedSignerClient,
+            config,
+            retryId,
+            requestDigest: requestDigest(context, {
+              kind: 'payout-retry',
+              planDigest: input.planDigest,
+              recipient,
+              retryId,
+              requestId: requested.requestId,
+            }),
+            fencingToken: input.fencingToken,
+            nonceLeaseContext: context,
+          });
+          const after = digest(state);
+          if (after === before || state.recipients.find(item => item.recipient === recipient)?.retries
+            ?.every(retry => ['FINALIZED', 'REFUSED'].includes(retry.state))) {
+            break;
+          }
+        }
+        const finalState = await payoutStore.load();
+        const finalAttempt = finalState.recipients.find(item => item.recipient.toLowerCase() === recipient.toLowerCase());
+        const finalRetry = finalAttempt?.retries.find(item => item.retryId === retryId);
+        const status = finalRetry?.state === 'FINALIZED'
+          ? 'SETTLED'
+          : finalRetry?.state === 'REFUSED'
+            ? 'REFUSED'
+            : 'PENDING';
+        return Object.freeze({
+          status,
+          cycleId,
+          recipient,
+          retryId,
+        });
+      } finally {
+        await releaseDirectPayoutWalletNonce({ cycleRepository: repository, context, config });
+      }
     },
 
     async reconcile(context) {

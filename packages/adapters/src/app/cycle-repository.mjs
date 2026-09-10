@@ -72,6 +72,11 @@ const POST_TERMINAL_RECORD_KINDS = new Set([
   'chain-attempt-finalized',
   'relay-leg-settled',
   'custody-ledger-recorded',
+  'payout-quarantine-retry-requested',
+  'payout-quarantine-retry-refused',
+  'payout-quarantine-settled',
+  'wallet-nonce-reserved',
+  'wallet-nonce-released',
   'held-owner-decision-recorded',
   'held-position-owner-decision-recorded',
   'held-position-identity-verified',
@@ -97,6 +102,21 @@ const POST_COMPLETION_RECORD_KINDS = new Set([
   'supplementary-chain-attempt-broadcast',
   'supplementary-chain-attempt-recovery-context-recorded',
 ]);
+function payoutRetryMayUseHeldCycle(state) {
+  return state?.terminalState === HELD_OWNER_DECISION
+    && state.terminalEvidence?.reason === 'PAYOUT_QUARANTINED_LIABILITY'
+    && [...(state.payoutQuarantines?.values?.() ?? [])].some(reservation => (
+      reservation.retries ?? []
+    ).some(retry => retry.resolution === null
+      && reservation.settlement?.retryId !== retry.retryId));
+}
+function payoutRetryMayReleaseHeldCycle(state) {
+  return state?.terminalState === HELD_OWNER_DECISION
+    && state.terminalEvidence?.reason === 'PAYOUT_QUARANTINED_LIABILITY'
+    && [...(state.payoutQuarantines?.values?.() ?? [])].some(reservation => (
+      reservation.retries ?? []
+    ).some(retry => retry.resolution === null || reservation.settlement?.retryId === retry.retryId));
+}
 const decimalPattern = /^(0|[1-9][0-9]*)$/;
 const signedDecimalPattern = /^(?:0|[1-9][0-9]*|-[1-9][0-9]*)$/;
 const digestPattern = /^sha256:[0-9a-f]{64}$/;
@@ -126,6 +146,8 @@ const quarantineReasonPattern = /^[A-Z][A-Z0-9_]{2,63}$/;
 const payoutDustRecordSchema = 'hookemon.payout-dust-record.v1';
 const payoutDustConsumptionSchema = 'hookemon.payout-dust-consumption.v1';
 const payoutQuarantineSchema = 'hookemon.payout-quarantine-reservation.v1';
+const payoutQuarantineRetrySchema = 'hookemon.payout-quarantine-retry.v1';
+const payoutQuarantineSettlementSchema = 'hookemon.payout-quarantine-settlement.v1';
 const supplementaryPayoutSourceSchema = 'hookemon.supplementary-payout-source.v2';
 const supplementaryReturnBoundarySchema = 'hookemon.supplementary-return-boundary.v2';
 const supplementaryFinalizedReturnSchema = 'hookemon.supplementary-finalized-return.v2';
@@ -229,6 +251,11 @@ export const CYCLE_REPOSITORY_INTERFACE = Object.freeze([
   'consumePayoutDustAndRecordStageAttempt',
   'readPayoutQuarantine',
   'reservePayoutQuarantine',
+  'requestPayoutQuarantineRetry',
+  'recordPayoutQuarantineRetryRefusal',
+  'settlePayoutQuarantine',
+  'listPayoutObligations',
+  'listOpenPayoutRetries',
   'acquireEvmNonceLock',
   'assertEvmNonceLock',
   'releaseEvmNonceLock',
@@ -1910,9 +1937,15 @@ function evmUsdgCanonicalCustodyIdentity(amount) {
 }
 
 function assertPayoutQuarantineReservation(value, label = 'payout quarantine reservation') {
-  assertPlainExactObject(value, [
-    'schema', 'cycleId', 'planDigest', 'recipient', 'amount', 'reason', 'evidence', 'ledger',
-  ], label);
+  const legacyFields = ['schema', 'cycleId', 'planDigest', 'recipient', 'amount', 'reason', 'evidence', 'ledger'];
+  const currentFields = [...legacyFields, 'retries', 'settlement'];
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+    || !(Object.keys(value).length === legacyFields.length || Object.keys(value).length === currentFields.length)
+    || !legacyFields.every(field => Object.hasOwn(value, field))
+    || (Object.keys(value).length === currentFields.length
+      && !['retries', 'settlement'].every(field => Object.hasOwn(value, field)))) {
+    throw new Error(`${label} must use the exact schema`);
+  }
   if (value.schema !== payoutQuarantineSchema) throw new Error(`${label} schema is invalid`);
   if (typeof value.cycleId !== 'string' || value.cycleId.length === 0) throw new Error(`${label} cycleId is invalid`);
   assertDigest(value.planDigest, `${label} planDigest`);
@@ -1933,6 +1966,10 @@ function assertPayoutQuarantineReservation(value, label = 'payout quarantine res
   if (ledger.cycleId !== value.cycleId || !identityMatches || ledger.decimals !== amount.decimals) {
     throw new Error(`${label} custody ledger does not match the quarantined amount`);
   }
+  const retries = value.retries === undefined ? [] : assertPayoutQuarantineRetries(value.retries, `${label} retries`);
+  const settlement = value.settlement === undefined || value.settlement === null
+    ? null
+    : assertPayoutQuarantineSettlement(value.settlement, `${label} settlement`, { cycleId: value.cycleId, planDigest: value.planDigest, recipient });
   return {
     schema: payoutQuarantineSchema,
     cycleId: value.cycleId,
@@ -1942,6 +1979,83 @@ function assertPayoutQuarantineReservation(value, label = 'payout quarantine res
     reason,
     evidence,
     ledger,
+    retries,
+    settlement,
+  };
+}
+
+function assertPayoutQuarantineRetry(value, label = 'payout quarantine retry') {
+  assertPlainObjectWithOptionalFields(value, [
+    'retryId', 'requestId', 'requestedAtMs', 'originalTransactionHash', 'resolution',
+  ], ['refusalEvidence', 'processProof'], label);
+  assertDigest(value.retryId, `${label} retryId`);
+  if (typeof value.requestId !== 'string' || !requestIdPattern.test(value.requestId)) throw new Error(`${label} requestId is invalid`);
+  if (!Number.isSafeInteger(value.requestedAtMs) || value.requestedAtMs < 0) throw new Error(`${label} requestedAtMs is invalid`);
+  if (typeof value.originalTransactionHash !== 'string' || !evmTransactionHashPattern.test(value.originalTransactionHash)) {
+    throw new Error(`${label} originalTransactionHash is invalid`);
+  }
+  if (value.resolution !== null) {
+    assertPlainExactObject(value.resolution, ['state', 'transactionHash'], `${label} resolution`);
+    if (value.resolution.state !== 'REFUSED'
+      || typeof value.resolution.transactionHash !== 'string'
+      || !evmTransactionHashPattern.test(value.resolution.transactionHash)) {
+      throw new Error(`${label} resolution is invalid`);
+    }
+  }
+  return {
+    retryId: value.retryId,
+    requestId: value.requestId,
+    requestedAtMs: value.requestedAtMs,
+    originalTransactionHash: value.originalTransactionHash.toLowerCase(),
+    resolution: value.resolution === null ? null : {
+      state: 'REFUSED',
+      transactionHash: value.resolution.transactionHash.toLowerCase(),
+    },
+    refusalEvidence: value.refusalEvidence === undefined || value.refusalEvidence === null
+      ? null
+      : cloneChainObservationEvidence(value.refusalEvidence, `${label} refusalEvidence`),
+    processProof: value.processProof === undefined || value.processProof === null
+      ? null
+      : cloneChainObservationEvidence(value.processProof, `${label} processProof`),
+  };
+}
+
+function assertPayoutQuarantineRetries(value, label = 'payout quarantine retries') {
+  if (!Array.isArray(value)) throw new Error(`${label} must be an array`);
+  return value.map((retry, index) => assertPayoutQuarantineRetry(retry, `${label}[${index}]`));
+}
+
+function assertPayoutQuarantineSettlement(value, label = 'payout quarantine settlement', binding = {}) {
+  assertPlainObjectWithOptionalFields(
+    value,
+    ['retryId', 'transactionHash', 'amount', 'settledAtMs', 'proofDigest'],
+    ['finalizedTransfer', 'payoutRetry'],
+    label,
+  );
+  if (value.retryId !== null) assertDigest(value.retryId, `${label} retryId`);
+  if (typeof value.transactionHash !== 'string' || !evmTransactionHashPattern.test(value.transactionHash)) {
+    throw new Error(`${label} transactionHash is invalid`);
+  }
+  const amount = assertPayoutAmount(value.amount, `${label} amount`, { positive: true });
+  if (!Number.isSafeInteger(value.settledAtMs) || value.settledAtMs < 0) throw new Error(`${label} settledAtMs is invalid`);
+  assertDigest(value.proofDigest, `${label} proofDigest`);
+  const finalizedTransfer = value.finalizedTransfer === undefined
+    ? null
+    : cloneChainObservationEvidence(value.finalizedTransfer, `${label} finalizedTransfer`);
+  const payoutRetry = value.payoutRetry === undefined || value.payoutRetry === null
+    ? null
+    : cloneChainObservationEvidence(value.payoutRetry, `${label} payoutRetry`);
+  if (binding.cycleId !== undefined && typeof binding.cycleId !== 'string') throw new Error(`${label} cycleId binding is invalid`);
+  if (binding.planDigest !== undefined && value.retryId !== null) assertDigest(binding.planDigest, `${label} planDigest binding`);
+  if (binding.recipient !== undefined && typeof binding.recipient !== 'string') throw new Error(`${label} recipient binding is invalid`);
+  return {
+    retryId: value.retryId,
+    transactionHash: value.transactionHash.toLowerCase(),
+    amount,
+    settledAtMs: value.settledAtMs,
+    proofDigest: value.proofDigest,
+    payoutRetry,
+    finalizedTransfer,
   };
 }
 
@@ -4259,6 +4373,90 @@ export class CycleRepository {
         }
         payoutQuarantines.set(reservationKey, reservation);
         custodyLedgers.set(ledgerKey, reservation.ledger);
+      } else if (entry.kind === 'payout-quarantine-retry-requested') {
+        if (entry.payload.schema !== payoutQuarantineRetrySchema) {
+          throw new Error('stored payout quarantine retry request schema is invalid');
+        }
+        const reservationKey = payoutQuarantineKey(entry.payload.planDigest, entry.payload.recipient);
+        const reservation = payoutQuarantines.get(reservationKey);
+        if (!reservation || reservation.cycleId !== cycleId) throw new Error('stored payout quarantine retry has no reservation');
+        const retry = assertPayoutQuarantineRetry(entry.payload.retry, 'stored payout quarantine retry');
+        if (typeof reservation.evidence.transactionHash !== 'string'
+          || retry.originalTransactionHash !== reservation.evidence.transactionHash.toLowerCase()) {
+          throw new Error('stored payout quarantine retry original transaction does not match reservation evidence');
+        }
+        if (reservation.settlement !== null) throw new Error('stored payout quarantine retry follows a settled reservation');
+        if (reservation.retries.some(existing => existing.requestId === retry.requestId
+          || existing.retryId === retry.retryId)) {
+          throw new Error('stored payout quarantine retry duplicates prior retry identity');
+        }
+        if (reservation.retries.some(existing => existing.resolution === null)) {
+          throw new Error('stored payout quarantine retry overlaps an unresolved retry');
+        }
+        reservation.retries.push(retry);
+      } else if (entry.kind === 'payout-quarantine-retry-refused') {
+        if (entry.payload.schema !== payoutQuarantineRetrySchema) {
+          throw new Error('stored payout quarantine retry refusal schema is invalid');
+        }
+        const reservationKey = payoutQuarantineKey(entry.payload.planDigest, entry.payload.recipient);
+        const reservation = payoutQuarantines.get(reservationKey);
+        if (!reservation || reservation.cycleId !== cycleId) throw new Error('stored payout quarantine retry refusal has no reservation');
+        const retry = reservation.retries.find(candidate => candidate.retryId === entry.payload.retryId);
+        if (!retry) throw new Error('stored payout quarantine retry refusal has no retry');
+        const refusalEvidence = cloneChainObservationEvidence(entry.payload.refusalEvidence, 'stored payout quarantine retry refusal evidence');
+        if (refusalEvidence.reason !== 'TRANSACTION_REVERTED'
+          || typeof refusalEvidence.finalizedBlockNumber !== 'string'
+          || typeof refusalEvidence.finalizedBlockHash !== 'string') {
+          throw new Error('stored payout quarantine retry refusal evidence is not finalized');
+        }
+        if (retry.resolution !== null
+          && canonicalJson(retry.resolution) !== canonicalJson({ state: 'REFUSED', transactionHash: refusalEvidence.transactionHash })) {
+          throw new Error('stored payout quarantine retry refusal conflicts with prior resolution');
+        }
+        retry.resolution = { state: 'REFUSED', transactionHash: refusalEvidence.transactionHash };
+        retry.refusalEvidence = refusalEvidence;
+        retry.processProof = entry.payload.processProof === undefined || entry.payload.processProof === null
+          ? null
+          : cloneChainObservationEvidence(entry.payload.processProof, 'stored payout quarantine retry refusal process proof');
+        retry.payoutRetry = entry.payload.payoutRetry === undefined || entry.payload.payoutRetry === null
+          ? null
+          : cloneChainObservationEvidence(entry.payload.payoutRetry, 'stored payout quarantine retry refusal payout retry');
+      } else if (entry.kind === 'payout-quarantine-settled') {
+        if (entry.payload.schema !== payoutQuarantineSettlementSchema) {
+          throw new Error('stored payout quarantine settlement schema is invalid');
+        }
+        const reservationKey = payoutQuarantineKey(entry.payload.planDigest, entry.payload.recipient);
+        const reservation = payoutQuarantines.get(reservationKey);
+        if (!reservation || reservation.cycleId !== cycleId) throw new Error('stored payout quarantine settlement has no reservation');
+        const settlement = assertPayoutQuarantineSettlement(entry.payload.settlement, 'stored payout quarantine settlement', {
+          cycleId, planDigest: reservation.planDigest, recipient: reservation.recipient,
+        });
+        if (reservation.settlement !== null) throw new Error('stored payout quarantine reservation has duplicate settlement');
+        if (settlement.amount.amountAtomic !== reservation.amount.amountAtomic) {
+          throw new Error('stored payout quarantine settlement amount does not match reservation');
+        }
+        if (settlement.retryId !== null) {
+          const retry = reservation.retries.find(candidate => candidate.retryId === settlement.retryId);
+          if (!retry || retry.resolution !== null) throw new Error('stored payout quarantine settlement retry is invalid');
+        } else if (settlement.transactionHash !== reservation.evidence.transactionHash.toLowerCase()) {
+          throw new Error('stored payout quarantine original settlement transaction does not match reservation');
+        }
+        const ledgerKey = custodyLedgerKey(reservation.ledger);
+        const previousLedger = custodyLedgers.get(ledgerKey);
+        if (!previousLedger) throw new Error('stored payout quarantine settlement has no prior custody ledger');
+        if (BigInt(previousLedger.payoutLiability) < BigInt(reservation.amount.amountAtomic)) {
+          throw new Error('stored payout quarantine settlement underflows payout liability');
+        }
+        const storedLedger = assertCustodyLedger(entry.payload.ledger, 'stored payout quarantine settlement ledger');
+        const expectedLedger = {
+          ...previousLedger,
+          payoutLiability: (BigInt(previousLedger.payoutLiability) - BigInt(reservation.amount.amountAtomic)).toString(),
+        };
+        if (canonicalJson(storedLedger) !== canonicalJson(expectedLedger)) {
+          throw new Error('stored payout quarantine settlement does not atomically release the matching custody liability');
+        }
+        reservation.settlement = settlement;
+        custodyLedgers.set(ledgerKey, storedLedger);
       } else if (entry.kind === 'stage-request-prepared') {
         assertStageName(entry.payload.stage);
         if (typeof entry.payload.requestDigest !== 'string' || !digestPattern.test(entry.payload.requestDigest)) {
@@ -4439,7 +4637,12 @@ export class CycleRepository {
     }
     const stored = this.#store.readCycle(cycleId);
     const state = await this.#replayStored(cycleId, stored, false);
-    if (operation && state.terminalState) {
+    const heldRetryNonceException = operation === 'reserveWalletNonce'
+      ? payoutRetryMayUseHeldCycle(state)
+      : operation === 'releaseWalletNonce'
+        ? payoutRetryMayReleaseHeldCycle(state)
+        : false;
+    if (operation && state.terminalState && !heldRetryNonceException) {
       throw new Error(`cycle-repository ${operation}: cycle is terminal as ${state.terminalState}`);
     }
     assertState?.(state);
@@ -6122,6 +6325,8 @@ export class CycleRepository {
       reason: reservationReason,
       evidence: reservationEvidence,
       ledger,
+      retries: [],
+      settlement: null,
     };
     await this.#append(cycleId, 'payout-quarantine-reserved', { reservation }, {
       operation: 'reservePayoutQuarantine',
@@ -6136,6 +6341,316 @@ export class CycleRepository {
       },
     });
     return structuredClone(reservation);
+  }
+
+  async requestPayoutQuarantineRetry(cycleId, {
+    planDigest,
+    recipient: recipientValue,
+    amount: amountValue,
+    requestId,
+    originalTransactionHash: originalTransactionHashValue,
+  }) {
+    assertDigest(planDigest, 'payout quarantine retry planDigest');
+    const recipient = assertEvmAddress(recipientValue, 'payout quarantine retry recipient');
+    const amount = assertPayoutAmount(amountValue, 'payout quarantine retry amount', { positive: true });
+    if (typeof requestId !== 'string' || !requestIdPattern.test(requestId)) {
+      throw new Error('cycle-repository requestPayoutQuarantineRetry: requestId is invalid');
+    }
+    if (typeof originalTransactionHashValue !== 'string' || !evmTransactionHashPattern.test(originalTransactionHashValue)) {
+      throw new Error('cycle-repository requestPayoutQuarantineRetry: originalTransactionHash is invalid');
+    }
+    const originalTransactionHash = originalTransactionHashValue.toLowerCase();
+    const state = await this.#replay(cycleId);
+    if (state.terminalState !== null && state.terminalState !== HELD_OWNER_DECISION) {
+      throw new Error(`cycle-repository requestPayoutQuarantineRetry: cycle is terminal as ${state.terminalState}`);
+    }
+    const key = payoutQuarantineKey(planDigest, recipient);
+    const reservation = state.payoutQuarantines.get(key);
+    if (!reservation) throw new Error('cycle-repository requestPayoutQuarantineRetry: payout quarantine reservation does not exist');
+    if (typeof reservation.evidence.transactionHash !== 'string'
+      || !evmTransactionHashPattern.test(reservation.evidence.transactionHash)) {
+      throw new Error('cycle-repository requestPayoutQuarantineRetry: reservation evidence has no original transaction hash');
+    }
+    if (canonicalJson(reservation.amount) !== canonicalJson(amount)) {
+      throw new Error('cycle-repository requestPayoutQuarantineRetry: amount does not match the reserved liability');
+    }
+    if (reservation.evidence.transactionHash.toLowerCase() !== originalTransactionHash) {
+      throw new Error('cycle-repository requestPayoutQuarantineRetry: original transaction does not match reservation evidence');
+    }
+    if (reservation.settlement !== null) {
+      throw new Error('cycle-repository requestPayoutQuarantineRetry: payout quarantine is already settled');
+    }
+    const existing = reservation.retries.find(retry => retry.requestId === requestId);
+    if (existing) {
+      if (canonicalJson({
+        planDigest, recipient, amount, requestId, originalTransactionHash,
+      }) !== canonicalJson({
+        planDigest, recipient, amount: reservation.amount, requestId: existing.requestId,
+        originalTransactionHash: existing.originalTransactionHash,
+      })) {
+        throw new Error('cycle-repository requestPayoutQuarantineRetry: requestId conflict');
+      }
+      return structuredClone(existing);
+    }
+    const previous = reservation.retries.at(-1);
+    if (previous?.resolution === null) {
+      throw new Error('cycle-repository requestPayoutQuarantineRetry: previous retry is unresolved');
+    }
+    const retry = {
+      retryId: digest({
+        cycleId,
+        planDigest,
+        recipient,
+        requestId,
+        sequence: reservation.retries.length,
+      }),
+      requestId,
+      requestedAtMs: currentRepositoryTime(this.#now),
+      originalTransactionHash,
+      resolution: null,
+    };
+    try {
+      await this.#append(cycleId, 'payout-quarantine-retry-requested', {
+        schema: payoutQuarantineRetrySchema,
+        planDigest,
+        recipient,
+        retry,
+      }, {
+        assertState: currentState => {
+          const current = currentState.payoutQuarantines.get(key);
+          if (!current || current.settlement !== null) {
+            throw new Error('cycle-repository requestPayoutQuarantineRetry: reservation changed while requesting retry');
+          }
+          if (current.retries.some(candidate => candidate.requestId === requestId)) {
+            throw new Error('cycle-repository requestPayoutQuarantineRetry: request became durable concurrently');
+          }
+          if (current.retries.at(-1)?.resolution === null) {
+            throw new Error('cycle-repository requestPayoutQuarantineRetry: previous retry became unresolved');
+          }
+        },
+      });
+    } catch (error) {
+      const latest = await this.#replay(cycleId);
+      const current = latest.payoutQuarantines.get(key);
+      const concurrent = current?.retries.find(candidate => candidate.requestId === requestId);
+      if (concurrent && canonicalJson(concurrent) === canonicalJson(retry)) return structuredClone(concurrent);
+      throw error;
+    }
+    return structuredClone(retry);
+  }
+
+  async recordPayoutQuarantineRetryRefusal(cycleId, {
+    planDigest,
+    recipient: recipientValue,
+    retryId,
+    refusalEvidence,
+    processProof = null,
+    payoutRetry = null,
+  }) {
+    assertDigest(planDigest, 'payout quarantine retry refusal planDigest');
+    const recipient = assertEvmAddress(recipientValue, 'payout quarantine retry refusal recipient');
+    assertDigest(retryId, 'payout quarantine retry refusal retryId');
+    const evidence = cloneChainObservationEvidence(refusalEvidence, 'payout quarantine retry refusal evidence');
+    if (typeof evidence.transactionHash !== 'string' || !evmTransactionHashPattern.test(evidence.transactionHash)) {
+      throw new Error('cycle-repository recordPayoutQuarantineRetryRefusal: transactionHash is required');
+    }
+    if (evidence.reason !== 'TRANSACTION_REVERTED'
+      || typeof evidence.finalizedBlockNumber !== 'string'
+      || typeof evidence.finalizedBlockHash !== 'string') {
+      throw new Error('cycle-repository recordPayoutQuarantineRetryRefusal: refusal evidence is not finalized');
+    }
+    const state = await this.#replay(cycleId);
+    const key = payoutQuarantineKey(planDigest, recipient);
+    const reservation = state.payoutQuarantines.get(key);
+    if (!reservation) throw new Error('cycle-repository recordPayoutQuarantineRetryRefusal: payout quarantine reservation does not exist');
+    if (reservation.settlement !== null) {
+      throw new Error('cycle-repository recordPayoutQuarantineRetryRefusal: payout quarantine is already settled');
+    }
+    const retry = reservation.retries.find(candidate => candidate.retryId === retryId);
+    if (!retry) throw new Error('cycle-repository recordPayoutQuarantineRetryRefusal: retry does not exist');
+    const resolution = { state: 'REFUSED', transactionHash: evidence.transactionHash.toLowerCase() };
+    if (retry.resolution !== null) {
+      if (canonicalJson(retry.resolution) !== canonicalJson(resolution)) {
+        throw new Error('cycle-repository recordPayoutQuarantineRetryRefusal: retry resolution conflicts');
+      }
+      return structuredClone(retry);
+    }
+    try {
+      await this.#append(cycleId, 'payout-quarantine-retry-refused', {
+        schema: payoutQuarantineRetrySchema,
+        planDigest,
+        recipient,
+        retryId,
+        refusalEvidence: evidence,
+        processProof: processProof === null ? null : cloneChainObservationEvidence(processProof, 'payout quarantine retry refusal process proof'),
+        payoutRetry: payoutRetry === null ? null : cloneChainObservationEvidence(payoutRetry, 'payout quarantine retry refusal payout retry'),
+      }, {
+        assertState: currentState => {
+          const current = currentState.payoutQuarantines.get(key);
+          const currentRetry = current?.retries.find(candidate => candidate.retryId === retryId);
+          if (!currentRetry || (currentRetry.resolution !== null
+            && canonicalJson(currentRetry.resolution) !== canonicalJson(resolution))) {
+            throw new Error('cycle-repository recordPayoutQuarantineRetryRefusal: retry changed while recording refusal');
+          }
+          if (currentRetry.resolution !== null) {
+            throw new Error('cycle-repository recordPayoutQuarantineRetryRefusal: refusal became durable concurrently');
+          }
+        },
+      });
+    } catch (error) {
+      const latest = await this.#replay(cycleId);
+      const current = latest.payoutQuarantines.get(key);
+      const concurrent = current?.retries.find(candidate => candidate.retryId === retryId);
+      if (concurrent?.resolution
+        && canonicalJson(concurrent.resolution) === canonicalJson(resolution)) return structuredClone(concurrent);
+      throw error;
+    }
+    return structuredClone(resolution);
+  }
+
+  async settlePayoutQuarantine(cycleId, {
+    planDigest,
+    recipient: recipientValue,
+    retryId = null,
+    proof,
+    operations,
+    payoutRetry = null,
+  }) {
+    assertDigest(planDigest, 'payout quarantine settlement planDigest');
+    const recipient = assertEvmAddress(recipientValue, 'payout quarantine settlement recipient');
+    if (retryId !== null) assertDigest(retryId, 'payout quarantine settlement retryId');
+    const source = assertEvmAddress(operations, 'payout quarantine settlement Operations address');
+    const state = await this.#replay(cycleId);
+    const key = payoutQuarantineKey(planDigest, recipient);
+    const reservation = state.payoutQuarantines.get(key);
+    if (!reservation) throw new Error('cycle-repository settlePayoutQuarantine: payout quarantine reservation does not exist');
+    if (reservation.settlement !== null) {
+      const existing = reservation.settlement;
+      if (existing.retryId === retryId && existing.transactionHash === proof?.transactionHash
+        && existing.amount.amountAtomic === reservation.amount.amountAtomic
+        && existing.proofDigest === digest(proof)) return structuredClone(existing);
+      throw new Error('cycle-repository settlePayoutQuarantine: settlement conflicts with existing settlement');
+    }
+    if (!isProcessNativePaymentProof(proof, {
+      kind: 'direct',
+      chainId: '4663',
+      assetId: 'native',
+      decimals: 18,
+      source,
+      recipient,
+      amountWei: reservation.amount.amountAtomic,
+      transactionHash: proof?.transactionHash,
+    })) {
+      throw new Error('cycle-repository settlePayoutQuarantine: proof is not an authenticated direct native payment');
+    }
+    if (retryId === null) {
+      if (typeof reservation.evidence.transactionHash !== 'string'
+        || proof.transactionHash.toLowerCase() !== reservation.evidence.transactionHash.toLowerCase()) {
+        throw new Error('cycle-repository settlePayoutQuarantine: original settlement transaction does not match reservation evidence');
+      }
+    } else {
+      const retry = reservation.retries.find(candidate => candidate.retryId === retryId);
+      if (!retry || retry.resolution !== null) {
+        throw new Error('cycle-repository settlePayoutQuarantine: retry is not open for settlement');
+      }
+    }
+    const ledgerKey = custodyLedgerKey({ chainId: '4663', assetId: 'native' });
+    const previousLedger = state.custodyLedgers.get(ledgerKey);
+    if (!previousLedger) throw new Error('cycle-repository settlePayoutQuarantine: native custody ledger does not exist');
+    if (BigInt(previousLedger.payoutLiability) < BigInt(reservation.amount.amountAtomic)) {
+      throw new Error('cycle-repository settlePayoutQuarantine: payout liability underflow');
+    }
+    const ledger = {
+      ...previousLedger,
+      payoutLiability: (BigInt(previousLedger.payoutLiability) - BigInt(reservation.amount.amountAtomic)).toString(),
+    };
+    const settlement = {
+      retryId,
+      transactionHash: proof.transactionHash.toLowerCase(),
+      amount: reservation.amount,
+      settledAtMs: currentRepositoryTime(this.#now),
+      proofDigest: digest(proof),
+      finalizedTransfer: structuredClone(proof),
+      payoutRetry: payoutRetry === null ? null : structuredClone(payoutRetry),
+    };
+    try {
+      await this.#append(cycleId, 'payout-quarantine-settled', {
+        schema: payoutQuarantineSettlementSchema,
+        planDigest,
+        recipient,
+        settlement,
+        ledger,
+      }, {
+        assertState: currentState => {
+          const current = currentState.payoutQuarantines.get(key);
+          const currentLedger = currentState.custodyLedgers.get(ledgerKey);
+          if (!current || current.settlement !== null || !currentLedger
+            || canonicalJson(currentLedger) !== canonicalJson(previousLedger)) {
+            throw new Error('cycle-repository settlePayoutQuarantine: reservation or custody changed while settling');
+          }
+        },
+      });
+    } catch (error) {
+      const latest = await this.#replay(cycleId);
+      const current = latest.payoutQuarantines.get(key);
+      if (current?.settlement
+        && current.settlement.retryId === settlement.retryId
+        && current.settlement.transactionHash === settlement.transactionHash
+        && current.settlement.amount.amountAtomic === settlement.amount.amountAtomic
+        && current.settlement.proofDigest === settlement.proofDigest) {
+        return structuredClone(current.settlement);
+      }
+      throw error;
+    }
+    return structuredClone(settlement);
+  }
+
+  async listPayoutObligations(cycleId) {
+    const state = await this.#replay(cycleId);
+    return [...state.payoutQuarantines.values()].map(reservation => ({
+      planDigest: reservation.planDigest,
+      recipient: reservation.recipient,
+      amount: structuredClone(reservation.amount),
+      reason: reservation.reason,
+      originalTransactionHash: reservation.evidence.transactionHash,
+      retries: structuredClone(reservation.retries),
+      settlement: structuredClone(reservation.settlement),
+    }));
+  }
+
+  async listOpenPayoutRetries() {
+    const open = [];
+    for (const cycleId of await this.listKnownCycleIds()) {
+      const state = await this.#replay(cycleId);
+      const payoutState = await this.#store.readPagedPayoutState(cycleId, 'payout');
+      const payoutRetries = new Map(
+        Array.isArray(payoutState?.recipients)
+          ? payoutState.recipients.flatMap(attempt => (attempt.retries ?? [])
+            .map(retry => [`${attempt.recipient.toLowerCase()}:${retry.retryId}`, retry]))
+          : [],
+      );
+      for (const reservation of state.payoutQuarantines.values()) {
+        for (const retry of reservation.retries) {
+          const payoutRetry = payoutRetries.get(`${reservation.recipient.toLowerCase()}:${retry.retryId}`);
+          const payoutProjectionUnresolved = payoutState !== null
+            && (payoutRetry === undefined || !['FINALIZED', 'REFUSED'].includes(payoutRetry.state));
+          const projectionGap = retry.resolution !== null
+            && payoutProjectionUnresolved
+            && (reservation.settlement?.retryId === retry.retryId || retry.resolution.state === 'REFUSED');
+          const unresolvedRetry = retry.resolution === null
+            && reservation.settlement?.retryId !== retry.retryId;
+          if (unresolvedRetry || projectionGap) {
+            open.push({
+              cycleId,
+              planDigest: reservation.planDigest,
+              recipient: reservation.recipient,
+              retryId: retry.retryId,
+            });
+          }
+        }
+      }
+    }
+    return open;
   }
 
   async #heldEvmNonceLockInAnotherActiveCycle(cycleId, chainId, wallet) {
@@ -6860,7 +7375,9 @@ export class CycleRepository {
       throw new Error('cycle-repository reserveWalletNonce: reservation lease is not active');
     }
     const state = await this.#replay(cycleId);
-    if (state.terminalState) throw new Error(`cycle-repository reserveWalletNonce: cycle is terminal as ${state.terminalState}`);
+    if (state.terminalState && !payoutRetryMayUseHeldCycle(state)) {
+      throw new Error(`cycle-repository reserveWalletNonce: cycle is terminal as ${state.terminalState}`);
+    }
     const key = walletNonceReservationKey(reservation.chainId, reservation.wallet);
     const current = state.walletNonceReservations.get(key);
     if (current?.state === 'HELD') {

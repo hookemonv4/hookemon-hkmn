@@ -61,6 +61,34 @@ test('reads a held owner decision bound to the held evidence and cycle revision'
   });
 });
 
+test('reads a refused payout retry request without granting execution authority', () => {
+  const result = readDecisionRequest({
+    requestId: 'retry-request-1',
+    expectedVersion: 3,
+    command: {
+      type: 'retry-refused-payout',
+      cycleId: 'cycle-42',
+      planDigest: `sha256:${'c'.repeat(64)}`,
+      recipient: `0x${'1'.repeat(40)}`,
+      amountAtomic: '1000000000000000000',
+      originalTransactionHash: `0x${'d'.repeat(64)}`,
+    },
+  });
+  assert.deepEqual(result.command, {
+    type: 'retry-refused-payout',
+    cycleId: 'cycle-42',
+    planDigest: `sha256:${'c'.repeat(64)}`,
+    recipient: `0x${'1'.repeat(40)}`,
+    amountAtomic: '1000000000000000000',
+    originalTransactionHash: `0x${'d'.repeat(64)}`,
+  });
+  assert.throws(() => readDecisionRequest({
+    requestId: 'retry-request-2',
+    expectedVersion: 3,
+    command: { ...result.command, amountAtomic: '0' },
+  }), ContractValidationError);
+});
+
 test('reads an update-configuration patch without granting pause or kill fields', () => {
   const result = readDecisionRequest({
     requestId: 'config-1',

@@ -3829,6 +3829,84 @@ test('reserves one wallet nonce fence across stages and cycles, then persists re
   );
 });
 
+test('allows a wallet nonce reservation for a held payout liability with an open retry only', async t => {
+  const repository = await CycleRepository.open(await tempDirectory(t));
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  const asset = { chainId: '4663', assetId: 'native', decimals: 18 };
+  await repository.recordCustodyLedger(cycleId, {
+    cycleId,
+    ...asset,
+    schema: 'hookemon.custody-ledger.v3',
+    ...Object.fromEntries(CUSTODY_LEDGER_BUCKETS.map(key => [key, '0'])),
+    expectedCycleAsset: null,
+    verifiedCurrentBalance: null,
+    returnReceived: '10',
+    gasReserve: { ...asset, amountAtomic: '0' },
+    gasSpent: { ...asset, amountAtomic: '0' },
+    gasPayments: [],
+  });
+  const recipient = '0x00000000000000000000000000000000000000bb';
+  const planDigest = `sha256:${'a'.repeat(64)}`;
+  const originalTransactionHash = `0x${'b'.repeat(64)}`;
+  await repository.reservePayoutQuarantine(cycleId, {
+    planDigest,
+    recipient,
+    amount: { ...asset, amountAtomic: '1' },
+    reason: 'TRANSACTION_REVERTED',
+    evidence: { transactionHash: originalTransactionHash, reason: 'TRANSACTION_REVERTED' },
+  });
+  await repository.holdCycle(cycleId, 'HELD_OWNER_DECISION', {
+    stage: 'payout',
+    reason: 'PAYOUT_QUARANTINED_LIABILITY',
+    planDigest,
+    liabilities: [{ recipient, amount: { ...asset, amountAtomic: '1' }, reason: 'TRANSACTION_REVERTED' }],
+  });
+  await repository.requestPayoutQuarantineRetry(cycleId, {
+    planDigest,
+    recipient,
+    amount: { ...asset, amountAtomic: '1' },
+    requestId: 'held-retry-1',
+    originalTransactionHash,
+  });
+  const reservation = {
+    chainId: '4663',
+    wallet: '0x00000000000000000000000000000000000000aa',
+    stage: 'payout',
+    fencingToken: '12345678-1234-4123-8123-123456789abc',
+    leaseAcquiredAtMs: 0,
+    leaseExpiresAtMs: Number.MAX_SAFE_INTEGER,
+  };
+  assert.equal((await repository.reserveWalletNonce(cycleId, reservation)).state, 'HELD');
+});
+
+test('rejects held wallet nonce reservations without an open payout retry and other terminal states', async t => {
+  const repository = await CycleRepository.open(await tempDirectory(t));
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  await repository.holdCycle(cycleId, 'HELD_OWNER_DECISION', {
+    stage: 'payout',
+    reason: 'PAYOUT_QUARANTINED_LIABILITY',
+    planDigest: `sha256:${'c'.repeat(64)}`,
+    liabilities: [],
+  });
+  const reservation = {
+    chainId: '4663',
+    wallet: '0x00000000000000000000000000000000000000aa',
+    stage: 'payout',
+    fencingToken: '22345678-1234-4123-8123-123456789abc',
+    leaseAcquiredAtMs: 0,
+    leaseExpiresAtMs: Number.MAX_SAFE_INTEGER,
+  };
+  await assert.rejects(() => repository.reserveWalletNonce(cycleId, reservation), /cycle is terminal/);
+
+  const other = await CycleRepository.open(await tempDirectory(t));
+  const { cycleId: otherCycleId } = await other.createCycle({ releaseAmount: '1', mode: 'production' });
+  await other.holdCycle(otherCycleId, 'HELD_DATA_UNVERIFIED', { reason: 'test' });
+  await assert.rejects(
+    () => other.reserveWalletNonce(otherCycleId, { ...reservation, fencingToken: '32345678-1234-4123-8123-123456789abc' }),
+    /cycle is terminal/,
+  );
+});
+
 test('takes over an expired wallet nonce after reopen without reviving the prior signing fence', async t => {
   const directory = await tempDirectory(t);
   let now = 9_999;

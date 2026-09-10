@@ -138,7 +138,21 @@ dashboard, CLI, and runner callers receive a frozen read client rather than a se
   exact binding before a nonce read or signature. `consumePayoutDustAndRecordStageAttempt` remains
   available for non-paged compatibility callers.
 - `reservePayoutQuarantine` and `readPayoutQuarantine` manage recipient liabilities keyed by plan
-  digest and recipient.
+  digest and recipient. `requestPayoutQuarantineRetry` records an audited, idempotent retry
+  request for a definitively refused native recipient; `recordPayoutQuarantineRetryRefusal`
+  records a later finalized retry refusal without reserving liability again. `settlePayoutQuarantine`
+  accepts only an authenticated direct native payment proof, atomically decrements the matching
+  `payoutLiability`, and records the settlement. `listPayoutObligations` and
+  `listOpenPayoutRetries` expose per-recipient obligations for operator status and automated retry.
+  The open-retry reader also returns a retry whose quarantine journal is already resolved while
+  its paged payout state is still unresolved, allowing the next lease-fenced tick to repair a
+  crash gap between the journal and payout-state persistence.
+  Settlement and refusal records retain the finalized payment, refusal, and retry projection
+  evidence needed for that repair. Replay is idempotent: gas is keyed by transaction proof,
+  liability is released at most once, and quarantine remains after a retry refusal.
+  A cycle held as `HELD_OWNER_DECISION` for `PAYOUT_QUARANTINED_LIABILITY` may reserve the
+  Operations nonce only while an unresolved quarantine retry is durable; other terminal states
+  remain fenced.
 
 ## Invariants
 

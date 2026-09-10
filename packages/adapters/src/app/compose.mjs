@@ -1837,6 +1837,13 @@ export async function compose(config) {
       return buildAutomatedCycleService(active.mode === 'production', active.mode).recoverActiveCycle({});
     },
     recordHeldOwnerDecision: ({ positionId, ...decision }) => cycleRepository.recordHeldOwnerDecision(positionId, decision),
+    requestPayoutQuarantineRetry: input => cycleRepository.requestPayoutQuarantineRetry(input.cycleId, {
+      planDigest: input.planDigest,
+      recipient: input.recipient,
+      amount: input.amount,
+      requestId: input.requestId,
+      originalTransactionHash: input.originalTransactionHash,
+    }),
   });
 
   async function executeAudited({ requestId, expectedRevision, command, effect, note = null } = {}) {
