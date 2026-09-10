@@ -29,17 +29,17 @@ contract PhaseThreeReleasePlan {
     bytes32 public constant TOKEN_ARTIFACT_SHA256 =
         0x021386a1bfe2c753c658e82add866f0c7d1e393cad71046994fd0e03f1c46d0a;
     bytes32 public constant HOOK_CREATION_CODE_HASH =
-        0xe82cda5819ee3ac8019358dcd1059b19ff5613e9586015423571e7a1db6b0ba3;
+        0x68eabef851696a628985be0daed49169ff3ce6ec95254a741c35ab83d54505d6;
     bytes32 public constant HOOK_RUNTIME_TEMPLATE_CODE_HASH =
-        0x2a0f13f5f62c644c19223bf641fbe3ed93a6e7a2e5f02ff478a0eb7086c5f6ba;
+        0xe9cbad9bf0a56a5d0c8be33bfe7fb859cf28cbb7b9172fa0bd49b09a93cc0610;
     bytes32 public constant HOOK_ARTIFACT_SHA256 =
-        0xc823286da7036b9a31d66d2726e0297fd60405f01f34745606fbd70aa4c3ed6b;
+        0xca1b13bddc1ca8ee1ac094cd6d1413721acdfc1664ae2ccc3ce0f02e0750b6dd;
     bytes32 public constant CUSTODY_CREATION_CODE_HASH =
         0x612740484e055828758b43eaccb7d5fdc6927423e6ab84b433221999a2ebce77;
     bytes32 public constant CUSTODY_RUNTIME_TEMPLATE_CODE_HASH =
         0xf66dd925b98becf4c6f4410abf52e0c95e31b407eb99115f19d1357b6cbf5334;
     bytes32 public constant CUSTODY_ARTIFACT_SHA256 =
-        0x943bf17d52aaf90de70640b18175430c043db9cb7e862468131da694c2fc0b3d;
+        0xcd2d7ae73948df75fd955df8cc1dc6f20d042df1abd5a3dbaef234e3b9ac26c4;
 
     uint256 public constant TOTAL_SUPPLY = 1_000_000_000e18;
     uint256 public constant POOL_ALLOCATION = TOTAL_SUPPLY;

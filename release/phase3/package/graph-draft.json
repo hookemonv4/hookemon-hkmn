@@ -11,7 +11,7 @@
       "buildInfo": {
         "localBuildInfoCount": 1,
         "reason": "Missing: address-bound constructor values and provider route fields. Resolve: materialize the provider graph after preflight and retain a fresh launch build. Verified alternative: this single pinned-profile build binds template bytecode and source content while all signable graph fields remain unset.",
-        "sourceContentSha256": "sha256:d9cccd70bb4199e045def57cd6d6e8457a7beb1559810def24647fd547788f97",
+        "sourceContentSha256": "sha256:abbfc74ca6757c8b6e4a3bea87a0356268635f1b2582107f5b1eda5e996e4394",
         "sourceCount": 36,
         "status": "OPEN_FACT"
       },
@@ -106,7 +106,7 @@
       {
         "address": null,
         "applicantSalt": null,
-        "artifactSha256": "sha256:943bf17d52aaf90de70640b18175430c043db9cb7e862468131da694c2fc0b3d",
+        "artifactSha256": "sha256:cd2d7ae73948df75fd955df8cc1dc6f20d042df1abd5a3dbaef234e3b9ac26c4",
         "componentKind": "other",
         "contractName": "PermanentPositionCustody",
         "creationBytecodeHash": "0x612740484e055828758b43eaccb7d5fdc6927423e6ab84b433221999a2ebce77",
@@ -121,14 +121,14 @@
       {
         "address": null,
         "applicantSalt": null,
-        "artifactSha256": "sha256:c823286da7036b9a31d66d2726e0297fd60405f01f34745606fbd70aa4c3ed6b",
+        "artifactSha256": "sha256:ca1b13bddc1ca8ee1ac094cd6d1413721acdfc1664ae2ccc3ce0f02e0750b6dd",
         "componentKind": "hook",
         "contractName": "HookemonHook",
-        "creationBytecodeHash": "0xe82cda5819ee3ac8019358dcd1059b19ff5613e9586015423571e7a1db6b0ba3",
+        "creationBytecodeHash": "0x68eabef851696a628985be0daed49169ff3ce6ec95254a741c35ab83d54505d6",
         "effectiveSalt": null,
         "libraries": [],
         "runtimeCodeHash": null,
-        "runtimeTemplateCodeHash": "0x2a0f13f5f62c644c19223bf641fbe3ed93a6e7a2e5f02ff478a0eb7086c5f6ba",
+        "runtimeTemplateCodeHash": "0xe9cbad9bf0a56a5d0c8be33bfe7fb859cf28cbb7b9172fa0bd49b09a93cc0610",
         "sourcePath": "packages/contracts/src/HookemonHook.sol",
         "targetId": "hook",
         "targetIndex": 2
@@ -136,8 +136,8 @@
     ]
   },
   "inputDigests": {
-    "addressManifestSha256": "sha256:692480fb65a2a7356edbc677176eef58f8f9cad7e230c0c18a31f00692bf13e7",
-    "launchInputsSha256": "sha256:a8c39fc3bdf50b312d06cf11276c9b9e482c6dea0ca3b3a34abe40085e6243c4"
+    "addressManifestSha256": "sha256:d3e4fb1a88d574f9bf35ec56425084e8996b6ec46a71fb74899523440531db7c",
+    "launchInputsSha256": "sha256:b14f25e780489b33a8a1613f0266460bbc538ed782dead6021e753c8cee0d20a"
   },
   "metadata": {
     "banner": {
@@ -158,8 +158,7 @@
     "Missing: provider-supplied encoded preimage for the accepted three-call initialization sequence token.allocate(hook), custody.configureBindingHook(hook), and hook.initializeGraphLaunch(custody,sqrtPriceX96). Resolve: obtain the route namespace, route nonce, topology hash, target-id hashes, and serialized provider graph call data. Verified alternative: retain no encoded call data, target addresses, or signing payload.",
     "Missing: owner-reviewed seed deadline, wallet nonce and gas parameters. Resolve: bind them to the exact unsigned native transaction after preflight. Verified alternative: retain the 900-second deadline ceiling without a transaction payload.",
     "Missing: final provider metadata binding. Resolve: bind the selected release/phase3/metadata/hkmn-logo.png and its verified immutable public URI through the official metadata packer. Verified alternative: the actual logo bytes, matching public image and API metadata input are retained; no banner is required by the selected metadata input.",
-    "Missing: owner-selected inventory price range, native claim ceilings and transaction gas budget. Resolve: choose reviewed range bounds and independent wei limits without converting dollar numerals into wei. Verified alternative: zero creator seed and zero graph funding are fixed; production price, addresses and transaction payload remain unmaterialized.",
-    "Missing: provider admission of the unchanged inclusive 10/40/250 basis-point custom fee graph and compatible buyer-prepayment router. Resolve: obtain a server-owned custom economic adapter and verified external bindings; then run authenticated preflight on a complete request. Verified alternative: the local zero-native inventory and buyer-funded router sequence are tested without deployment or submission claims.",
+    "Missing: provider admission of the revised inclusive 20/40/240 basis-point custom fee graph and compatible buyer-prepayment router. Resolve: obtain a server-owned custom economic adapter and verified external bindings; then run authenticated preflight on a complete request. Verified alternative: the local zero-native inventory and buyer-funded router sequence are tested without deployment or submission claims.",
     "Missing: provider route fields, applicant salts and effective salts. Resolve: bind the provider route record and run deterministic address derivation. Verified alternative: keep addresses and graph digest unset while retaining only template hash evidence.",
     "Missing: address-bound constructor arguments and encoded graph calls. Resolve: derive final target addresses, bind authority values and encode the required graph-call sequence. Verified alternative: retain null initializer calldata and prohibit signing.",
     "Missing: the minted position token ID. Resolve: read the PositionManager mint result after the owner seed transaction and bind it through PermanentPositionCustody.bindMintedPosition. Verified alternative: deploy custody with constructor tokenId 0 and do not claim a bound position before seed.",
@@ -180,11 +179,23 @@
       "valueRule": "msg.value == amount0Max"
     },
     "priceCandidates": {
-      "nativeCurrency0": null,
+      "nativeCurrency0": {
+        "amount0Max": "0",
+        "amount1Max": "1000000000000000000000000000",
+        "consumedAmount0": "0",
+        "consumedAmount1": "999999999999999999999999885",
+        "consumedHkmn": "999999999999999999999999885",
+        "liquidity": "421035394154913054639875",
+        "lockedHkmnDust": "115",
+        "refundWei": "0",
+        "sqrtLowerX96": "62755286167801460104445931611012",
+        "sqrtPriceX96": "250929875796514805540091219040452",
+        "sqrtUpperX96": "250929875796514805540091219040452"
+      },
       "selection": {
         "poolId": null,
         "poolKey": null,
-        "rule": "Native ETH is currency0. Zero-native inventory starts exactly at the selected upper tick; derive maximal token-only liquidity from the complete HKMN stock and permanently lock mechanical rounding dust.",
+        "rule": "The preserved inventory price is 250929875796514805540091219040452 at the upper tick; nativeCurrency0 records its exact calculation. selectedSqrtPriceX96 remains unset until bound to platform-supplied deployment identities.",
         "selectedOrdering": "nativeCurrency0",
         "selectedSqrtPriceX96": null,
         "status": "OPEN_FACT"

@@ -793,7 +793,7 @@
       "bytes": 9345,
       "kind": "source-entry",
       "path": "packages/contracts/script/release/PhaseThreeReleasePlan.sol",
-      "sha256": "c6b0564deeff4dc42d47696cddfa79c46ef4b46032adca15ead277a2a9318a03"
+      "sha256": "36a7262ff31c44200df4a7ee1238e3a456df6bfb74a779e7997a13b1b7bd838e"
     },
     {
       "bytes": 2740,
@@ -817,13 +817,13 @@
       "bytes": 15650,
       "kind": "source-entry",
       "path": "packages/contracts/src/accounting/FeeAccounting.sol",
-      "sha256": "e8ea8d1ead71f4273f5fdb08f27a02b5e9120fd11cf3de4d5258a747a5795347"
+      "sha256": "686c57fd48ff083e6c435f28e4c4896501b58b1b11748c12b81fa1f0bf17c20f"
     },
     {
       "bytes": 14389,
       "kind": "source-entry",
       "path": "packages/contracts/src/bindings/RobinhoodBindings.sol",
-      "sha256": "e8e18d027a852627b70bdb6bd10b2df7eb23a1caa664adc968e9cde15b9c8d18"
+      "sha256": "08a3192bdd8da15ce3b7004d82e6e986f5a28fc9d366d4e5a04459923559c4a9"
     },
     {
       "bytes": 6148,
@@ -844,28 +844,28 @@
       "sha256": "5fa04a2e43a2e2ae2c153dc566ee0f4fb7ab4fcb756a1d50e20087db76865970"
     },
     {
-      "bytes": 55355,
+      "bytes": 55357,
       "kind": "test-entry",
       "path": "packages/contracts/test/accounting/FeeAccounting.t.sol",
-      "sha256": "3cae4a00035dfc68582c72b73d83d4dca7b90f79cc77f221c832a80f0c984f68"
+      "sha256": "6de81917a3133b0709b9610019ddc90dc39f4b06a0dd80fd899271dfd034f84a"
     },
     {
       "bytes": 8458,
       "kind": "test-entry",
       "path": "packages/contracts/test/accounting/FeeAccountingInvariant.t.sol",
-      "sha256": "d80b54b93da1c7dd9ffbae4f26449e34e6ffaa1e00c08456b53315cd1f5f0db6"
+      "sha256": "43059a90e0f18c72bbfe5491869d4b8256e6ac818014472518e84b854f1c0444"
     },
     {
-      "bytes": 48107,
+      "bytes": 48453,
       "kind": "test-entry",
       "path": "packages/contracts/test/integration/HookemonHook.t.sol",
-      "sha256": "23268cd6ed394725ef0e43e5bf65df1a902a6f3912916d762143e279fc19498f"
+      "sha256": "8b20913bb15c1b9622c98e06a53bdc6fc4ff6b3517ebfd349946a82daebf9929"
     },
     {
-      "bytes": 114606,
+      "bytes": 114629,
       "kind": "capability-test:phase-three-launch-graph",
       "path": "packages/contracts/test/integration/RobinhoodV4ArchiveFork.t.sol",
-      "sha256": "471f698428a87ca02e218c67feb620e9fbbb3de0decf784f0a881da84fd9a0f8"
+      "sha256": "bf0e527b69d1468a5765e8392e9159da34e56965cbac92e95ca025c81841ab1f"
     },
     {
       "bytes": 31790,
@@ -880,10 +880,10 @@
       "sha256": "40921c6cfb5e3cdbfea1c66e3eb0a817700efdfdc72de887de34be98dca11480"
     },
     {
-      "bytes": 22401,
+      "bytes": 22404,
       "kind": "test-entry",
       "path": "packages/contracts/test/market/CanonicalMarket.t.sol",
-      "sha256": "999cad2298575b59415cf51c8d67a4b664e9f34c8f60d08904e0b934de181127"
+      "sha256": "a71a7c5e45c602c5fafb4e8893ff23298930c44ad85b9f3563a06b9b8f1c8b4e"
     },
     {
       "bytes": 43180,
@@ -901,13 +901,13 @@
       "bytes": 10833,
       "kind": "test-entry",
       "path": "packages/contracts/test/release/PhaseThreeReleasePlan.t.sol",
-      "sha256": "94b08e6c393930a8ca48aa759b213ba5994f38f2ad7bcd09b2f447b95801ee5b"
+      "sha256": "53c11ee7e2098a1c3faa2c890f433e5bebf135cae44b41ed8944dedd6d2601ac"
     },
     {
       "bytes": 11654,
       "kind": "dependency-lock",
       "path": "product/dependency-pins.json",
-      "sha256": "484bfda7519b3814e6fb61ba52936478de6e89154e60973dfd500cbf1d3befe3"
+      "sha256": "dcfdb3f0a716477d6801bbf523f0f46d159abd6f409aca29e1f780a5e46c85a2"
     },
     {
       "bytes": 2673,
@@ -928,10 +928,10 @@
       "sha256": "25ac425e184e524f58700801216d525d7de9553580b70c796c7c14681f1d7dcd"
     },
     {
-      "bytes": 2066,
+      "bytes": 2111,
       "kind": "package:THREAT_MODEL.md",
       "path": "release/phase3/THREAT_MODEL.md",
-      "sha256": "439d1c0d61a58b34a0ed3e4c8fd0d9e7030f4d9ec7552985ae0901c865dbee5b"
+      "sha256": "29e99d523a4088b1efd91b7eecf9bb88129485351b15a3ec228a37c7c9a2c572"
     },
     {
       "bytes": 42350,
@@ -940,10 +940,10 @@
       "sha256": "1f815a172ae5d3c2c946a42e9f8eb2a009903cf471f06fde040340c6f0c02da1"
     },
     {
-      "bytes": 9897,
+      "bytes": 9932,
       "kind": "project-surface-evidence:canonical-pool-hook",
       "path": "release/phase3/address-manifest.json",
-      "sha256": "825406b8c104ee64d502f82b62acc363e287961ac73e120c972149059ca05a13"
+      "sha256": "9fc93e9edbcf42b6fd9ce86b10608afa1edbedbc32886ce088979f4b2eb9d728"
     },
     {
       "bytes": 75950,
@@ -979,13 +979,13 @@
       "bytes": 299507,
       "kind": "capability-evidence:phase-three-launch-graph",
       "path": "release/phase3/artifacts/custody.json",
-      "sha256": "943bf17d52aaf90de70640b18175430c043db9cb7e862468131da694c2fc0b3d"
+      "sha256": "cd2d7ae73948df75fd955df8cc1dc6f20d042df1abd5a3dbaef234e3b9ac26c4"
     },
     {
-      "bytes": 1072304,
+      "bytes": 1072294,
       "kind": "capability-evidence:phase-three-launch-graph",
       "path": "release/phase3/artifacts/hook.json",
-      "sha256": "c823286da7036b9a31d66d2726e0297fd60405f01f34745606fbd70aa4c3ed6b"
+      "sha256": "ca1b13bddc1ca8ee1ac094cd6d1413721acdfc1664ae2ccc3ce0f02e0750b6dd"
     },
     {
       "bytes": 170734,
@@ -997,7 +997,7 @@
       "bytes": 254751,
       "kind": "capability-evidence:phase-three-launch-graph",
       "path": "release/phase3/build-info/launch.json",
-      "sha256": "4df157b807ec319963fc0b6f0de5800cd2266df6af2c4397f042a1a67d2ad57c"
+      "sha256": "73990d57ce98cea9fdfc0a35e0d83a45c6dd1febdd7855b601ff5941bade4d02"
     },
     {
       "bytes": 16196,
@@ -1036,40 +1036,40 @@
       "sha256": "68d1ec551980a4773b75e6c8f3f98147a9f584ba9803848ad35b3b64271798a1"
     },
     {
-      "bytes": 6521,
+      "bytes": 6682,
       "kind": "project-surface-evidence:canonical-pool-hook",
       "path": "release/phase3/launch-inputs.json",
-      "sha256": "c623e4da9bc2e457f117c215a0f5f5d48731c85a491351af59e644712fc491a9"
+      "sha256": "1f4ae409792ebcef4a54e89a5045b9812200bfc2542bd744c295354dbb6e4cc5"
     },
     {
-      "bytes": 7425,
+      "bytes": 7666,
       "kind": "project-surface-evidence:canonical-pool-hook",
       "path": "release/phase3/launch-plan.md",
-      "sha256": "5a941b14ce16a7148f0cfd184916daec275a92981b9abc5a4cf1f57aa9c42788"
+      "sha256": "1837c39d0ba2c73528ba5db959a3c3396715efb7116f22b317bb2b99a804cffc"
     },
     {
       "bytes": 410613,
       "kind": "capability-evidence:phase-three-launch-graph",
       "path": "release/phase3/package/create-request.json",
-      "sha256": "8bfcbdd46e802f173ac74893bb64583b4be5331ce27d3ff8f62cdbd7fb5db12c"
+      "sha256": "b99259dabc212e15d7073a0e454359135a2d65efe95f4c44c3d554c4fab0c71c"
     },
     {
-      "bytes": 12100,
+      "bytes": 12277,
       "kind": "capability-evidence:phase-three-launch-graph",
       "path": "release/phase3/package/graph-draft.json",
-      "sha256": "a3567588d99f5c2a0b2de1bfbebfd6031757ce92cc0457871917183d8c9d808d"
+      "sha256": "ffddd2d4c4e20c3e169a89c36062919f7b6261a847deba4542865f0c29c8f2af"
     },
     {
       "bytes": 3101,
       "kind": "capability-evidence:phase-three-launch-graph",
       "path": "release/phase3/package/package-manifest.json",
-      "sha256": "56a7e96e47c21da50540a08d0fcaff57a945376dec5f648666c0b82e16065859"
+      "sha256": "791672e5f802f921e8b4b8836359a0c5c222866306b39174159886c0ed3dba23"
     },
     {
-      "bytes": 77972,
+      "bytes": 78135,
       "kind": "package:submission.json",
       "path": "release/phase3/submission.json",
-      "sha256": "30e04213a6ee17e7d72a41b5b66c24f17888b26a4a04b65340efbfd908a063c9"
+      "sha256": "cb5fcf9bb673437ba6cf02d5131a95b40c955dbfb681b83600339c4aa591a11a"
     },
     {
       "bytes": 3619,
@@ -1084,10 +1084,10 @@
       "sha256": "ad9dda427d009b525f081a4f33990d453b0b15e1a43e4746c61f4332acef066e"
     },
     {
-      "bytes": 127363,
+      "bytes": 126888,
       "kind": "specification",
       "path": "specs/requirements.json",
-      "sha256": "c89397d3ece140e601f2bb494f8f13a86996faca5f5b43d013abc770abfadf5c"
+      "sha256": "fe0c8cbd409bb1aa9c921e015cb64e1ccc7b6debd7ec9d619c4cb06758da09b0"
     }
   ],
   "importResolutions": [
@@ -2421,8 +2421,8 @@
     }
   ],
   "javascriptImportResolutions": [],
-  "reviewTargetHash": "sha256:88792a5684980d8616a0de9d5f75c87cf50d8d7613b659c59316c12e7fb74ba3",
+  "reviewTargetHash": "sha256:1f0363b45c8ca7c8862aefa39be863933c08d8762fe71323d49d39a0846a1266",
   "schemaVersion": 1,
   "standardVersion": "1.5.0",
-  "submissionHash": "sha256:5461af38d410b902c6133bcfe19c5c0a39b3b3a58adfc5bd7e892d70ccd7cdfe"
+  "submissionHash": "sha256:89a6dc4ae10f0ade25b5049db510c1378d5b9cb604207fd5d2f193e3185f904e"
 }

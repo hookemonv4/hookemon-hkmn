@@ -114,8 +114,8 @@
   },
   "forkProof": {
     "path": ".github/workflows/fork-proof.yml",
-    "expectedSha256": "8bf73db693c8d154383809e8d08948b93cb41ba711db750921af31638b6ef9c5",
-    "actualSha256": "8bf73db693c8d154383809e8d08948b93cb41ba711db750921af31638b6ef9c5"
+    "expectedSha256": "7808e65ea9d83ac312ecbba1e8d861e31838aff730aef7c088b350e7fd8697da",
+    "actualSha256": "7808e65ea9d83ac312ecbba1e8d861e31838aff730aef7c088b350e7fd8697da"
   },
   "forkPinCanary": {
     "path": ".github/workflows/fork-pin-canary.yml",
@@ -188,13 +188,13 @@
     },
     "controlDependencyVerifier": {
       "path": "scripts/verify-control-dependencies.mjs",
-      "expectedSha256": "fbb53af1521686b8fb35dcdec587f311e6195156cb28d857ae4dd5a49dc086ed",
-      "actualSha256": "fbb53af1521686b8fb35dcdec587f311e6195156cb28d857ae4dd5a49dc086ed",
+      "expectedSha256": "0ee90a6da2afa6450caee19e2c3d6c908c26c9c131df78fee0a5243fe2152506",
+      "actualSha256": "0ee90a6da2afa6450caee19e2c3d6c908c26c9c131df78fee0a5243fe2152506",
       "closure": [
         {
           "path": "scripts/verify-control-dependencies.mjs",
-          "sha256": "fbb53af1521686b8fb35dcdec587f311e6195156cb28d857ae4dd5a49dc086ed",
-          "actualSha256": "fbb53af1521686b8fb35dcdec587f311e6195156cb28d857ae4dd5a49dc086ed"
+          "sha256": "0ee90a6da2afa6450caee19e2c3d6c908c26c9c131df78fee0a5243fe2152506",
+          "actualSha256": "0ee90a6da2afa6450caee19e2c3d6c908c26c9c131df78fee0a5243fe2152506"
         },
         {
           "path": "scripts/lib/util.mjs",
@@ -212,8 +212,8 @@
   "controlInputs": {
     "archiveForkProofTest": {
       "path": "packages/contracts/test/integration/RobinhoodV4ArchiveFork.t.sol",
-      "expectedSha256": "471f698428a87ca02e218c67feb620e9fbbb3de0decf784f0a881da84fd9a0f8",
-      "actualSha256": "471f698428a87ca02e218c67feb620e9fbbb3de0decf784f0a881da84fd9a0f8"
+      "expectedSha256": "bf0e527b69d1468a5765e8392e9159da34e56965cbac92e95ca025c81841ab1f",
+      "actualSha256": "bf0e527b69d1468a5765e8392e9159da34e56965cbac92e95ca025c81841ab1f"
     }
   },
   "workflowPolicy": {
@@ -272,27 +272,27 @@
   "controlGatePinBump": {
     "schema": "hookemon.control-gate-pin-bump.v2",
     "approvalToken": "OWNER APPROVED",
-    "basePinsSha256": "2f1e3cbdd932fd08cae4873236c849149139cb31a66651d62c14591c4eba5e9f",
-    "candidatePinsSha256": "484bfda7519b3814e6fb61ba52936478de6e89154e60973dfd500cbf1d3befe3",
+    "basePinsSha256": "484bfda7519b3814e6fb61ba52936478de6e89154e60973dfd500cbf1d3befe3",
+    "candidatePinsSha256": "dcfdb3f0a716477d6801bbf523f0f46d159abd6f409aca29e1f780a5e46c85a2",
     "baseChecker": {
       "path": "scripts/verify-control-dependencies.mjs",
-      "blobId": "354df31db4e2855f0217d9987dcbb80a91457942"
+      "blobId": "d5ae88e0f36cce3d3efa185c940236fd8e7ad94f"
     },
     "controls": [
       {
         "path": ".github/workflows/fork-proof.yml",
-        "previousSha256": "4d422ca3bbb03a08c8d99b3d8b01d2919418009bd183e7655f95f9993d70d2b8",
-        "sha256": "8bf73db693c8d154383809e8d08948b93cb41ba711db750921af31638b6ef9c5"
+        "previousSha256": "8bf73db693c8d154383809e8d08948b93cb41ba711db750921af31638b6ef9c5",
+        "sha256": "7808e65ea9d83ac312ecbba1e8d861e31838aff730aef7c088b350e7fd8697da"
       },
       {
         "path": "packages/contracts/test/integration/RobinhoodV4ArchiveFork.t.sol",
-        "previousSha256": "09e7b66de30b493636f5605fbdc7e7dc859f8baabd994f47893c73e22ce9eaf0",
-        "sha256": "471f698428a87ca02e218c67feb620e9fbbb3de0decf784f0a881da84fd9a0f8"
+        "previousSha256": "471f698428a87ca02e218c67feb620e9fbbb3de0decf784f0a881da84fd9a0f8",
+        "sha256": "bf0e527b69d1468a5765e8392e9159da34e56965cbac92e95ca025c81841ab1f"
       },
       {
         "path": "scripts/verify-control-dependencies.mjs",
-        "previousSha256": "5ad4a559963959e94bc05353496c0bd761050fb4cad55f0b278e46d41242cd45",
-        "sha256": "fbb53af1521686b8fb35dcdec587f311e6195156cb28d857ae4dd5a49dc086ed"
+        "previousSha256": "fbb53af1521686b8fb35dcdec587f311e6195156cb28d857ae4dd5a49dc086ed",
+        "sha256": "0ee90a6da2afa6450caee19e2c3d6c908c26c9c131df78fee0a5243fe2152506"
       }
     ]
   }

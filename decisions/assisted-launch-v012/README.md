@@ -22,3 +22,5 @@ The assisted route may separate deployment/initialization from inventory transac
 Buyer routing retains actual native presettlement: explicit native `SETTLE`, `SWAP_EXACT_IN_SINGLE`, then `TAKE_ALL` for HKMN. Buyer ETH must settle before fee collection. Mock-router and local pinned PoolManager results do not prove the deployed UniversalRouter or its exact ABI; Programmable performs that integration. Standard JSON compiler inputs are compiler data, not an API launch request.
 
 No new customer economic choice is needed for this preparation. Exact platform integration and later wallet review remain before any transaction. Deployment, funding, live launch requests and signatures are outside this revision.
+
+The owner-requested allocation tests change the pinned archive-fork fixture. Its hash, the two workflow hash assertions, and the checker's supported workflow digest are regenerated together. The control pin-bump record binds those exact changes to the protected base; test execution, RPC pin validation, secret isolation and required checks remain enforced. No gate condition or platform packaging validator is weakened.

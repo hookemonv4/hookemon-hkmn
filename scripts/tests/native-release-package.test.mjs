@@ -53,7 +53,7 @@ test('native draft rejects mixed historical assets and one-sided or zero claim l
     inputs => { inputs.pool.quoteAsset.amountAtomic = '1'; },
     inputs => { inputs.roles.usdg = '0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168'; },
     (inputs, manifest) => { manifest.targets[2].constructor.processClaimLimit6hWei = '0'; manifest.targets[2].constructor.processClaimLimitMaxWei = '1'; },
-    (inputs, manifest) => { manifest.targets[2].constructor.processClaimLimit6hWei = '1'; },
+    (inputs, manifest) => { manifest.targets[2].constructor.processClaimLimit6hWei = '1'; manifest.targets[2].constructor.processClaimLimitMaxWei = null; },
     (inputs, manifest) => { manifest.targets[2].constructor.seedIntentDigest = null; },
   ]) {
     const value = fixture(change);
