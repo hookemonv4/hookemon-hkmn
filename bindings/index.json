@@ -6,7 +6,7 @@
       "path": "bindings/robinhood-chain.json",
       "requirementsRevision": 54,
       "architectureRevision": 3,
-      "manifestDigest": "sha256:ffe969c18a3bdf6bb1200299cf55541dd38af7a680c336553b4e5ae38d22e0c9",
+      "manifestDigest": "sha256:945461f146ae533a82c53745e5073446a6ffc0da4a45693dc27819039bb2d0b2",
       "status": "BUILD_ONLY_FAIL_CLOSED"
     }
   ]

@@ -14,7 +14,7 @@ The assisted-launch revision 0.1.2 is recorded in `decisions/assisted-launch-v01
 | Programmable recipient | `0xD88539d3c4C460136a733A3Fd60cf6BF269079da` |
 | Stock | Exactly 1 billion HKMN at 18 decimals, entirely allocated to the canonical market |
 | Pool | Native ETH currency0, HKMN currency1; zero LP fee, spacing 60, inventory ticks 133500 through 161220 |
-| Project fee | 300 bps inclusive: 240 process, 40 treasury, 20 Programmable; no additional surcharge. |
+| Project fee | 300 bps inclusive: 250 process, 30 treasury, 20 Programmable; no additional surcharge. |
 | Liquidity custody | Permanent position custody; the test provides no withdrawal route |
 | Seed and process claim ceilings | Zero creator ETH; initial claim cap 9960873688152935270 wei, maximum 19921747376305870540 wei; 24 claims per six hours |
 | Total test funding | Owner plans EUR 250; adequacy is deliberately unproven and measured after the test |

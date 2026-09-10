@@ -50,7 +50,7 @@ const CI_CHANGE_CLASSIFIER_PATH = 'scripts/ci-change-scope.mjs';
 const SUPPORTED_CI_CHANGE_CLASSIFIER_SHA256 = '32c67ba0f0c7740f841dbcb3f2a45950bc82bba30385f2435f0ca111a5ebb0df';
 const ARCHIVE_FORK_PROOF_TEST_PATH = 'packages/contracts/test/integration/RobinhoodV4ArchiveFork.t.sol';
 const SUPPORTED_V4_GATES_WORKFLOW_SHA256 = '9c0de0b13311fcfa2f657d622a4b1725cf874c98cd00bb2f05ac910e49d18c6c';
-const SUPPORTED_FORK_PROOF_WORKFLOW_SHA256 = '3b8d852554b98df0328be7f11b26fe4961fdd7dae962e6cd7f6bb09bba8088ce';
+const SUPPORTED_FORK_PROOF_WORKFLOW_SHA256 = 'e971b50c65f7a78b8b24b48236b5b6b8e780cca47f9f5546a6d1763357d14ae8';
 const SUPPORTED_FORK_PIN_CANARY_WORKFLOW_SHA256 = 'e3447ec6f2f9e2ee3f516a6e6ff9694d6a2f318a0e6ba39de72a8a1cccd43f4c';
 const SUPPORTED_IDENTITY_GATE_WORKFLOW_SHA256 = '65a80e8c0ac8cc4430b12e7aaf61c640e38a398fe40f4f604fd742f56a8defeb';
 const SUPPORTED_CONTROL_GATE_WORKFLOW_SHA256 = 'cfacbe4a87600a4aa3d7fbe3708d7f709aaf419c1eb565c1f223ac55dc8c4f74';
@@ -1199,8 +1199,8 @@ function regularRepositoryFileHash(root, relativePath, label, errors) {
 
 // These data-bearing controls are covered by the protected verifier's own pin.
 const NATIVE_CLEANROOM_CONTROL_DIGESTS = Object.freeze({
-  'scripts/check-cleanroom.mjs': '8180181044f3cc2ee742ab06abb097a9a55456339ea86b49f2cd1c395e411ecf',
-  'scripts/native-cleanroom-recognition.json': 'c2f8f8af62088a468f685a28cfef09ffdaa83f373800b7fd781ade9efabd92d1',
+  'scripts/check-cleanroom.mjs': '1a620020e87bd4ec8ad6763a989275b76141eb85d7994cff5cbc6b3ef912b2fb',
+  'scripts/native-cleanroom-recognition.json': '48181ff62926191e463bf270500dfdb5ba6e97412e95ed57c0db920a94202f90',
 });
 
 export function verifyNativeCleanroomIntegrity(root, errors = []) {

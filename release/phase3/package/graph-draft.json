@@ -11,7 +11,7 @@
       "buildInfo": {
         "localBuildInfoCount": 1,
         "reason": "Missing: address-bound constructor values and provider route fields. Resolve: materialize the provider graph after preflight and retain a fresh launch build. Verified alternative: this single pinned-profile build binds template bytecode and source content while all signable graph fields remain unset.",
-        "sourceContentSha256": "sha256:abbfc74ca6757c8b6e4a3bea87a0356268635f1b2582107f5b1eda5e996e4394",
+        "sourceContentSha256": "sha256:c07fe0605a567a16f8c559d251dedb51845ca0baf701bba5bebcb431bc34476c",
         "sourceCount": 36,
         "status": "OPEN_FACT"
       },
@@ -106,7 +106,7 @@
       {
         "address": null,
         "applicantSalt": null,
-        "artifactSha256": "sha256:cd2d7ae73948df75fd955df8cc1dc6f20d042df1abd5a3dbaef234e3b9ac26c4",
+        "artifactSha256": "sha256:a728f2ab2dd769e24ee4f1487d73a463b31d772edb30acb199f4299234267a69",
         "componentKind": "other",
         "contractName": "PermanentPositionCustody",
         "creationBytecodeHash": "0x612740484e055828758b43eaccb7d5fdc6927423e6ab84b433221999a2ebce77",
@@ -121,14 +121,14 @@
       {
         "address": null,
         "applicantSalt": null,
-        "artifactSha256": "sha256:ca1b13bddc1ca8ee1ac094cd6d1413721acdfc1664ae2ccc3ce0f02e0750b6dd",
+        "artifactSha256": "sha256:5a45a3342dd01623793824fa15db7cc5e8e8a217b7e8ff367e59335023ea1159",
         "componentKind": "hook",
         "contractName": "HookemonHook",
-        "creationBytecodeHash": "0x68eabef851696a628985be0daed49169ff3ce6ec95254a741c35ab83d54505d6",
+        "creationBytecodeHash": "0xde430f9e52853d2ca810e4d95ba3937649bb4fc899def5d16521efff31459d45",
         "effectiveSalt": null,
         "libraries": [],
         "runtimeCodeHash": null,
-        "runtimeTemplateCodeHash": "0xe9cbad9bf0a56a5d0c8be33bfe7fb859cf28cbb7b9172fa0bd49b09a93cc0610",
+        "runtimeTemplateCodeHash": "0x63c854b6b52f47806b52908e3ef58490fcc204ec07f477560b6ad7a6cc5efeb9",
         "sourcePath": "packages/contracts/src/HookemonHook.sol",
         "targetId": "hook",
         "targetIndex": 2
@@ -136,8 +136,8 @@
     ]
   },
   "inputDigests": {
-    "addressManifestSha256": "sha256:d3e4fb1a88d574f9bf35ec56425084e8996b6ec46a71fb74899523440531db7c",
-    "launchInputsSha256": "sha256:b14f25e780489b33a8a1613f0266460bbc538ed782dead6021e753c8cee0d20a"
+    "addressManifestSha256": "sha256:244a28a12c21616d4d50622d6811aa1acaacfae59feb9cd304c06e866bedfb16",
+    "launchInputsSha256": "sha256:f640dcb104a00ad4b1002babe9efe751e6248a7ac7b35048ea907eb66925015b"
   },
   "metadata": {
     "banner": {
@@ -158,7 +158,7 @@
     "Missing: provider-supplied encoded preimage for the accepted three-call initialization sequence token.allocate(hook), custody.configureBindingHook(hook), and hook.initializeGraphLaunch(custody,sqrtPriceX96). Resolve: obtain the route namespace, route nonce, topology hash, target-id hashes, and serialized provider graph call data. Verified alternative: retain no encoded call data, target addresses, or signing payload.",
     "Missing: owner-reviewed seed deadline, wallet nonce and gas parameters. Resolve: bind them to the exact unsigned native transaction after preflight. Verified alternative: retain the 900-second deadline ceiling without a transaction payload.",
     "Missing: final provider metadata binding. Resolve: bind the selected release/phase3/metadata/hkmn-logo.png and its verified immutable public URI through the official metadata packer. Verified alternative: the actual logo bytes, matching public image and API metadata input are retained; no banner is required by the selected metadata input.",
-    "Missing: provider admission of the revised inclusive 20/40/240 basis-point custom fee graph and compatible buyer-prepayment router. Resolve: obtain a server-owned custom economic adapter and verified external bindings; then run authenticated preflight on a complete request. Verified alternative: the local zero-native inventory and buyer-funded router sequence are tested without deployment or submission claims.",
+    "Missing: provider admission of the revised inclusive 20/30/250 basis-point custom fee graph and compatible buyer-prepayment router. Resolve: obtain a server-owned custom economic adapter and verified external bindings; then run authenticated preflight on a complete request. Verified alternative: the local zero-native inventory and buyer-funded router sequence are tested without deployment or submission claims.",
     "Missing: provider route fields, applicant salts and effective salts. Resolve: bind the provider route record and run deterministic address derivation. Verified alternative: keep addresses and graph digest unset while retaining only template hash evidence.",
     "Missing: address-bound constructor arguments and encoded graph calls. Resolve: derive final target addresses, bind authority values and encode the required graph-call sequence. Verified alternative: retain null initializer calldata and prohibit signing.",
     "Missing: the minted position token ID. Resolve: read the PositionManager mint result after the owner seed transaction and bind it through PermanentPositionCustody.bindMintedPosition. Verified alternative: deploy custody with constructor tokenId 0 and do not claim a bound position before seed.",

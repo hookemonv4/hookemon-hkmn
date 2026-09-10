@@ -1,20 +1,20 @@
 {
   "schema": "hookemon.cleanroom-recognition.v1",
-  "requirementsRevision": 75,
+  "requirementsRevision": 76,
   "sourceRevision": "19d9d8bfae0a55c7fd8091ffb42d7c9845ca6074",
   "auditPath": "docs/evidence/native-cleanroom-audit-20260908/findings.json",
   "auditSha256": "187ec57183501df3c733129603255c8b87bb63f274679acd4413cc7416dabd8c",
   "scope": "Exact reviewed bytes only; native economic terms, incidental full identifiers and unchanged official evidence. No runtime authority or privacy-rule exemption.",
   "files": {
     "architecture/interfaces.json": {
-      "sha256": "562e2ae60ddfba254e22a67dc5f535c6773be41451fffe7d3f3ff48fb81b69f2",
+      "sha256": "be2ec5ccb89947d187ad78438125124594d7be7606ef7434745dfe65f4b52a57",
       "matches": [
         {
           "rule": "historical-architecture",
-          "offset": 42639,
+          "offset": 42676,
           "length": 4,
           "sha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
-          "tokenStart": 42639,
+          "tokenStart": 42676,
           "tokenLength": 11,
           "tokenSha256": "67c3da52dac923f8e13d12d8ec89604cc901c8888ce886a014e73d546625dc16",
           "basis": "reviewed-native-71-or-retained-provider-source",
@@ -22,10 +22,10 @@
         },
         {
           "rule": "historical-architecture",
-          "offset": 42725,
+          "offset": 42762,
           "length": 4,
           "sha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
-          "tokenStart": 42725,
+          "tokenStart": 42762,
           "tokenLength": 4,
           "tokenSha256": "8591ee9090c0c02ca1f103cb637131d8f358870aba145245ff083e138fdd705b",
           "basis": "reviewed-native-71-or-retained-provider-source",
@@ -33,10 +33,10 @@
         },
         {
           "rule": "historical-architecture",
-          "offset": 47374,
+          "offset": 47411,
           "length": 4,
           "sha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
-          "tokenStart": 47374,
+          "tokenStart": 47411,
           "tokenLength": 4,
           "tokenSha256": "8591ee9090c0c02ca1f103cb637131d8f358870aba145245ff083e138fdd705b",
           "basis": "reviewed-native-71-or-retained-provider-source",
@@ -6305,7 +6305,7 @@
       "matches": []
     },
     "specs/requirements.json": {
-      "sha256": "b4dc4b10fbe4ce1f39d0959e34f777f0b9524bf88342ceec8f7edbe96331bc72",
+      "sha256": "a2ce87d8c9db0d127355113c161bf397b89c4db7dc99d40febae3498d4cb6b4e",
       "matches": [
         {
           "rule": "historical-architecture",
@@ -8218,7 +8218,7 @@
       ]
     },
     "decisions/assisted-launch-v012/requirements.patch": {
-      "sha256": "1629a3649f7c7174815722836277fc2203272332d0926d8b45c803c313b4950f",
+      "sha256": "9b4aa366ff948efecbe84d2786e663a40253108097b76388abe587ba5658fb4f",
       "matches": [
         {
           "rule": "historical-architecture",
@@ -8244,5 +8244,5 @@
     "addedFiles": [],
     "justification": "Apply the exact owner-approved recipient selection delta to native revision73. Existing native economic tokens are unchanged; only their reviewed files and offsets move. No new recognized token, privacy exception or runtime authority."
   },
-  "revisionNote": "Revision 75 fee update: rebind current interface and requirements bytes and the exact requirements diff; recognized token identities and scanner rules remain unchanged."
+  "revisionNote": "Revision 76 Treasury correction: rebind current interface and requirements bytes and the exact requirements diff; recognized token identities and scanner rules remain unchanged."
 }
