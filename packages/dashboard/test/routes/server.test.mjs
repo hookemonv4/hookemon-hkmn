@@ -5,11 +5,16 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
 
-import { appendAuditEntry, readAllAuditEntries } from '../../src/auth/audit-log.mjs';
+import {
+  appendAuditEntry,
+  executeAuditedCommand,
+  readAllAuditEntries,
+  readAuditEntriesAfter,
+} from '../../src/auth/audit-log.mjs';
 import { normalizePublicCycleStatus } from '../../src/contracts/public-cycle-status.mjs';
 import { normalizePublicCommunitySnapshot } from '../../src/contracts/public-community-snapshot.mjs';
 import { buildContext, createRequestListener, readEnvironmentConfig } from '../../src/server.mjs';
-import { openSqliteProjection } from '../../src/storage/sqlite-projection.mjs';
+import { encodeCardCursor, openSqliteProjection } from '../../src/storage/sqlite-projection.mjs';
 import { createOperatorControl } from '../../../runner/src/operator/control.mjs';
 import { createDefaultOperatorConfiguration } from '../../../runner/src/config/state-schema.mjs';
 import { CUSTODY_LEDGER_BUCKETS } from '../../../runner/src/cycle/money-schemas.mjs';
@@ -183,6 +188,8 @@ test('bootstrap accepts the proxy credential and an optional valid Access assert
   assert.equal(result.status, 200, result.diagnostics);
   assert.equal(result.body.identity.email, 'operator-console');
   assert.equal(result.body.state.desiredStatus, 'active');
+  assert.deepEqual(result.body.catalog, null);
+  assert.deepEqual(result.body.readiness, { ready: false, reasons: ['catalog-not-loaded'] });
 });
 
 test('bootstrap projects only its published hard caps when runner custody caps are present', async t => {
@@ -192,6 +199,19 @@ test('bootstrap projects only its published hard caps when runner custody caps a
   assert.equal(result.status, 200, result.diagnostics);
   const fields = ['maxBoostersPerCycle', 'maxUnitPriceMicroUsd', 'maxCycleBudgetMicroUsd', 'max24HourBudgetMicroUsd'];
   assert.deepEqual(result.body.hardCaps, Object.fromEntries(fields.map(field => [field, OPERATOR_HARD_CAPS[field]])));
+});
+
+test('bootstrap degrades a throwing readiness seam to a bounded 200 response', async t => {
+  const server = await buildTestServer(t, {
+    readReadiness: async () => { throw new Error('readiness dependency unavailable'); },
+  });
+  const result = await server.get('/operator/api/bootstrap', AUTH);
+  assert.equal(result.status, 200);
+  assert.deepEqual(result.body.readiness, { ready: false, reasons: ['start-readiness: unavailable'] });
+  assert.deepEqual(server.calls.errors, [{
+    operation: 'operator-bootstrap-readiness',
+    message: 'readiness dependency unavailable',
+  }]);
 });
 
 test('authority mutations appear in the next bootstrap view and its durable audit projection', async (t) => {
@@ -208,13 +228,44 @@ test('authority mutations appear in the next bootstrap view and its durable audi
 
   const configured = await server.post('/operator/api/decisions', {
     requestId: 'config-status',
-    expectedVersion: 1,
+    expectedVersion: 0,
     command: { type: 'update-configuration', configuration: { intervalMinutes: 30, requestedOrders: 2 } },
   }, AUTH);
   assert.equal(configured.status, 200);
   const bootstrap = await server.get('/operator/api/bootstrap', AUTH);
   assert.equal(bootstrap.body.state.cycleIntervalMinutes, 30);
   assert.deepEqual(bootstrap.body.state.manualPackOrders, [{ productId: 'base-pack', quantity: 2 }]);
+});
+
+test('audit requests ingest concurrent writers, isolate tampered tails, and rebuild replacements', async t => {
+  const server = await buildTestServer(t);
+  await executeAuditedCommand({
+    path: server.ctx.auditLogPath,
+    requestId: 'cli-audit-1',
+    command: { type: 'pause' },
+    actor: { email: 'cli' },
+    actorRole: 'operator',
+    expectedVersion: 0,
+    observedVersion: 0,
+    effect: async () => ({ action: 'pause' }),
+  });
+  const synced = await server.get('/operator/api/audit', AUTH);
+  assert.equal(synced.status, 200);
+  assert.equal(synced.body.decisions[0].requestId, 'cli-audit-1');
+  const validEntries = await readAllAuditEntries(server.ctx.auditLogPath);
+  const lines = (await readFile(server.ctx.auditLogPath, 'utf8')).trim().split('\n');
+  await writeFile(server.ctx.auditLogPath, `${lines[0]}\n${JSON.stringify({ ...JSON.parse(lines.at(-1)), hash: 'sha256:forged' })}\n`, 'utf8');
+
+  const tampered = await server.get('/operator/api/audit', AUTH);
+  assert.equal(tampered.status, 200);
+  assert.equal(tampered.body.decisions[0].requestId, 'cli-audit-1');
+  assert.equal(server.calls.errors.at(-1).operation, 'operator-audit-sync');
+
+  await writeFile(server.ctx.auditLogPath, `${JSON.stringify(validEntries[0])}\n`, 'utf8');
+  const rebuilt = await server.get('/operator/api/audit', AUTH);
+  assert.equal(rebuilt.status, 200);
+  assert.equal(rebuilt.body.decisions.length, 1);
+  assert.equal(rebuilt.body.decisions[0].requestId, 'cli-audit-1');
 });
 
 test('run-cycle-now invokes the authority once and retains its precomputed receipt code', async (t) => {
@@ -248,6 +299,30 @@ test('cards, packs, identities, static controls, and unknown paths preserve thei
   assert.match(page.body, /id="pauseBtn"/);
   assert.match(page.body, /id="manualApprovalBtn"/);
   assert.equal((await server.get('/nope')).status, 404);
+});
+
+test('cards route rejects malformed cursors and serves a valid opaque cursor page', async t => {
+  const server = await buildTestServer(t);
+  const observedAt = '2026-01-01T00:00:00.000Z';
+  server.ctx.sqliteProjection.upsertCard({
+    cycleId: 'cycle-a', packIndex: 0, productId: 'pack-a', rarity: 'rare', nftAddress: null,
+    cardName: null, setName: null, cardNumber: null, imageUrl: null,
+    packPriceMicroUsdg: '1000000', buybackMicroUsdg: null, observedAt,
+  });
+  server.ctx.sqliteProjection.upsertCard({
+    cycleId: 'cycle-b', packIndex: 0, productId: 'pack-b', rarity: 'epic', nftAddress: null,
+    cardName: null, setName: null, cardNumber: null, imageUrl: null,
+    packPriceMicroUsdg: '1000000', buybackMicroUsdg: null, observedAt,
+  });
+  const malformed = await server.get('/operator/api/cards?cursor=2026-01-01T00:00:00.000Z', AUTH);
+  assert.equal(malformed.status, 400);
+  assert.deepEqual(malformed.body, { code: 'CARDS_QUERY_INVALID' });
+  const cursor = encodeCardCursor({ sort: 'recent', value: observedAt, cycleId: 'cycle-b', packIndex: 0 });
+  const page = await server.get(`/operator/api/cards?limit=1&cursor=${encodeURIComponent(cursor)}`, AUTH);
+  assert.equal(page.status, 200);
+  assert.equal(page.body.cards.length, 1);
+  assert.equal(page.body.cards[0].cycleId, 'cycle-a');
+  assert.equal(page.body.historyComplete, false);
 });
 
 test('owner dashboard read projections use the injected authority and expose the configured network', async (t) => {
@@ -291,6 +366,183 @@ test('owner dashboard projects cycles and custody from an authority built with a
   assert.equal(result.body.cycles[0].cycleId, cycleId);
   assert.equal(result.body.custody.buckets[0].cycleId, cycleId);
   assert.equal(result.body.custody.buckets[0].buckets.claimed.amountAtomic, '0');
+});
+
+test('dashboard exposes held positions and manual approvals and forwards native held decisions', async (t) => {
+  const positionId = `held:${'a'.repeat(64)}`;
+  const evidenceDigest = `sha256:${'b'.repeat(64)}`;
+  const cycleDigest = `sha256:${'c'.repeat(64)}`;
+  const executed = [];
+  const server = await buildTestServer(t, {
+    operatorControl: {
+      async status() {
+        return {
+          ...status(0, configuration({ manualApprovalCycles: 1 })),
+          activeCycleId: 'cycle-held',
+          cycles: [],
+          heldPositions: [{
+            positionId,
+            cycleId: 'cycle-held',
+            costMicroUsd: '7',
+            insuredValue: null,
+            reason: 'HELD_UNAVAILABLE',
+            terminalState: 'OPEN',
+            evidenceDigest,
+            openedAtMs: Date.UTC(2026, 0, 1),
+            positionRevision: 0,
+            ownerDecision: null,
+          }],
+          manualApprovals: [{
+            cycleId: 'cycle-held',
+            cycleDigest,
+            mode: 'production',
+            ordinal: 1,
+            releaseCostMicroUsd: '7',
+            openedAtMs: Date.UTC(2026, 0, 1),
+            approved: false,
+            approvedAtMs: null,
+          }],
+        };
+      },
+      async execute(input) {
+        executed.push(input);
+        return { action: input.command.type, revision: 1, configuration: configuration() };
+      },
+    },
+    readLifetimeTotals: async () => ({
+      units: 'micro-usdg',
+      cyclesScanned: 0,
+      terminalCycles: 0,
+      totals: {
+        totalCycleFundingMicroUsdg: null,
+        totalCollectorSpendMicroUsdg: null,
+        totalBuybacksReturnedMicroUsdg: null,
+        totalBridgedBackMicroUsdg: null,
+        totalRewardsPaidMicroUsdg: null,
+        totalRewardsDeferredMicroUsdg: null,
+        totalQuotedOperatingCostsMicroUsdg: null,
+        latestRetainedReserveMicroUsdg: null,
+        latestCycleReserveTargetMicroUsdg: null,
+      },
+      counts: { openedPacks: 0, skippedCycles: 0, completedCycles: 0 },
+      completeness: {
+        totalCycleFundingMicroUsdg: false,
+        totalCollectorSpendMicroUsdg: false,
+        totalBuybacksReturnedMicroUsdg: false,
+        totalBridgedBackMicroUsdg: false,
+        totalRewardsPaidMicroUsdg: false,
+        totalRewardsDeferredMicroUsdg: false,
+        totalQuotedOperatingCostsMicroUsdg: false,
+        latestRetainedReserveMicroUsdg: false,
+        latestCycleReserveTargetMicroUsdg: false,
+        openedPacks: false,
+        skippedCycles: false,
+      },
+      perCycle: [],
+    }),
+    cardHistory: async () => ({ cards: [], complete: true }),
+  });
+  const dashboard = await server.get('/operator/api/dashboard', AUTH);
+  assert.equal(dashboard.status, 200, dashboard.diagnostics);
+  assert.equal(dashboard.body.heldPositions[0].positionId, positionId);
+  assert.equal(dashboard.body.manualApprovals[0].approved, false);
+  assert.equal(dashboard.body.completeness.heldPositions, true);
+  assert.equal(dashboard.body.completeness.manualApprovals, true);
+
+  const decision = await server.post('/operator/api/decisions', {
+    requestId: 'held-route-request',
+    expectedVersion: 0,
+    command: {
+      type: 'held-owner-decision',
+      positionId,
+      heldEvidenceDigest: evidenceDigest,
+      expectedPositionRevision: 0,
+      choice: 'sell',
+    },
+  }, AUTH);
+  assert.equal(decision.status, 200, decision.diagnostics);
+  assert.equal(decision.body.code, 'HELD_OWNER_DECISION_RECORDED');
+  assert.deepEqual(executed[0].command, {
+    type: 'held-owner-decision',
+    positionId,
+    heldEvidenceDigest: evidenceDigest,
+    expectedPositionRevision: 0,
+    choice: 'sell',
+  });
+
+  const approval = await server.post('/operator/api/decisions', {
+    requestId: 'manual-approval-route-request',
+    expectedVersion: 1,
+    command: {
+      type: 'manual-approval',
+      cycleId: 'cycle-held',
+      cycleDigest,
+    },
+  }, AUTH);
+  assert.equal(approval.status, 200, approval.diagnostics);
+  assert.equal(approval.body.code, 'MANUAL_APPROVAL_RECORDED');
+  assert.deepEqual(executed[1].command, {
+    type: 'manual-approval',
+    cycleId: 'cycle-held',
+    cycleDigest,
+  });
+});
+
+test('dashboard preserves unavailable held and manual inventory sources', async (t) => {
+  const server = await buildTestServer(t, {
+    operatorControl: {
+      async status() {
+        return {
+          ...status(0, configuration()),
+          activeCycleId: null,
+          cycles: [],
+          heldPositions: null,
+          manualApprovals: null,
+        };
+      },
+      async execute() {
+        throw new Error('not expected');
+      },
+    },
+    readLifetimeTotals: async () => ({
+      units: 'micro-usdg',
+      cyclesScanned: 0,
+      terminalCycles: 0,
+      totals: {
+        totalCycleFundingMicroUsdg: null,
+        totalCollectorSpendMicroUsdg: null,
+        totalBuybacksReturnedMicroUsdg: null,
+        totalBridgedBackMicroUsdg: null,
+        totalRewardsPaidMicroUsdg: null,
+        totalRewardsDeferredMicroUsdg: null,
+        totalQuotedOperatingCostsMicroUsdg: null,
+        latestRetainedReserveMicroUsdg: null,
+        latestCycleReserveTargetMicroUsdg: null,
+      },
+      counts: { openedPacks: null, skippedCycles: null, completedCycles: 0 },
+      completeness: {
+        totalCycleFundingMicroUsdg: false,
+        totalCollectorSpendMicroUsdg: false,
+        totalBuybacksReturnedMicroUsdg: false,
+        totalBridgedBackMicroUsdg: false,
+        totalRewardsPaidMicroUsdg: false,
+        totalRewardsDeferredMicroUsdg: false,
+        totalQuotedOperatingCostsMicroUsdg: false,
+        latestRetainedReserveMicroUsdg: false,
+        latestCycleReserveTargetMicroUsdg: false,
+        openedPacks: false,
+        skippedCycles: false,
+      },
+      perCycle: [],
+    }),
+    cardHistory: async () => ({ cards: [], complete: true }),
+  });
+  const dashboard = await server.get('/operator/api/dashboard', AUTH);
+  assert.equal(dashboard.status, 200, dashboard.diagnostics);
+  assert.equal(dashboard.body.heldPositions, null);
+  assert.equal(dashboard.body.manualApprovals, null);
+  assert.equal(dashboard.body.completeness.heldPositions, false);
+  assert.equal(dashboard.body.completeness.manualApprovals, false);
 });
 
 test('the dashboard route table has one mutation endpoint', async () => {
@@ -341,6 +593,36 @@ test('a duplicate request writes one pre-effect audit receipt, one terminal rece
   assert.equal(records.length, 2);
   assert.deepEqual(records.map(record => record.commandState), ['PREPARED', 'APPLIED']);
   assert.ok(records.every(record => record.requestId === 'pause-once'));
+});
+
+test('a concurrent identical request observes preparation and later replays the terminal result', async (t) => {
+  const server = await buildTestServer(t);
+  let effectCalls = 0;
+  let releaseEffect;
+  const effectReleased = new Promise(resolve => { releaseEffect = resolve; });
+  server.ctx.operatorControl.execute = async () => {
+    effectCalls += 1;
+    await effectReleased;
+    return { action: 'pause', revision: 1, configuration: configuration({ paused: true, executionPaused: true }) };
+  };
+  const request = { requestId: 'pause-concurrent', expectedVersion: 0, command: { type: 'pause' } };
+  const firstPromise = server.post('/operator/api/decisions', request, AUTH);
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const records = await readAllAuditEntries(server.ctx.auditLogPath);
+    if (records.some(record => record.requestId === request.requestId && record.commandState === 'PREPARED')) break;
+    await new Promise(resolve => setTimeout(resolve, 5));
+  }
+  const concurrent = await server.post('/operator/api/decisions', request, AUTH);
+  assert.equal(concurrent.status, 202);
+  assert.equal(concurrent.body.code, 'COMMAND_PREPARED');
+  assert.equal(concurrent.body.commandState, 'PREPARED');
+  releaseEffect();
+  const first = await firstPromise;
+  assert.equal(first.status, 200);
+  const replay = await server.post('/operator/api/decisions', request, AUTH);
+  assert.equal(replay.status, 200);
+  assert.equal(replay.body.replayed, true);
+  assert.equal(effectCalls, 1);
 });
 
 test('an unresolved command stays uncertain on retry instead of becoming a replayed success', async (t) => {
@@ -420,6 +702,12 @@ test('the HTTP control path records cap-plus-one and stale-revision refusals as 
   assert.equal(stale.status, 409, stale.diagnostics);
   assert.equal(stale.body.code, 'COMMAND_REJECTED');
   assert.equal(stale.body.commandState, 'REJECTED');
+  const staleReplay = await server.post('/operator/api/decisions', {
+    requestId: 'stale-revision', expectedVersion: 1, command: { type: 'pause' },
+  }, AUTH);
+  assert.equal(staleReplay.status, 409, staleReplay.diagnostics);
+  assert.equal(staleReplay.body.commandState, 'REJECTED');
+  assert.equal(staleReplay.body.replayed, true);
   assert.equal((await readOperatorState(statePath)).configuration.paused, false);
   assert.deepEqual(
     (await readAllAuditEntries(server.ctx.auditLogPath)).map(entry => entry.commandState),
@@ -586,3 +874,46 @@ test('authenticated recipient decisions accept all options and reject malformed 
   }
   assert.equal(server.calls.execute.length, count);
 });
+
+test('audit refresh rejects a corrupt prefix even when a valid tail is available', async t => {
+  const server = await buildTestServer(t);
+  const record = async requestId => executeAuditedCommand({
+    path: server.ctx.auditLogPath, requestId, command: { type: 'pause' },
+    actor: { email: 'cli' }, actorRole: 'operator', expectedVersion: 0, observedVersion: 0,
+    effect: async () => ({ action: 'pause' }),
+  });
+  await record('prefix-command');
+  const before = await server.get('/operator/api/audit', AUTH);
+  await record('tail-command');
+  const entries = await readAllAuditEntries(server.ctx.auditLogPath);
+  entries[0].action = 'tampered-prefix';
+  await writeFile(server.ctx.auditLogPath, entries.map(JSON.stringify).join('\n') + '\n');
+  const after = await server.get('/operator/api/audit', AUTH);
+  assert.equal(after.status, 200);
+  assert.deepEqual(after.body.decisions, before.body.decisions);
+  assert.equal(server.calls.errors.at(-1).operation, 'operator-audit-sync');
+  await assert.rejects(readAuditEntriesAfter(server.ctx.auditLogPath, 2), /hash mismatch/);
+});
+
+for (const replacementCount of [1, 2]) {
+  test(`audit refresh atomically replaces a valid ${replacementCount === 1 ? 'equal-length' : 'longer'} log`, async t => {
+    const server = await buildTestServer(t);
+    const record = async (path, requestId) => executeAuditedCommand({
+      path, requestId, command: { type: 'pause' },
+      actor: { email: 'cli' }, actorRole: 'operator', expectedVersion: 0, observedVersion: 0,
+      effect: async () => ({ action: 'pause' }),
+    });
+    await record(server.ctx.auditLogPath, 'old-command');
+    await server.get('/operator/api/audit', AUTH);
+    const replacementPath = `${server.ctx.auditLogPath}.replacement`;
+    for (let index = 0; index < replacementCount; index += 1) {
+      await record(replacementPath, `replacement-${index}`);
+    }
+    await writeFile(server.ctx.auditLogPath, await readFile(replacementPath));
+    const response = await server.get('/operator/api/audit', AUTH);
+    assert.equal(response.status, 200);
+    assert.equal(response.body.decisions.length, replacementCount * 2);
+    assert.ok(response.body.decisions.every(entry => entry.requestId.startsWith('replacement-')));
+    assert.equal(server.calls.errors.length, 0);
+  });
+}

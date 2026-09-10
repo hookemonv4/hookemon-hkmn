@@ -100,6 +100,19 @@ async function readAuthorityProjection(ctx) {
   const heldPositions = projectPublicHeldPositions(authorityStatus.heldPositions, cycles, generatedAt);
   const terminals = cycles.filter(cycle => typeof cycle?.terminalState === 'string');
   const completedCycles = terminals.filter(cycle => cycle.terminalState === 'COMPLETE' || cycle.terminalState === 'COMPLETED').length;
+  let lifetimeTotals = null;
+  if (typeof ctx.readLifetimeTotals === 'function') {
+    try {
+      lifetimeTotals = await ctx.readLifetimeTotals();
+    } catch (error) {
+      ctx.onError?.('lifetime-totals', error);
+    }
+  }
+  const paidOut = lifetimeTotals?.perCycle
+    ? lifetimeTotals.perCycle.filter(cycle => cycle.terminalState !== null
+      && (typeof cycle.accounting?.paidHolderRewardsMicroUsdg === 'string'
+        || typeof cycle.accounting?.paidHolderRewardsWei === 'string')).length
+    : null;
 
   return {
     authorityStatus,
@@ -110,8 +123,8 @@ async function readAuthorityProjection(ctx) {
       intervalMinutes: configuration?.intervalMinutes ?? null,
       nextRunAt: readNextCycleAt(ctx),
       activeCycle: current ? { cycleId: current.cycleId, stage: activeStage(current), accounting } : null,
-      lastPayout: null,
-      totals: { paidOut: completedCycles },
+      lastPayout: lifetimeTotals?.latestCycle ?? null,
+      totals: { paidOut },
       heldPositions,
     },
     // Every terminal cycle is passed through; buildPublicCommunitySnapshot itself decides whether
@@ -119,6 +132,7 @@ async function readAuthorityProjection(ctx) {
     terminalCycles: terminals,
     completedCycles,
     heldPositions,
+    lifetimeTotals,
   };
 }
 
@@ -177,9 +191,9 @@ export function createCommunityDashboardHandler(ctx) {
         generatedAt: projection.internalStatus.generatedAt,
         nextCycleAt: projection.internalStatus.nextRunAt,
         completedCycles: projection.completedCycles,
-        // Not tracked anywhere in this integration head — honestly null, never a fabricated 0.
-        skippedCycles: null,
-        openedPacks: null,
+        skippedCycles: projection.lifetimeTotals?.counts?.skippedCycles ?? null,
+        openedPacks: projection.lifetimeTotals?.counts?.openedPacks ?? null,
+        lifetimeTotals: projection.lifetimeTotals,
         heldPositions: projection.heldPositions,
         readAccounting: ctx.readAccounting ? cycleId => ctx.readAccounting(cycleId) : null,
         recentWinners,

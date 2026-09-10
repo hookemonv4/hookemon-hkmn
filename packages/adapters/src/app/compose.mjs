@@ -42,6 +42,7 @@ import {
   loadCollectorProductionBindingRegistry,
 } from '../signing/collector-production-binding.mjs';
 import { buildDurableCardFeed } from '../collector/durable-card-feed.mjs';
+import { buildDurableCardHistory } from '../collector/durable-card-history.mjs';
 import { createRecentWinnersCollector } from '../collector/recent-winners.mjs';
 import {
   assertCycleRepositoryInterface,
@@ -54,6 +55,8 @@ import { createCycleAttributableFinalizedAvailableReader } from './payout-availa
 import { createObservability } from './observability.mjs';
 import { createStageDriver } from './stage-driver.mjs';
 import { projectCycleAccounting, projectPolicyCustody } from './accounting-projection.mjs';
+import { projectLifetimeTotals } from './lifetime-projection.mjs';
+import { createActivationReadiness } from './activation-readiness.mjs';
 import { MoneyConfigurationRejected, validateMoneyConfiguration } from './environment.mjs';
 import { createSupplementaryBuybackHandler } from './stages/supplementary-buyback.mjs';
 import {
@@ -66,6 +69,7 @@ export { validateMoneyConfiguration } from './environment.mjs';
 
 const decimalPattern = /^(0|[1-9][0-9]*)$/;
 const solanaGenesisHashPattern = /^[1-9A-HJ-NP-Za-km-z]{32,88}$/;
+const RECENT_WINNERS_CYCLE_SCAN_LIMIT = 50;
 
 function assertDecimal(value, label) {
   if (typeof value !== 'string' || !decimalPattern.test(value)) throw new Error(`${label} must be a canonical unsigned decimal string`);
@@ -241,7 +245,21 @@ function buildDashboardIdentities(config) {
   });
 }
 
-async function composeDashboard({ dashboardConfig, chainId, operationsAddress, cycleRepository, operatorControl, readLastTick, adapters, identities, getSchedulerView, listRecentWinners }) {
+async function composeDashboard({
+  dashboardConfig,
+  chainId,
+  operationsAddress,
+  cycleRepository,
+  operatorControl,
+  readLastTick,
+  adapters,
+  identities,
+  getSchedulerView,
+  listRecentWinners,
+  readCatalog,
+  readReadiness,
+  now,
+}) {
   const auditVerification = await verifyAuditChain(dashboardConfig.auditLogPath);
   if (!auditVerification.valid) {
     throw new Error(`compose dashboard audit chain is invalid at sequence ${auditVerification.brokenAtSequence}: ${auditVerification.reason}`);
@@ -271,6 +289,8 @@ async function composeDashboard({ dashboardConfig, chainId, operationsAddress, c
     listPacks: adapters.collectorCrypt
       ? async () => adapters.collectorCrypt.getMachines()
       : null,
+    readCatalog,
+    readReadiness,
     identities,
     // Real per-cycle accounting (routes/public.mjs's `ctx.readAccounting` seam, threaded through
     // status-projection.mjs's own `readAccounting` parameter) — see accounting-projection.mjs's own
@@ -281,9 +301,44 @@ async function composeDashboard({ dashboardConfig, chainId, operationsAddress, c
         operationsAddress,
       } });
     },
+    async readLifetimeTotals() {
+      const cycleIds = await cycleRepository.listKnownCycleIds();
+      return projectLifetimeTotals({
+        cycleRepository,
+        cycleIds,
+        readAccounting: cycleId => ctx.readAccounting(cycleId),
+      });
+    },
+    async cardHistory({ limit } = {}) {
+      const cycleIds = await cycleRepository.listKnownCycleIds();
+      return {
+        cards: await listRecentWinners({ limit }),
+        complete: cycleIds.length <= RECENT_WINNERS_CYCLE_SCAN_LIMIT,
+      };
+    },
+    async readCycleAllocations(cycleId) {
+      if (typeof cycleRepository.readPagedPayoutState !== 'function') return null;
+      const state = await cycleRepository.readPagedPayoutState(cycleId, 'payout');
+      if (!state || !Array.isArray(state.recipients)) return null;
+      return state.recipients
+        .map((entry, index) => {
+          const amount = entry?.amount?.amountAtomic ?? entry?.amount?.units ?? entry?.amountAtomic;
+          const address = entry?.recipient ?? entry?.address;
+          if (typeof address !== 'string' || typeof amount !== 'string' || !/^(0|[1-9][0-9]*)$/.test(amount)) return null;
+          const native = entry?.amount?.assetId === 'native' && String(entry?.amount?.chainId) === '4663'
+            && entry?.amount?.decimals === 18;
+          return {
+            rank: index + 1,
+            address: address.toLowerCase(),
+            ...(native ? { allocatedWei: amount } : { allocatedMicroUsdg: amount }),
+          };
+        })
+        .filter(Boolean);
+    },
     // Public-Integration-interface.md binding 2: the frozen SchedulerView, read synchronously off
     // the real running scheduler — never wrapped in a Promise, never a second timer's guess.
     getSchedulerView,
+    now,
     // Public-Integration-interface.md binding 3: real recently-revealed cards, deduplicated and
     // attributed to this project's own known operations, never a second source of financial truth.
     listRecentWinners,
@@ -299,6 +354,7 @@ async function composeDashboard({ dashboardConfig, chainId, operationsAddress, c
 
   return {
     ctx,
+    sqliteProjection,
     port: dashboardConfig.port,
     listener: createRequestListener(ctx),
     async close() {
@@ -1808,6 +1864,7 @@ export async function compose(config) {
   // guessed or cached independently. Updated on every tick outcome, not only a successful one, since
   // "when does the next tick happen" is meaningful even after a failed one.
   let lastTick = null;
+  let dashboard = null;
   const scheduler = createScheduler({
     statePath: resolved.statePath,
     now,
@@ -1815,6 +1872,16 @@ export async function compose(config) {
     buildWorker: ({ liveMode }) => buildAutomatedCycleService(liveMode, liveMode ? 'production' : 'rehearsal'),
     onTick(event) {
       lastTick = { at: event.at, intervalMs: event.intervalMs };
+      const cycleIds = [
+        event.result?.cycleId,
+      ].filter(value => typeof value === 'string');
+      void refreshCardHistory({ cycleIds }).catch(error => {
+        if (dashboard?.ctx?.onError) dashboard.ctx.onError('card-history-refresh', error);
+        else {
+          // eslint-disable-next-line no-console -- composition has no injected logger.
+          console.error('[dashboard] card-history refresh failed:', error);
+        }
+      });
       resolved.onTick?.(event);
     },
   });
@@ -1877,7 +1944,6 @@ export async function compose(config) {
   // Bounded to the most recently known cycles: `listKnownCycleIds()` returns every cycle a store has
   // ever held (archived cycles first, then active), unbounded over a long production lifetime, and
   // this feed only ever needs to show the newest cards.
-  const RECENT_WINNERS_CYCLE_SCAN_LIMIT = 50;
   async function listRecentWinners({ limit } = {}) {
     const knownCycleIds = await cycleRepository.listKnownCycleIds();
     const scannedCycleIds = knownCycleIds.slice(-RECENT_WINNERS_CYCLE_SCAN_LIMIT);
@@ -1907,7 +1973,54 @@ export async function compose(config) {
     return collector.list({ limit });
   }
 
-  const dashboard = dashboardConfig
+  async function refreshCardHistory({ cycleIds = undefined } = {}) {
+    if (dashboard === null) return;
+    const known = await cycleRepository.listKnownCycleIds();
+    const selected = cycleIds === undefined
+      ? known
+      : [...new Set([...cycleIds, ...known.slice(-2)])];
+    const rows = [];
+    for (const cycleId of selected) {
+      const batch = await cycleRepository.readPackBatchRequest(cycleId, 'purchase');
+      if (batch === null) continue;
+      const built = buildDurableCardHistory({
+        cycleId,
+        packBatchRequestPacks: batch.packs,
+        purchaseRequestedAtMs: batch.requestedAtMs,
+        stages: {
+          purchase: await cycleRepository.readStage(cycleId, 'purchase'),
+          open: await cycleRepository.readStage(cycleId, 'open'),
+          epicGate: await cycleRepository.readStage(cycleId, 'epic-gate'),
+          buyback: await cycleRepository.readStage(cycleId, 'buyback'),
+        },
+      });
+      rows.push(...built.cards);
+    }
+    dashboard.sqliteProjection.upsertCards(rows);
+  }
+
+  const activationLiveMode = resolved.execution.profile === 'production'
+    ? !resolved.execution.dryRun
+    : resolved.execution.profile === 'rehearsal'
+      ? resolved.execution.providerMode === 'live'
+      : false;
+  const activationMode = resolved.execution.profile === 'production'
+    ? 'production'
+    : resolved.execution.profile === 'rehearsal'
+      ? 'rehearsal'
+      : resolved.execution.dryRun ? 'production' : 'rehearsal';
+  const activationReadiness = createActivationReadiness({
+    collectorClient: adapters.collectorCrypt ?? null,
+    assertStartReadiness: options => assertStartReadiness(options),
+    readinessOptions: {
+      liveMode: activationLiveMode,
+      mode: activationMode,
+      requirePolicyConfiguration: true,
+      requireCanaryPreflight: activationLiveMode,
+    },
+  });
+
+  dashboard = dashboardConfig
     ? await composeDashboard({
       dashboardConfig,
       chainId: resolved.chainId,
@@ -1919,8 +2032,16 @@ export async function compose(config) {
       adapters,
       identities: buildDashboardIdentities(resolved),
       operationsAddress: resolved.accounts.evm,
+      now,
+      readCatalog: activationReadiness.readCatalog,
+      readReadiness: activationReadiness.readReadiness,
     })
     : null;
+  if (dashboard !== null) {
+    dashboard.refreshCardHistory = refreshCardHistory;
+    dashboard.sqliteProjection.clearCards();
+    await refreshCardHistory();
+  }
 
   return {
     scheduler,
@@ -1930,6 +2051,7 @@ export async function compose(config) {
     operatorControl,
     executeAudited,
     dashboard,
+    refreshCardHistory,
     policyEngine,
     // WP-39: the real, composed adapter clients — exposed read-only for a one-off caller (e.g.
     // `bin/hookemon-runner.mjs`'s `accept-degraded-return`) that needs a live adapter without

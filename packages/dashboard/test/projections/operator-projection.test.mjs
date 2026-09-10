@@ -95,6 +95,109 @@ test('dashboard contract continues to accept the prior cap-only response shape',
   assert.equal(assertDashboardResponse(legacy).schemaVersion, 5);
 });
 
+test('schema 8 projects native lifetime metrics and allocations without historical aliases', () => {
+  const dashboard = buildDashboardReadModel({
+    authorityStatus: {
+      revision: 3,
+      configuration: null,
+      activeCycleId: null,
+      cycles: [{ cycleId: 'native-cycle', terminalState: 'COMPLETED', terminalAtMs: 1_000 }],
+      cap: { offChain24Hour: null, onChainRemainingCapacity: null },
+      custody: { buckets: [] },
+      alerts: [],
+    },
+    lifetimeTotals: {
+      units: 'wei',
+      cyclesScanned: 1,
+      terminalCycles: 1,
+      totals: {
+        totalCycleFundingWei: '100',
+        totalBridgedBackWei: '80',
+        totalRewardsPaidWei: '70',
+        totalRewardsDeferredWei: '10',
+        totalCollectorSpendMicroUsd: null,
+        totalBuybacksReturnedMicroUsd: null,
+        totalQuotedOperatingCostsMicroUsd: null,
+        latestRetainedReserveWei: null,
+        latestCycleReserveTargetWei: null,
+      },
+      counts: { openedPacks: 1, skippedCycles: 0, completedCycles: 1 },
+      completeness: {
+        totalCycleFundingWei: true,
+        totalBridgedBackWei: true,
+        totalRewardsPaidWei: true,
+        totalRewardsDeferredWei: true,
+        totalCollectorSpendMicroUsd: false,
+        totalBuybacksReturnedMicroUsd: false,
+        totalQuotedOperatingCostsMicroUsd: false,
+        latestRetainedReserveWei: false,
+        latestCycleReserveTargetWei: false,
+        openedPacks: true,
+        skippedCycles: true,
+      },
+      latestCycle: {
+        cycleId: 'native-cycle',
+        terminalState: 'COMPLETED',
+        terminalAtMs: 1_000,
+        paidWei: '70',
+        accounting: {
+          schema: 'hookemon.native-round-accounting.v1',
+          releaseAmount: { chainId: '4663', assetId: 'native', decimals: 18, units: '100' },
+        },
+      },
+      perCycle: [],
+    },
+    cardHistory: { cards: [], complete: true },
+    latestCycleAllocations: [
+      { rank: 1, address: '0xabc', allocatedWei: '70' },
+    ],
+    lastTick: { at: 1_000, intervalMs: 20 },
+    now: () => 1_000,
+  });
+
+  assert.equal(dashboard.schemaVersion, 8);
+  assert.equal(dashboard.metrics.totalCycleFundingWei, '100');
+  assert.equal(dashboard.metrics.totalRewardsPaidWei, '70');
+  assert.equal(Object.hasOwn(dashboard.metrics, 'totalCycleFundingMicroUsdg'), false);
+  assert.equal(dashboard.latestCycle.paidWei, '70');
+  assert.equal(Object.hasOwn(dashboard.latestCycle, 'paidMicroUsdg'), false);
+  assert.equal(dashboard.latestCycleTopAllocations[0].allocatedWei, '70');
+  assertDashboardResponse(dashboard);
+
+  dashboard.heldPositions = null;
+  dashboard.manualApprovals = null;
+  dashboard.completeness.heldPositions = false;
+  dashboard.completeness.manualApprovals = false;
+  assertDashboardResponse(dashboard);
+
+  const positionId = `held:${'a'.repeat(64)}`;
+  dashboard.heldPositions = [{
+    positionId,
+    cycleId: 'native-cycle',
+    costMicroUsd: '7',
+    insuredValue: { chainId: '4663', assetId: 'native', decimals: 18, units: '9' },
+    reason: 'HELD_UNAVAILABLE',
+    terminalState: 'OPEN',
+    evidenceDigest: `sha256:${'b'.repeat(64)}`,
+    openedAt: new Date(1_000).toISOString(),
+    positionRevision: 0,
+    ownerDecision: null,
+  }];
+  dashboard.manualApprovals = [{
+    cycleId: 'native-cycle',
+    cycleDigest: `sha256:${'c'.repeat(64)}`,
+    mode: 'production',
+    ordinal: 1,
+    releaseCostMicroUsd: '7',
+    openedAt: new Date(1_000).toISOString(),
+    approved: false,
+    approvedAt: null,
+  }];
+  dashboard.completeness.heldPositions = true;
+  dashboard.completeness.manualApprovals = true;
+  assertDashboardResponse(dashboard);
+});
+
 
 test('bootstrap exposes the exact stored plan and deliberately accepts legacy payloads without one', () => {
   const packPlan = { schema: 'hookemon.pack-plan.v1', revision: 4, orders: [{ pack: 'base-pack', quantity: 3 }] };
@@ -121,4 +224,27 @@ test('saved recipient setting never replaces an active cycle frozen or historic 
   const historic = buildDashboardReadModel({ authorityStatus, now: () => 0 });
   assert.equal(historic.activeCycle.rewardRecipientLimit, null);
   assert.equal(historic.activeCycle.configurationRevision, null);
+});
+
+test('the first active native cycle is visible before terminal accounting exists', () => {
+  const dashboard = buildDashboardReadModel({
+    authorityStatus: {
+      revision: 3, configuration: null, activeCycleId: 'first-native-cycle',
+      cycles: [{ cycleId: 'first-native-cycle', terminalState: null,
+        stages: [{ stage: 'purchase', status: 'PREPARED' }], payout: null }],
+      heldPositions: [], manualApprovals: [],
+      cap: { offChain24Hour: null, onChainRemainingCapacity: null },
+      custody: { buckets: [] }, alerts: [],
+    },
+    cardHistory: { cards: [], complete: true },
+    now: () => Date.UTC(2026, 0, 1),
+  });
+  dashboard.completeness.cyclesScanned = 1;
+  assert.equal(dashboard.latestCycle, null);
+  assert.equal(dashboard.schemaVersion, 8);
+  assert.equal(assertDashboardResponse(dashboard).activeCycle.cycleId, 'first-native-cycle');
+  assert.ok(Object.hasOwn(dashboard.activeCycle, 'maxCycleBudgetMicroUsd'));
+  const mixed = structuredClone(dashboard);
+  mixed.activeCycle.maxCycleBudgetMicroUsdg = '5';
+  assert.throws(() => assertDashboardResponse(mixed), /OPERATOR_CONTRACT_INVALID/);
 });

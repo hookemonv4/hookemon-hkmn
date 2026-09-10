@@ -7,6 +7,7 @@ import { productionMoneyConfiguration } from '../../../runner/test/cycle/product
 import { execFile, spawn } from 'node:child_process';
 import { createHash, generateKeyPairSync, randomBytes, randomUUID, sign as signMessage } from 'node:crypto';
 import { cp, mkdir, mkdtemp, readdir, readFile, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises';
+import { createServer as createHttpServer } from 'node:http';
 import { createServer, request as httpsRequest } from 'node:https';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -33,6 +34,8 @@ import { CycleRepository } from '../../src/app/cycle-repository.mjs';
 import { buildClaimProcessCall } from '../../src/hook-contract-client.mjs';
 import { deriveOnchainCycleId } from '../../src/app/stages/action-builder.mjs';
 import { compose } from '../../src/app/compose.mjs';
+import { createRequestListener } from '../../../dashboard/src/server.mjs';
+import { normalizePublicCommunitySnapshot } from '../../../dashboard/src/contracts/public-community-snapshot.mjs';
 import { assertPayoutManifestUnchanged } from '../../src/app/stages/payout.mjs';
 import { supplementaryPayoutStageId } from '../../src/app/stages/supplementary-payout.mjs';
 import { attachOwnerSignature, buildCanonicalStandingAuthorityDocument } from '../../src/signing/standing-authority.mjs';
@@ -3624,7 +3627,13 @@ test('N=2 composed offline scenario: real compose(config) drives purchase throug
   // durable state survives a fresh handle open -- not a real cross-process CLI restart, which
   // remains the separately required literal-CLI proof this checkpoint does not substitute for.
   const composition = await compose(config);
-  t.after(() => composition.shutdown());
+  let compositionShutdown = false;
+  t.after(async () => {
+    if (!compositionShutdown) {
+      compositionShutdown = true;
+      await composition.shutdown();
+    }
+  });
 
   let tickError = null;
   try {
@@ -3931,6 +3940,80 @@ test('N=2 composed offline scenario: real compose(config) drives purchase throug
     canonicalJson([...cycleAfterSecondTick.custodyLedgers.entries()]), canonicalJson([...cycle.custodyLedgers.entries()]),
     `custody ledgers must stay byte-identical after the second tick -- no duplicate write of any kind; ${diagnostics()}`,
   );
+
+  // The production graph above is the native 4663/native/18 path. Reopen it through a fresh
+  // composed dashboard after terminal closure so every public/private projection is checked against
+  // the same durable evidence, rather than against a synthetic dashboard fixture.
+  await composition.shutdown();
+  compositionShutdown = true;
+  const dashboardComposition = await compose({
+    ...config,
+    dashboard: {
+      profileId: 'mainnet',
+      proxyCredential: 'd'.repeat(40),
+      port: 8787,
+      sqlitePath: ':memory:',
+      auditLogPath: join(directory, 'dashboard-audit.log'),
+    },
+  });
+  const dashboardServer = createHttpServer(createRequestListener(dashboardComposition.dashboard.ctx));
+  await new Promise(resolve => dashboardServer.listen(0, resolve));
+  const dashboardPort = dashboardServer.address().port;
+  const dashboardGet = async (path, headers = {}) => {
+    const response = await fetch(`http://127.0.0.1:${dashboardPort}${path}`, { headers, keepalive: false });
+    return { status: response.status, body: await response.json() };
+  };
+  t.after(async () => {
+    dashboardServer.closeAllConnections();
+    await new Promise(resolve => dashboardServer.close(resolve));
+    await dashboardComposition.shutdown();
+  });
+
+  const dashboardCredential = { 'x-hookemon-proxy-credential': 'd'.repeat(40) };
+  const [community, cycleStatus, cycleHistory, operatorDashboard] = await Promise.all([
+    dashboardGet('/public/api/community-dashboard'),
+    dashboardGet('/public/api/cycle-status'),
+    dashboardGet('/public/api/cycle-history?limit=5'),
+    dashboardGet('/operator/api/dashboard', dashboardCredential),
+  ]);
+  assert.strictEqual(community.status, 200);
+  assert.strictEqual(cycleStatus.status, 200);
+  assert.strictEqual(cycleHistory.status, 200);
+  assert.strictEqual(operatorDashboard.status, 200);
+
+  const openEvidence = await repositoryAfterSecondTick.readStage(cycleId, 'open');
+  const openedPacks = openEvidence.evidence.packs
+    .filter(pack => pack.decision === 'opened').length;
+  assert.ok(openedPacks > 0);
+  const nativeAccounting = await dashboardComposition.dashboard.ctx.readAccounting(cycleId);
+  assert.strictEqual(nativeAccounting.schema, 'hookemon.native-round-accounting.v1');
+  assert.match(nativeAccounting.releaseAmount.units, /^(0|[1-9][0-9]*)$/);
+  assert.match(nativeAccounting.inboundBridgeProceeds.units, /^(0|[1-9][0-9]*)$/);
+  assert.match(nativeAccounting.paidHolderRewardsWei, /^(0|[1-9][0-9]*)$/);
+  assert.match(nativeAccounting.payoutLiabilityWei, /^(0|[1-9][0-9]*)$/);
+
+  assert.strictEqual(community.body.schemaVersion, 9);
+  normalizePublicCommunitySnapshot(community.body, 'mainnet');
+  assert.strictEqual(community.body.metrics.totalCycleFundingWei, nativeAccounting.releaseAmount.units);
+  assert.strictEqual(community.body.metrics.totalBridgedBackWei, nativeAccounting.inboundBridgeProceeds.units);
+  assert.strictEqual(community.body.metrics.totalRewardsPaidWei, nativeAccounting.paidHolderRewardsWei);
+  assert.strictEqual(community.body.metrics.totalRewardsDeferredWei, nativeAccounting.payoutLiabilityWei);
+  assert.strictEqual(community.body.metrics.openedPacks, openedPacks);
+  assert.strictEqual(community.body.latestCycle.paidWei, nativeAccounting.paidHolderRewardsWei);
+
+  assert.strictEqual(operatorDashboard.body.schemaVersion, 8);
+  assert.strictEqual(operatorDashboard.body.metrics.totalCycleFundingWei, nativeAccounting.releaseAmount.units);
+  assert.strictEqual(operatorDashboard.body.metrics.totalBridgedBackWei, nativeAccounting.inboundBridgeProceeds.units);
+  assert.strictEqual(operatorDashboard.body.metrics.totalRewardsPaidWei, nativeAccounting.paidHolderRewardsWei);
+  assert.strictEqual(operatorDashboard.body.metrics.totalRewardsDeferredWei, nativeAccounting.payoutLiabilityWei);
+  assert.strictEqual(operatorDashboard.body.metrics.openedPacks, openedPacks);
+  assert.strictEqual(operatorDashboard.body.completeness.totalRewardsPaidWei, true);
+  assert.strictEqual(operatorDashboard.body.completeness.totalCollectorSpendMicroUsd, false);
+  assert.strictEqual(operatorDashboard.body.latestCycle.paidWei, nativeAccounting.paidHolderRewardsWei);
+  assert.ok(operatorDashboard.body.latestCycleTopAllocations.length > 0);
+  const allocatedWei = operatorDashboard.body.latestCycleTopAllocations
+    .reduce((total, allocation) => total + BigInt(allocation.allocatedWei), 0n);
+  assert.ok(allocatedWei <= BigInt(nativeAccounting.paidHolderRewardsWei));
 
   // Later held-card sale: provider availability for pack 1's own held card genuinely changes (its
   // own `getBuybackAvailable` now reports `available: true`), the operator records a real

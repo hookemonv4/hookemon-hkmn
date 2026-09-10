@@ -184,6 +184,7 @@ export const CYCLE_REPOSITORY_CLIENT_INTERFACE = Object.freeze([
   'listKnownCycleIds',
   'readOutboundQuoteRefresh',
   'readFinalizedClaimCustodyEvidence',
+  'readPagedPayoutState',
 ]);
 
 export const CYCLE_REPOSITORY_INTERFACE = Object.freeze([
@@ -3111,10 +3112,15 @@ function heldPositionOwnerDecisionTransition(position, decision) {
       if (canonicalJson(existing) === canonicalJson(decision)) return { position, decision: existing };
       throw new Error('cycle-repository recordHeldOwnerDecision: requestId conflict');
     }
-    if (existing.choice === 'keep-holding' && decision.choice === 'keep-holding') {
+    if (existing.choice === decision.choice
+      && existing.heldEvidenceDigest === decision.heldEvidenceDigest
+      && decision.expectedRevision === position.positionRevision) {
       return { position, decision: existing };
     }
     if (existing.choice === 'sell') {
+      if (decision.expectedRevision !== position.positionRevision) {
+        throw new Error('cycle-repository recordHeldOwnerDecision: stale position revision');
+      }
       throw new Error('cycle-repository recordHeldOwnerDecision: held position already has a sell decision');
     }
   }

@@ -83,7 +83,7 @@ test("keeps operator commands auditable, concurrency-safe and execution-free", a
   assert.match(source, /configurationSnapshotFromForm/);
   assert.match(source, /commandConfirmation/);
   assert.match(source, /Ungespeicherte Änderungen werden für diesen Befehl nicht verwendet/);
-  assert.match(source, /replaceForm:\s*command\.type === "update-configuration"/);
+  assert.match(source, /replaceForm:\s*envelope\.command\.type === "update-configuration"/);
   assert.match(source, /\/operator\/api\/audit\?[^"'`]*cursor/);
   assert.doesNotMatch(
     source,

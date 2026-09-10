@@ -3,7 +3,7 @@ import test from 'node:test';
 import { readDashboardProfile } from '../lib/public-dashboard-profile.ts';
 import { normalizePublicCycleStatus } from '../lib/public-cycle-status.ts';
 import { normalizePublicCommunitySnapshot } from '../lib/public-community-snapshot.ts';
-import { dashboardTiming, formatMicroUsdg, historyPresentation, humanizeSchedulerReason, latestPayout, normalizePublicCycleHistory, payoutPresentation, presentCard, processStep, safeCardImage, validateDashboardPair } from '../public/comic-production/dashboard.mjs';
+import { dashboardTiming, formatMicroUsdg, historyPresentation, historyRefreshDecision, humanizeSchedulerReason, latestPayout, normalizePublicCycleHistory, payoutPresentation, presentCard, processStep, safeCardImage, validateDashboardPair } from '../public/comic-production/dashboard.mjs';
 
 const generatedAt = '2026-09-04T12:00:00.000Z';
 const nextCycleAt = '2026-09-04T12:20:00.000Z';
@@ -37,6 +37,49 @@ function completeCycle() {
     returnedMicroUsdg: '1200000', rewardStatus: 'complete', roundAccounting: null, paidMicroUsdg: '1000000',
   };
 }
+
+function refreshCommunity(overrides = {}) {
+  return {
+    metrics: { completedCycles: 1, skippedCycles: 0 },
+    historyComplete: true,
+    latestCycle: { cycleId: 'cycle-1' },
+    ...overrides,
+  };
+}
+
+test('history refresh reloads only for completion changes or a pending retry', () => {
+  const first = historyRefreshDecision({
+    previousFingerprint: null, community: refreshCommunity(), retryPending: false,
+  });
+  assert.equal(first.reload, false);
+  const unchanged = historyRefreshDecision({
+    previousFingerprint: first.fingerprint, community: refreshCommunity(), retryPending: false,
+  });
+  assert.equal(unchanged.reload, false);
+  const retried = historyRefreshDecision({
+    previousFingerprint: first.fingerprint, community: refreshCommunity(), retryPending: true,
+  });
+  assert.equal(retried.reload, true);
+  const completed = historyRefreshDecision({
+    previousFingerprint: first.fingerprint,
+    community: refreshCommunity({ metrics: { completedCycles: 2, skippedCycles: 0 } }),
+    retryPending: false,
+  });
+  assert.equal(completed.reload, true);
+});
+
+test('history refresh fingerprint ignores active-cycle status changes', () => {
+  const first = historyRefreshDecision({
+    previousFingerprint: null, community: refreshCommunity(), retryPending: false,
+  });
+  const changedStatus = historyRefreshDecision({
+    previousFingerprint: first.fingerprint,
+    community: refreshCommunity({ latestCycle: { cycleId: 'cycle-1', status: 'pending' } }),
+    retryPending: false,
+  });
+  assert.equal(changedStatus.reload, false);
+  assert.equal(changedStatus.fingerprint, first.fingerprint);
+});
 
 test('browser dashboard accepts canonical server output and keeps nullable observations intact', () => {
   const pair = fixture();

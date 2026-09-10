@@ -27,7 +27,10 @@ export type ActiveCycle = {
   maxUnitPriceMicroUsdg: string | null;
   maxCycleBudgetMicroUsdg: string | null;
   max24HourBudgetMicroUsdg: string | null;
-  revealedCards: number;
+  maxUnitPriceMicroUsd?: string | null;
+  maxCycleBudgetMicroUsd?: string | null;
+  max24HourBudgetMicroUsd?: string | null;
+  revealedCards: number | null;
   rewardRecipientLimit?: number | null;
 };
 
@@ -46,4 +49,34 @@ export type CardHistoryResponse = {
   cards: CardHistoryCard[];
   nextCursor: string | null;
   historyComplete: boolean;
+};
+
+export type HeldPosition = {
+  positionId: string;
+  cycleId: string;
+  costMicroUsd: string;
+  insuredValue: { chainId: string; assetId: string; decimals: number; units: string } | null;
+  reason: string;
+  terminalState: string;
+  evidenceDigest: string;
+  openedAt: string;
+  positionRevision: number;
+  ownerDecision: {
+    positionId: string;
+    heldEvidenceDigest: string;
+    requestId: string;
+    expectedRevision: number;
+    choice: "sell" | "keep-holding";
+  } | null;
+};
+
+export type ManualApproval = {
+  cycleId: string;
+  cycleDigest: string;
+  mode: "production" | "rehearsal";
+  ordinal: number;
+  releaseCostMicroUsd: string;
+  openedAt: string;
+  approved: boolean;
+  approvedAt: string | null;
 };

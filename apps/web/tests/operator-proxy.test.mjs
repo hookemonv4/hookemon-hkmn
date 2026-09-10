@@ -60,7 +60,7 @@ test("routes only approved operator requests to the isolated HTTPS control servi
   const cases = [
     ["/operator/api/bootstrap", "GET"],
     ["/operator/api/dashboard", "GET"],
-    ["/operator/api/cards?limit=25&sort=recent&productId=pokemon_25", "GET"],
+    ["/operator/api/cards?limit=25&sort=recent&productId=pokemon_25&cursor=-_", "GET"],
     ["/operator/api/audit?cursor=9&limit=2", "GET"],
     ["/operator/api/decisions", "POST"],
   ];
@@ -154,6 +154,7 @@ test("rejects unauthenticated, malformed and excessive requests before external 
     [operatorRequest("/operator/api/cards?limit=1&limit=2"), 400, "OPERATOR_QUERY_INVALID"],
     [operatorRequest("/operator/api/cards?limit=51"), 400, "OPERATOR_QUERY_INVALID"],
     [operatorRequest("/operator/api/cards?sort=popular"), 400, "OPERATOR_QUERY_INVALID"],
+    [operatorRequest("/operator/api/cards?cursor=2026-01-01T00:00:00.000Z"), 400, "OPERATOR_QUERY_INVALID"],
     [operatorRequest("/operator/api/cards?minBuybackMicroUsdg=1.5"), 400, "OPERATOR_QUERY_INVALID"],
     [operatorRequest("/operator/api/cards?from=2026-08-25"), 400, "OPERATOR_QUERY_INVALID"],
     [operatorRequest(`/operator/api/cards?cursor=${"x".repeat(513)}`), 400, "OPERATOR_QUERY_INVALID"],

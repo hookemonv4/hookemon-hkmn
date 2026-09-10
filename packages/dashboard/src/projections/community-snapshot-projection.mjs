@@ -65,6 +65,7 @@ const repositoryTerminalStatus = Object.freeze({
  *   `createRecentWinnersCollector().list()` output) — real observations only, never fabricated.
  *   Passed straight through as `cards`, newest-first, bounded to the contract's own card limit.
  *   Omitted, `cards` stays `[]`, exactly as before this parameter existed.
+ * @param {object|null} [input.lifetimeTotals] - complete-or-null lifetime accounting projection.
  * @returns {Promise<object>} a `PublicCommunitySnapshot` (schemaVersion 8), already validated.
  */
 export async function buildPublicCommunitySnapshot({
@@ -78,13 +79,38 @@ export async function buildPublicCommunitySnapshot({
   readAccounting = null,
   heldPositions = [],
   recentWinners = [],
+  lifetimeTotals = null,
 }) {
   const profile = readDashboardProfile(profileId);
   const { latest: latestTerminal, historyComplete } = selectLatestTerminalCycle(repositoryCycles);
 
-  const latestCycle = latestTerminal ? await buildLatestCycle(latestTerminal, readAccounting) : null;
+  const latestCycle = latestTerminal
+    ? await buildLatestCycle(latestTerminal, readAccounting, lifetimeTotals?.latestCycle ?? null)
+    : null;
   const native = latestCycle?.roundAccounting?.schema === 'hookemon.native-round-accounting.v1';
-  if (native) { delete latestCycle.paidMicroUsdg; latestCycle.paidWei = latestCycle.roundAccounting.paidHolderRewardsWei; }
+  if (native) {
+    delete latestCycle.paidMicroUsdg;
+    latestCycle.paidWei = lifetimeTotals?.latestCycle?.paidWei
+      ?? latestCycle.roundAccounting.paidHolderRewardsWei
+      ?? null;
+  }
+  const historicalMetrics = {
+    ...UNKNOWN_METRICS,
+    completedCycles,
+    skippedCycles: lifetimeTotals?.completeness?.skippedCycles ? lifetimeTotals.counts.skippedCycles : skippedCycles,
+    openedPacks: lifetimeTotals?.completeness?.openedPacks ? lifetimeTotals.counts.openedPacks : openedPacks,
+    ...Object.fromEntries(Object.keys(UNKNOWN_METRICS)
+      .filter(key => !['latestObservedProjectPoolMicroUsdg'].includes(key))
+      .map(key => [key, lifetimeTotals?.completeness?.[key] ? lifetimeTotals.totals[key] : UNKNOWN_METRICS[key]])),
+  };
+  const metrics = native
+    ? {
+      ...nativeUnknownFields(historicalMetrics),
+      ...Object.fromEntries(Object.keys(lifetimeTotals?.totals ?? {})
+        .filter(key => key.endsWith('Wei'))
+        .map(key => [key, lifetimeTotals?.completeness?.[key] ? lifetimeTotals.totals[key] : null])),
+    }
+    : historicalMetrics;
   const snapshot = {
     schemaVersion: native ? 9 : 8,
     profile: profile.id,
@@ -95,7 +121,7 @@ export async function buildPublicCommunitySnapshot({
     nextCycleAt,
     delayed: false,
     poolObservedAt: null,
-    metrics: { ...(native ? nativeUnknownFields(UNKNOWN_METRICS) : UNKNOWN_METRICS), completedCycles, skippedCycles, openedPacks },
+    metrics,
     latestCycle,
     cards: Array.isArray(recentWinners) ? recentWinners.slice(0, MAX_CARDS) : [],
     heldPositionCount: heldPositions.length,
@@ -120,14 +146,16 @@ function selectLatestTerminalCycle(repositoryCycles) {
   return { latest: sorted[0], historyComplete: true };
 }
 
-async function buildLatestCycle(repositoryCycle, readAccounting) {
+async function buildLatestCycle(repositoryCycle, readAccounting, lifetimeCycle = null) {
   const roundAccounting = typeof readAccounting === 'function' ? await readAccounting(repositoryCycle.cycleId) : null;
   return {
     cycleId: repositoryCycle.cycleId,
     status: repositoryTerminalStatus[repositoryCycle.terminalState] ?? 'unknown',
     reason: null,
-    updatedAt: null,
-    paidMicroUsdg: null,
+    updatedAt: Number.isSafeInteger(lifetimeCycle?.terminalAtMs ?? repositoryCycle.terminalAtMs)
+      ? new Date(lifetimeCycle?.terminalAtMs ?? repositoryCycle.terminalAtMs).toISOString()
+      : null,
+    paidMicroUsdg: lifetimeCycle?.paidMicroUsdg ?? null,
     // The real finalized-recipient count, when accounting evidence has it (see
     // accounting-projection.mjs's projectPayoutEvidence) — never a fabricated 0.
     payoutRecipientCount: roundAccounting?.paidHolderRewardsRecipientCount ?? null,

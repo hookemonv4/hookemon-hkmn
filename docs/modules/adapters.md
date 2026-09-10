@@ -244,6 +244,13 @@ infrastructure.
    their chain-journal stage from canonical Relay settlement evidence; pending provider integrations
    stop after `PREPARED`. Dry-run also refuses to bypass an unresolved live attempt with a probe.
 
+## Lifetime dashboard projection
+
+The adapter composition wires the dashboard's lifetime projection, bounded recent-card history,
+and durable terminal payout allocations. Recent cards are intentionally limited to the newest 50
+cycles and expose a completeness flag; lifetime totals do not use that cap. Monetary fields that
+the accounting projection cannot source without relabeling another chain's asset remain null.
+
 ## Operational commands
 
 ```sh
@@ -280,3 +287,20 @@ node --test packages/adapters/test/app/cycle-repository.test.mjs packages/adapte
   kind; custody verification never defaults that kind.
 - Reuse the injected repository client inside a composed process. Composition hands the dashboard
   and CLI only the frozen client facade; WP10b owns standalone dashboard adoption.
+
+## Dashboard activation seam
+
+The composition root exposes `refreshCardHistory({ cycleIds })` for the private dashboard
+projection. Startup clears and rebuilds the cards table from every known cycle's durable purchase
+batch and purchase/open/epic-gate/buyback evidence; scheduler ticks refresh touched cycles and the
+newest two known cycles. Failed incremental refreshes are reported without escaping the scheduler tick.
+
+`collector/durable-card-history.mjs` is the pure adapter for this projection. It emits only packs
+with validated epic-gate rarity evidence, preserves atomic six-decimal values without conversion,
+and counts rejected packs as skipped.
+
+The production composition builds the dashboard activation-readiness seam from the configured
+Collector client and the same `assertStartReadiness` checks used before worker startup. The seam
+exposes independently cached `readCatalog()` and `readReadiness()` functions to the dashboard;
+catalog failures are represented as `UNAVAILABLE` or `STALE`, while readiness is decided only by
+repository integrity, network identity, policy configuration, and the configured preflight.

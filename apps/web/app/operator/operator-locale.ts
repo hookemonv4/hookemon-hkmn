@@ -164,6 +164,10 @@ export function germanStatus(code: string | null | undefined): string {
     : "Unbekannter Status";
 }
 
+export function operatorHistoryLabel(complete: boolean): string {
+  return complete ? "GESAMTHISTORIE VOLLSTÄNDIG" : "GESAMTHISTORIE VORLÄUFIG";
+}
+
 export function parseGermanUsd(value: string): string {
   const match = GERMAN_USDG_PATTERN.exec(value);
   if (!match) throw new Error("USD_BETRAG_UNGUELTIG");

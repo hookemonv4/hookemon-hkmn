@@ -10,15 +10,30 @@ or moving custody.
 ## Public interface
 
 - `GET /operator/api/bootstrap` and `GET /operator/api/dashboard` return views derived from
-  `operatorControl.status()`. The dashboard emits schema version 6 with canonical lifecycle state,
+  `operatorControl.status()`. The dashboard emits schema version 8 with canonical lifecycle state,
   per-cycle stage and request identifiers, typed transaction identifiers, cap usage, custody
-  buckets, telemetry-source availability, alerts, held-owner facts, and payout status from that
-  authority snapshot.
+  buckets, telemetry-source availability, alerts, held-owner facts, held-card inventory, manual
+  approvals, and payout status from that authority snapshot.
 - The dashboard response validator continues to accept the prior schema versions with their
   cap-only response shape. Version 6 requires loss and outstanding-custody cap usage plus
   `alertSources`.
 - `GET /operator/api/network` returns the configured `mainnet` or `testnet` profile.
   `GET /operator/api/identities` returns only public identities injected by the composed runner.
+
+`GET /operator/api/bootstrap` reports the composed Collector catalog and start readiness when the
+runner supplies `readCatalog` and `readReadiness` seams. Catalog status is one of `LOADED`,
+`STALE`, `UNAVAILABLE`, or `NOT_CONFIGURED`; catalog state is informational and never makes a
+service ready. Readiness is the result of `assertStartReadiness` with bounded `start-readiness:`
+reasons on rejection. A standalone listener without those seams retains the legacy
+`catalog-not-loaded` fallback.
+- Schema 8 exposes `activeCycleId`, scheduler `pendingReason`, `heldPositions`, and
+  `manualApprovals`. The two arrays are bounded to 10,000 and remain `null` when their source
+  telemetry or configuration is unavailable. `completeness.heldPositions` and
+  `completeness.manualApprovals` are false for those null values; no empty list is substituted.
+- Held positions expose the durable position identity, cycle, USD cost, typed insured value,
+  quarantine reason, terminal state, evidence digest, opened timestamp, revision, and existing
+  owner decision. Manual approvals expose the durable cycle digest, mode ordinal, release cost,
+  approval state, and approval timestamp.
 - `GET /public/api/cycle-status` and `GET /public/api/community-dashboard` derive their read-only
   responses from the same authority snapshot.
 - `GET /public/api/cycle-history` returns a schema version 1, paginated, read-only page of terminal
@@ -62,6 +77,11 @@ or moving custody.
 - The owner page retains a request ID across lost responses, reloads, `PREPARED`, and `UNCERTAIN`
   results. It clears that key only after `APPLIED` or a deterministic `REJECTED` result, so an
   unresolved effect cannot be retried under a new request ID.
+- The browser stores the complete command envelope in session storage before dispatch. It retries
+  `PREPARED` and uncertain responses with the identical envelope using bounded exponential backoff
+  (eight recovery attempts maximum). `APPLIED` clears the envelope; `REJECTED` clears it and
+  reports the deterministic refusal; an exhausted uncertain command remains stored for the next
+  mount and is shown with its request ID for audit investigation.
 - Audit reservations and terminal appends take a short process-local queue slot and a cross-process
   audit-log file lock. Authority effects execute after the reservation lock is released, so one slow
   or failed effect cannot block a later audit append.
@@ -70,6 +90,10 @@ or moving custody.
   routes against corrupted evidence.
 - Reconcile dispatches only the runner's read-only reconcile command. It does not trigger a
   scheduler tick, recovery, signing, or provider mutation.
+- Held-owner decisions use `{ type: "held-owner-decision", positionId, heldEvidenceDigest,
+  expectedPositionRevision, choice }`; the dashboard forwards this runner-native shape unchanged.
+  Manual approvals use `{ type: "manual-approval", cycleId, cycleDigest }`. The existing
+  `restart-request` alias dispatches `resume-cycle` for an active cycle.
 - The dashboard never signs, broadcasts, deploys, spends, moves custody, or substitutes for the
   runner authority.
 - The dashboard profile defaults to `mainnet`. A supplied chain ID must match that profile before a
@@ -128,6 +152,9 @@ record, do not rerun its effect locally. Verify runner state before intentionall
 request ID. Do not construct a local cycle store as a fallback. Rebuild SQLite from the verified
 audit log if its projection is missing or stale.
 
+The operator page labels `PREPARED` and `UNCERTAIN` as unresolved rather than rejected. Keep the
+original request envelope and inspect the audit entry before issuing any new command.
+
 - OPEN FACT: The dashboard can show that required safety telemetry is unavailable, but composition
   does not yet provide a read-only persistent canary-alert feed. Resolve it by exposing a typed,
   read-only alert snapshot from the composed observability service. Verified safe alternative: show
@@ -148,7 +175,7 @@ The bootstrap hard-cap projection exposes only its four published pack-spend fie
 
 ## Native money boundary
 
-Cycle status v7, community snapshots v9 and the private dashboard v7 carry native accounting.
+Cycle status v7, community snapshots v9 and the private dashboard v8 carry native accounting.
 `native-accounting.mjs` validates integer wei separately from micro-USD valuation fields and rejects
 historical `MicroUsdg` keys in native money surfaces. A validation-only historical skeleton checks
 unchanged layout and metadata fields with amount-presence sentinels; native scalars are never
@@ -159,7 +186,8 @@ retain their original readers. The standalone website parser copies are byte-par
 and return amounts carry the explicit 4663/native/18 identity; Collector debit and proceeds retain
 their Solana asset identity. Physical balances, reserves and payout liabilities use `Wei`; economic
 valuations use `MicroUsd` and remain null without corresponding evidence. A funding quote does
-not establish actual pack spend. Lifetime monetary totals remain null without an accounting index.
+not establish actual pack spend. Lifetime monetary totals remain null when terminal cycles lack
+the corresponding durable accounting evidence; mixed native/historical lifetimes are quarantined.
 
 Operator bootstrap and configuration decisions use USD caps with `MicroUsd` names. Historical
 USDG configuration keys fail validation before a command reaches the runner. Native public payout
@@ -173,10 +201,64 @@ and parser parity. Historical contract and dashboard presentation tests exercise
 
 Pack selection groups use native expandable sections, with Pokémon first, followed by One Piece, Sports, and other packs. Pokémon opens initially; each group orders packs by catalog price and code. Collapsing a section preserves selection.
 
+## Lifetime projection and completeness
+
+The composed dashboard exposes a repository-backed `readLifetimeTotals` seam. It scans every known
+cycle, reads durable purchase/open evidence, and delegates monetary facts to the cycle accounting
+projection. A lifetime amount is emitted only when every terminal cycle has the required evidence;
+otherwise the amount is `null` and its `completeness` flag is `false`. Opened-pack and skipped-cycle
+counts follow the same rule. Active-cycle observations remain visible in `perCycle` but are excluded
+from terminal lifetime totals. The private operator projection uses schema version 8 and includes
+per-metric completeness plus `cyclesScanned`; schema 7 remains accepted for legacy readers.
+
+## Public 503 diagnosis
+
+The public Worker requires `PUBLIC_DASHBOARD_PROFILE`, `PUBLIC_CYCLE_STATUS_URL`,
+`PUBLIC_COMMUNITY_SNAPSHOT_URL`, `PUBLIC_CYCLE_HISTORY_URL`, `OPERATOR_CONTROL_SERVICE_URL`, and
+`OPERATOR_CONTROL_PROXY_CREDENTIAL`. The three public URLs must be HTTPS URLs without credentials,
+ports, query strings, or fragments, with exact paths `/public/api/cycle-status`,
+`/public/api/community-dashboard`, and `/public/api/cycle-history`, and must share one origin.
+Missing or invalid configuration, unreachable/non-success upstream responses, timeouts, oversized
+bodies, and fetch failures produce `503 PUBLIC_*_UNAVAILABLE`, even when the homepage itself is
+healthy. A reachable upstream response whose JSON or schema is invalid produces
+`502 PUBLIC_*_INVALID`. The runner must start with its dashboard composed (not `--no-dashboard`),
+and the configured URLs must reach that listener/control service. The current deployment workflow
+explicitly synchronizes only two of the four public secrets; verify the other Worker secrets exist
+when diagnosing deployment.
+
 ## Reward recipient controls
+
+## Private card history
+
+Private card history is a rebuildable SQLite projection ingested from durable pack-batch and
+lifecycle evidence. A row is emitted only after epic-gate rarity is verified. `/operator/api/cards`
+uses opaque base64url JSON cursors containing the sort, key value, cycle ID, and pack index;
+cursors are keyset-tie-safe and raw ISO or numeric cursors are invalid. The shared
+purchase-request timestamp is the cycle's observation time, so `(cycle_id, pack_index)` is always
+the tie-break.
+
+The public history list remains independently paginated. A validated terminal-cycle fingerprint
+change resets it, and a failed initial load is retried once on the next successful main poll.
 
 Bootstrap publishes the runner's canonical recipient options and the saved future-cycle limit.
 The authenticated configuration command accepts only numeric integers 100–1000 in steps of 100.
+
+### Concurrent operator audit and configuration refresh
+
+The private audit projection ingests the shared hash-chained audit log before each
+`/operator/api/audit` response. This makes CLI-originated entries visible without a
+dashboard restart. Every refresh verifies the full durable snapshot, then replaces
+the projection in one SQLite transaction using that exact snapshot. Valid shorter,
+equal-length and longer replacement logs cannot mix with the prior projection. An
+invalid prefix or tail is reported through the dashboard error seam and leaves the
+last verified projection available.
+
+The operator browser keeps the configuration form's base revision separately from
+the live bootstrap revision. Polling adopts fresh configuration only while the form
+is clean; dirty edits and their compare-and-swap base are preserved. External changes
+are shown with both revisions and require an explicit adoption action. A stale save
+returns a revision conflict rather than silently rebasing the form, so the operator
+can inspect the edits and retry deliberately.
 The owner page separates the editable choice, confirmed saved value and active-cycle frozen value.
 A successful command requires an authoritative matching bootstrap readback before the page reports
 success. Stale, uncertain, failed or unreadable outcomes remain visibly unconfirmed; reload restores
@@ -189,3 +271,5 @@ null representation. `operator/control.mjs` validates the snapshot digest and cy
 projecting repository data.
 
 The disconnected local selection wrapper uses `assertLocalSelectionCommand` to accept only pack-plan and reward-recipient updates while paused, execution-paused and non-live. Reward-only edits do not depend on catalog availability. Pack edits retain catalog membership and the existing allowlist protections. The wrapper grants no execution operation.
+
+Native active-cycle budget fields are validated independently from the latest completed round. The first running cycle remains visible before terminal accounting exists; the panel retains its USD budget fields and does not relabel them as historical settlement amounts.

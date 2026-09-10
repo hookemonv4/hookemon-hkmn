@@ -13,7 +13,7 @@ creates a local cycle store, signer, or provider effect.
   functions.
 - `status()` returns the configuration revision, active and known repository cycles, canonical
   lifecycle stages, provider requests, typed chain transaction evidence, custody buckets, cap
-  usage, telemetry-source availability, alerts, and payout state.
+  usage, telemetry-source availability, alerts, payout state, held positions, and manual approvals.
 - Each cycle exposes its repository `version`, `heldEvidenceDigest`, and `ownerDecision` exactly
   when the repository supplies them.
 - `execute({ expectedRevision, requestId, command })` accepts `pause`, `resume`, `kill`,
@@ -55,17 +55,43 @@ creates a local cycle store, signer, or provider effect.
   `rewardSelection`; historical cycles expose null and retain all-holder semantics.
 - `pause` sets both `paused` and `executionPaused`. `kill` additionally sets `killSwitch`.
   `resume` clears only the two pause fields and never clears a kill switch.
-- A held-owner decision binds cycle ID, held-evidence digest, request ID, expected cycle revision,
-  and owner choice before it reaches the repository authority.
+- `manualApprovals` is null when configuration is unavailable. Otherwise it contains the pending
+  manual-approval ledger entries (terminal cycles excluded), sorted by cycle ID with each entry's
+  same-mode ordinal, release cost, durable approval state, and approval timestamp. A digest-bound
+  approval with a mismatched cycle ID remains unapproved.
+- A held-owner decision binds `positionId`, held-evidence digest, request ID, expected position
+  revision, and owner choice before it reaches the repository authority.
 - The service does not append audit records or deduplicate request IDs. Its caller persists the
   dispatch receipt before an effect and returns the stored receipt for a duplicate request.
+- The dashboard caller stores the original request envelope before dispatch and reuses its request
+  ID, expected revision, command, and note for recovery. A `PREPARED` or `UNCERTAIN` response is
+  not a rejection: the browser retries the same envelope with bounded backoff and retains it in
+  session storage if recovery is exhausted.
 
 ## State transitions
 
 - Configuration commands use the operator-state revision as their compare-and-swap value.
 - Pause, resume, kill, and configuration updates persist the next configuration before returning.
+
+The dashboard refreshes the audit projection from the durable shared audit log, so
+commands issued by the CLI become visible in the next audit response. The browser
+stores the revision from which a configuration form was loaded and sends that
+revision on save. Polling never rebases dirty edits; when another writer advances
+the revision, the dashboard displays the external revision and offers an explicit
+“Externe Änderungen übernehmen” action. A stale save is reported as a
+`Revisionskonflikt` with the expected and current revisions. Operators should review
+the preserved edits before adopting external configuration or resubmitting.
 - Manual approval persists through the policy engine. A held-owner decision persists through the
-  repository. Recovery and tick commands return the result of their one injected authority call.
+  repository. The accepted command shapes are:
+
+  ```js
+  { type: 'manual-approval', cycleId, cycleDigest }
+  { type: 'held-owner-decision', positionId, heldEvidenceDigest,
+    expectedPositionRevision, choice: 'sell' | 'keep-holding' }
+  ```
+
+  Recovery and tick commands return the result of their one injected authority call. The dashboard
+  `restart-request` alias invokes the existing `resume-cycle` command.
 - Reconcile reads repository state only. It never invokes a tick, recovery callback, signer, or
   provider mutation.
 
@@ -83,6 +109,9 @@ node --test --test-timeout=120000 packages/runner/test/operator/control.test.mjs
 
 - On a stale revision, read `status()` again and submit a fresh request ID with the current
   revision.
+- For `UNCERTAIN`, do not click a replacement command or mint a new request ID until the audit
+  record and authority state have been checked. The page exposes the original request ID and
+  response code in its command-status line.
 - When safety telemetry is unavailable, use pause or kill if needed, restore the accounting reader,
   and verify its status before resuming an exposure-increasing action.
 - Reconcile an interrupted provider or chain attempt from the repository before requesting
@@ -103,3 +132,5 @@ Active operator monetary controls use USD micro-units (`*MicroUsd`). Cycle reser
 Native principal and gas never enter a USD cap field without authenticated valuation.
 
 The managed claim path uses the durable [Process USD budget](process-usd-budget.md). `processClaimLimit6hMicroUsd` defaults to USD25,000, accepts zero, and is owner-adjustable up to USD50,000; it does not replace the other spend controls.
+
+Unresolved browser commands retain their exact request envelope after automatic recovery exhausts its attempts. New commands remain disabled until a matching durable APPLIED or REJECTED receipt resolves that envelope. Explicit recovery reuses the original request ID, expected version and command. Authentication failures, malformed responses and unreceipted conflicts preserve uncertainty; an HTTP success alone never clears the recovery identity.

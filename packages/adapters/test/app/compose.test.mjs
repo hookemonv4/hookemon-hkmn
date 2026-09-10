@@ -18,10 +18,12 @@ import { PublicKey, Transaction } from '@solana/web3.js';
 import { acquireLease } from '../../../runner/src/automation/exclusive-lease.mjs';
 import { createEmptyOperatorState, mutateOperatorState, readOperatorState } from '../../../runner/src/operator/state-file.mjs';
 import { applyOperatorConfiguration } from '../../../runner/src/config/state-schema.mjs';
-import { digest } from '../../../runner/src/cycle/journal.mjs';
+import { canonicalJson, digest } from '../../../runner/src/cycle/journal.mjs';
 import { createRelayClient, createQuoteUsdValuation, relayQuoteDigest } from '../../src/relay-client.mjs';
 import { createRequestListener } from '../../../dashboard/src/server.mjs';
+import { normalizePublicCommunitySnapshot } from '../../../dashboard/src/contracts/public-community-snapshot.mjs';
 import { appendAuditEntry, readAllAuditEntries } from '../../../dashboard/src/auth/audit-log.mjs';
+import { runOperatorCli } from '../../../runner/src/operator/cli.mjs';
 import { buildQuoteRefreshPlanner, compose as composeRoot, createTrustedSolanaBlockhashContextResolver } from '../../src/app/compose.mjs';
 import {
   CYCLE_REPOSITORY_CLIENT_INTERFACE,
@@ -52,6 +54,7 @@ import {
   buildAndSignStepAuthorization,
   createProductionTestFixture,
 } from '../../../runner/test/cycle/production-cycle.mjs';
+import { nativeProducedAdmissionFixture } from '../native/admission-fixture.mjs';
 import { privateKeyToAccount, serializeSignature, sign as signSecp256k1 } from 'viem/accounts';
 
 const DASHBOARD_CREDENTIAL = 'd'.repeat(40);
@@ -240,6 +243,8 @@ async function seedCycle(stateDir, {
   providerMode = null,
   completedStages = [],
   packBatchRequests = [],
+  heldPosition = null,
+  archive = false,
   // `admission` may be the durable admission object itself, or a factory `reservedCycleId =>
   // admission` for a caller whose admission must name a cycleId reserved before createCycle opens
   // it (the admission rides inside `cycle-opened` itself, so it has to be built first). `operations`
@@ -248,8 +253,9 @@ async function seedCycle(stateDir, {
   admission = null,
   operations = null,
   releaseCostMicroUsd = '1',
+  now = () => 1_000,
 }) {
-  const cycleRepository = await CycleRepository.open(join(stateDir, 'cycles'), () => 1_000, { testAuthority: createTestProfileMutationAuthority() });
+  const cycleRepository = await CycleRepository.open(join(stateDir, 'cycles'), now, { testAuthority: createTestProfileMutationAuthority() });
   const reservedCycleId = admission === null ? null : cycleRepository.nextCycleId();
   const resolvedAdmission = typeof admission === 'function' ? await admission(reservedCycleId) : admission;
   const cycle = await cycleRepository.createCycle({
@@ -270,7 +276,16 @@ async function seedCycle(stateDir, {
   for (const { stage, packs } of packBatchRequests) {
     await cycleRepository.recordPackBatchRequest(cycle.cycleId, stage, packs);
   }
-  return { ...cycle, releaseCostMicroUsd, ...(resolvedAdmission === null ? {} : { admission: resolvedAdmission }) };
+  const recordedHeldPosition = heldPosition === null
+    ? null
+    : await cycleRepository.recordHeldPosition(cycle.cycleId, heldPosition);
+  if (archive) await cycleRepository.completeCycle(cycle.cycleId);
+  return {
+    ...cycle,
+    releaseCostMicroUsd,
+    ...(resolvedAdmission === null ? {} : { admission: resolvedAdmission }),
+    ...(recordedHeldPosition === null ? {} : { heldPosition: recordedHeldPosition }),
+  };
 }
 
 function baseConfigurationPatch(overrides = {}) {
@@ -1700,6 +1715,7 @@ test('compose exposes one repository-backed cycle client instead of a bare runne
     'readActiveCycle', 'peekActiveCycle', 'readStage', 'describeCycle', 'readOperationalStageAttempt',
     'readChainTransactionAttempt', 'readClaimPreconditions', 'readHeldPosition', 'readHeldPositionEvidence', 'listHeldPositions',
     'readSupplementarySettlement', 'listKnownCycleIds', 'readOutboundQuoteRefresh', 'readFinalizedClaimCustodyEvidence',
+    'readPagedPayoutState',
   ]);
   assert.equal(assertCycleRepositoryClientInterface(composition.cycleRepository), composition.cycleRepository);
   assert.deepEqual(Object.keys(composition.cycleRepository).sort(), [...CYCLE_REPOSITORY_CLIENT_INTERFACE].sort());
@@ -2584,9 +2600,18 @@ test('compose(config) exposes config.standingAuthority unchanged, and null when 
  * dashboard HTTP server bound to an ephemeral port. Mirrors packages/dashboard/test/routes/
  * server.test.mjs's own `buildTestServer` helper, but drives it through the real, composed
  * `compose()` rather than a hand-built ctx. */
-async function buildComposedDashboard(t, { statePath, stateDir, configurationPatch = {}, cycleSeed = null } = {}) {
+async function buildComposedDashboard(t, {
+  statePath,
+  stateDir,
+  configurationPatch = {},
+  cycleSeed = null,
+  adapters = undefined,
+  configureState = null,
+  composePatch = {},
+} = {}) {
   await writeOperatorState(statePath, configurationPatch);
   const seededCycle = cycleSeed === null ? null : await seedCycle(stateDir, cycleSeed);
+  if (configureState !== null) await configureState({ statePath, stateDir, seededCycle });
   const composition = await compose({
     stateDir,
     statePath,
@@ -2604,6 +2629,8 @@ async function buildComposedDashboard(t, { statePath, stateDir, configurationPat
       auditLogPath: join(stateDir, 'dashboard-audit.log'),
     },
     now: () => 1_000,
+    ...composePatch,
+    ...(adapters === undefined ? {} : { adapters }),
   });
   assert.notEqual(composition.dashboard, null, 'compose() must build a dashboard when config.dashboard is present');
 
@@ -2637,6 +2664,42 @@ async function buildComposedDashboard(t, { statePath, stateDir, configurationPat
   };
 }
 
+test('dashboard bootstrap exposes the Collector catalog and actual start readiness result', async t => {
+  const stateDir = await tempStateDir(t);
+  const statePath = join(stateDir, 'operator-state.json');
+  const adapters = throwingAdapters();
+  adapters.collectorCrypt.getMachines = async () => ({
+    machines: [{ code: 'base-pack', name: 'Base pack', price: '12.5', public: true }],
+  });
+  const server = await buildComposedDashboard(t, { statePath, stateDir, adapters });
+  const bootstrap = await server.get('/operator/api/bootstrap', {
+    'x-hookemon-proxy-credential': DASHBOARD_CREDENTIAL,
+  });
+  assert.equal(bootstrap.status, 200);
+  assert.equal(bootstrap.body.catalog.status, 'LOADED');
+  assert.deepEqual(bootstrap.body.catalog.packs, [{
+    id: 'base-pack',
+    name: 'Base pack',
+    priceMicroStablecoin: '12500000',
+    available: null,
+  }]);
+  assert.deepEqual(bootstrap.body.readiness, { ready: true, reasons: [] });
+});
+
+test('dashboard bootstrap reports the configured RPC chain mismatch as not ready', async t => {
+  const stateDir = await tempStateDir(t);
+  const statePath = join(stateDir, 'operator-state.json');
+  const adapters = throwingAdapters();
+  adapters.robinhood.client.getChainId = async () => 1;
+  const server = await buildComposedDashboard(t, { statePath, stateDir, adapters });
+  const bootstrap = await server.get('/operator/api/bootstrap', {
+    'x-hookemon-proxy-credential': DASHBOARD_CREDENTIAL,
+  });
+  assert.equal(bootstrap.status, 200);
+  assert.equal(bootstrap.body.readiness.ready, false);
+  assert.match(bootstrap.body.readiness.reasons[0], /^start-readiness: .*4663/);
+});
+
 test('dashboard composed in-process: run-cycle-now over HTTP actually drives the real scheduler through a complete dry-run cycle', async t => {
   const stateDir = await tempStateDir(t);
   const statePath = join(stateDir, 'operator-state.json');
@@ -2658,6 +2721,245 @@ test('dashboard composed in-process: run-cycle-now over HTTP actually drives the
   const dashboardBody = await server.get('/operator/api/dashboard', { 'x-hookemon-proxy-credential': DASHBOARD_CREDENTIAL });
   assert.equal(dashboardBody.status, 200);
   assert.notEqual(dashboardBody.body.nextCycleAt, null);
+});
+
+test('dashboard ingests a CLI configuration writer and preserves CAS conflicts', async t => {
+  const stateDir = await tempStateDir(t);
+  const statePath = join(stateDir, 'operator-state.json');
+  const server = await buildComposedDashboard(t, { statePath, stateDir });
+  const inputPath = join(stateDir, 'configuration.json');
+  await writeFile(inputPath, `${canonicalJson({
+    allowedPackIds: ['base-pack'],
+    intervalMinutes: 30,
+    max24HourBudgetMicroUsd: '100',
+    maxBoostersPerCycle: 1,
+    maxCycleBudgetMicroUsd: '100',
+    maxUnitPriceMicroUsd: '100',
+    requestedOrders: 1,
+  })}\n`, 'utf8');
+
+  await runOperatorCli([
+    'update-configuration',
+    '--expected-revision', '0',
+    '--request-id', 'cli-config-1',
+    '--input', inputPath,
+  ], {
+    operatorControl: server.composition.operatorControl,
+    executeAudited: server.composition.executeAudited,
+  });
+
+  const headers = { 'x-hookemon-proxy-credential': DASHBOARD_CREDENTIAL };
+  const bootstrap = await server.get('/operator/api/bootstrap', headers);
+  assert.equal(bootstrap.status, 200);
+  assert.equal(bootstrap.body.state.version, 1);
+  assert.equal(bootstrap.body.state.intervalMinutes, 30);
+  const audit = await server.get('/operator/api/audit', headers);
+  assert.equal(audit.status, 200);
+  assert.equal(audit.body.decisions.some(entry => entry.requestId === 'cli-config-1'), true);
+
+  const stale = await server.post('/operator/api/decisions', {
+    requestId: 'dashboard-stale-config',
+    expectedVersion: 0,
+    command: {
+      type: 'update-configuration',
+      configuration: {
+        allowedPackIds: ['base-pack'],
+        intervalMinutes: 40,
+        maxBoostersPerCycle: 1,
+        requestedOrders: 1,
+      },
+    },
+  }, headers);
+  assert.equal(stale.status, 409);
+  assert.equal(stale.body.code, 'COMMAND_REJECTED');
+  assert.equal(stale.body.state.version, 1);
+});
+
+test('dashboard composed in-process: public and private routes share the real lifetime projection', async t => {
+  const stateDir = await tempStateDir(t);
+  const statePath = join(stateDir, 'operator-state.json');
+  const server = await buildComposedDashboard(t, { statePath, stateDir });
+
+  const decision = await server.post('/operator/api/decisions', {
+    requestId: 'req-public-routes-1',
+    expectedVersion: 0,
+    command: { type: 'run-cycle-now' },
+  }, { 'x-hookemon-proxy-credential': DASHBOARD_CREDENTIAL });
+  assert.equal(decision.status, 200);
+
+  const headers = { 'x-hookemon-proxy-credential': DASHBOARD_CREDENTIAL };
+  const [status, community, history, operator] = await Promise.all([
+    server.get('/public/api/cycle-status'),
+    server.get('/public/api/community-dashboard'),
+    server.get('/public/api/cycle-history?limit=5'),
+    server.get('/operator/api/dashboard', headers),
+  ]);
+  for (const response of [status, community, history, operator]) assert.equal(response.status, 200);
+  const cycleId = (await server.composition.cycleRepository.listKnownCycleIds())[0];
+  const purchaseStage = await server.composition.cycleRepository.readStage(cycleId, 'purchase');
+  const openStage = await server.composition.cycleRepository.readStage(cycleId, 'open');
+  const openedPacks = Array.isArray(openStage.evidence?.packs)
+    ? openStage.evidence.packs.filter(pack => pack.decision === 'opened').length
+    : null;
+  const accounting = await server.composition.dashboard.ctx.readAccounting(cycleId);
+  assert.equal(accounting.schema, undefined);
+  assert.equal(community.body.schemaVersion, 8);
+  normalizePublicCommunitySnapshot(community.body, 'mainnet');
+  assert.equal(community.body.metrics.completedCycles, 1);
+  assert.equal(operator.body.metrics.completedCycles, 1);
+  assert.equal(operator.body.historyComplete, true);
+  assert.equal(operator.body.execution.connected, true);
+  assert.equal(community.body.metrics.openedPacks, openedPacks);
+  assert.equal(operator.body.metrics.openedPacks, openedPacks);
+  assert.match(accounting.packSpendMicroUsdg, /^(0|[1-9][0-9]*)$/);
+  assert.strictEqual(community.body.metrics.totalCycleFundingMicroUsdg, accounting.packSpendMicroUsdg);
+  assert.strictEqual(operator.body.metrics.totalCycleFundingMicroUsdg, accounting.packSpendMicroUsdg);
+  assert.equal(operator.body.metrics.totalCollectorSpendMicroUsdg, null);
+  const purchasedPacks = Array.isArray(purchaseStage.evidence?.packs)
+    ? purchaseStage.evidence.packs.filter(pack => pack.status === 'purchased').length
+    : 0;
+  assert.equal(operator.body.metrics.skippedCycles, purchasedPacks > 0 ? 0 : 1);
+  assert.equal(operator.body.completeness.totalCycleFundingMicroUsdg, accounting.packSpendMicroUsdg !== null);
+  assert.equal(operator.body.completeness.totalCollectorSpendMicroUsdg, false);
+});
+
+test('dashboard composed in-process: held decisions and manual approvals remain durable and idempotent', async t => {
+  const stateDir = await tempStateDir(t);
+  const statePath = join(stateDir, 'operator-state.json');
+  let manualCycleId;
+  let manualCycleDigest;
+  const server = await buildComposedDashboard(t, {
+    statePath,
+    stateDir,
+    composePatch: { moneyConfiguration: productionMoneyConfiguration() },
+    cycleSeed: {
+      releaseAmount: '1',
+      releaseCostMicroUsd: '7',
+      mode: 'production',
+      now: () => 1_700_000_000_000,
+      admission: cycleId => nativeProducedAdmissionFixture(cycleId, { amountWei: '1', costMicroUsd: '7' }),
+      completedStages: AUTOMATED_CYCLE_STAGES.map(stage => ({
+        stage,
+        evidence: { stage, finalized: true },
+      })),
+      heldPosition: {
+        packId: 'base-pack',
+        memo: 'compose-held-memo',
+        mint: 'compose-held-mint',
+        cardRef: 'compose-held-mint',
+        costMicroUsd: '7',
+        valueMicroUsd: '7',
+        insuredValue: null,
+        reason: 'EPIC_THRESHOLD',
+        terminalState: 'HELD_OWNER_DECISION',
+        evidence: { stage: 'epic-gate', decision: 'hold' },
+      },
+      archive: true,
+    },
+    configureState: async ({ stateDir: configuredStateDir, statePath: configuredStatePath, seededCycle }) => {
+      const repository = await CycleRepository.open(
+        join(configuredStateDir, 'cycles'),
+        () => 1_000,
+        { testAuthority: createTestProfileMutationAuthority() },
+      );
+      const manualCycle = await repository.createCycle({
+        releaseAmount: '2',
+        releaseCostMicroUsd: '9',
+        mode: 'production',
+      });
+      manualCycleId = manualCycle.cycleId;
+      manualCycleDigest = digest({ schema: 'hookemon.test-manual-approval.v1', cycleId: manualCycleId });
+      const currentState = await readOperatorState(configuredStatePath);
+      await mutateOperatorState(configuredStatePath, currentState.revision, state => ({
+        ...state,
+        configuration: {
+          ...state.configuration,
+          manualApprovalCycles: 1,
+          cycleLedger: [{
+            cycleId: manualCycleId,
+            cycleDigest: manualCycleDigest,
+            mode: 'production',
+            openedAtMs: 1_000,
+            releaseCostMicroUsd: '9',
+            releaseAmountWei: '2',
+          }],
+          approvalsByCycleDigest: {},
+        },
+      }));
+      assert.equal(seededCycle.heldPosition.positionId.startsWith('held:'), true);
+    },
+  });
+  const headers = { 'x-hookemon-proxy-credential': DASHBOARD_CREDENTIAL };
+  const before = await server.get('/operator/api/dashboard', headers);
+  assert.equal(before.status, 200, before.diagnostics);
+  const held = before.body.heldPositions[0];
+  assert.equal(before.body.completeness.heldPositions, true);
+  assert.equal(typeof held.evidenceDigest, 'string');
+  assert.equal(held.positionRevision, 0);
+  assert.equal(before.body.manualApprovals.length, 1);
+  assert.equal(before.body.manualApprovals[0].cycleId, manualCycleId);
+  assert.equal(before.body.manualApprovals[0].approved, false);
+
+  const command = {
+    type: 'held-owner-decision',
+    positionId: held.positionId,
+    heldEvidenceDigest: held.evidenceDigest,
+    expectedPositionRevision: held.positionRevision,
+    choice: 'sell',
+  };
+  const first = await server.post('/operator/api/decisions', {
+    requestId: 'compose-held-sell-1',
+    expectedVersion: 1,
+    command,
+  }, headers);
+  assert.equal(first.status, 200, first.diagnostics);
+  assert.equal(first.body.code, 'HELD_OWNER_DECISION_RECORDED');
+
+  const afterFirstDescription = await server.composition.cycleRepository.describeCycle(held.cycleId);
+  assert.equal(afterFirstDescription.heldPositions.get(held.positionId).ownerDecision.choice, 'sell');
+  const firstSettlement = await server.composition.cycleRepository.readSupplementarySettlement(held.positionId);
+  assert.equal(firstSettlement.state, 'PREPARED');
+  assert.equal(firstSettlement.positionEvidenceDigest, held.evidenceDigest);
+
+  const duplicate = await server.post('/operator/api/decisions', {
+    requestId: 'compose-held-sell-2',
+    expectedVersion: 1,
+    command: { ...command, expectedPositionRevision: 1 },
+  }, headers);
+  assert.equal(duplicate.status, 200, duplicate.diagnostics);
+  const duplicateSettlement = await server.composition.cycleRepository.readSupplementarySettlement(held.positionId);
+  assert.deepEqual(duplicateSettlement, firstSettlement);
+  assert.deepEqual(
+    (await server.composition.cycleRepository.describeCycle(held.cycleId)).heldPositions.get(held.positionId).ownerDecision,
+    afterFirstDescription.heldPositions.get(held.positionId).ownerDecision,
+  );
+
+  const stale = await server.post('/operator/api/decisions', {
+    requestId: 'compose-held-sell-stale',
+    expectedVersion: 1,
+    command,
+  }, headers);
+  assert.equal(stale.status, 409, stale.diagnostics);
+  assert.deepEqual(await server.composition.cycleRepository.readSupplementarySettlement(held.positionId), firstSettlement);
+
+  const approval = await server.post('/operator/api/decisions', {
+    requestId: 'compose-manual-approval-1',
+    expectedVersion: 1,
+    command: {
+      type: 'manual-approval',
+      cycleId: manualCycleId,
+      cycleDigest: manualCycleDigest,
+    },
+  }, headers);
+  assert.equal(approval.status, 200, approval.diagnostics);
+  const stateAfterApproval = await readOperatorState(statePath);
+  assert.deepEqual(stateAfterApproval.configuration.approvalsByCycleDigest[manualCycleDigest], {
+    cycleId: manualCycleId,
+    approvedAtMs: 1_000,
+  });
+  const afterApproval = await server.get('/operator/api/dashboard', headers);
+  assert.equal(afterApproval.body.manualApprovals[0].approved, true);
+  assert.equal(afterApproval.body.manualApprovals[0].approvedAt, new Date(1_000).toISOString());
 });
 
 test('dashboard composed in-process: restart-request/reconcile-request over HTTP actually reach AutomatedCycleService.recoverActiveCycle', async t => {
@@ -2866,6 +3168,62 @@ test('dashboard composed in-process: ctx.listRecentWinners returns no cards when
   });
 
   assert.deepEqual(await server.composition.dashboard.ctx.listRecentWinners({ limit: 10 }), []);
+});
+
+test('dashboard composed in-process rebuilds durable private card history and pages tied timestamps', async t => {
+  const stateDir = await tempStateDir(t);
+  const statePath = join(stateDir, 'operator-state.json');
+  const server = await buildComposedDashboard(t, {
+    statePath,
+    stateDir,
+    cycleSeed: {
+      releaseAmount: SUFFICIENT_BUDGET.packPriceWei,
+      completedStages: [
+        { stage: 'eligibility-snapshot' },
+        { stage: 'claim-process' },
+        { stage: 'outbound' },
+        { stage: 'purchase', evidence: { packs: [
+          { packIndex: 0, memo: 'memo-0', status: 'purchased', signature: 'purchase-0', packCost: { decimals: 6, amountAtomic: '1000000' } },
+          { packIndex: 1, memo: 'memo-1', status: 'purchased', signature: 'purchase-1', packCost: { decimals: 6, amountAtomic: '1000000' } },
+          { packIndex: 2, memo: 'memo-2', status: 'purchased', signature: 'purchase-2', packCost: { decimals: 6, amountAtomic: '1000000' } },
+        ] } },
+        { stage: 'open', evidence: { packs: [
+          { packIndex: 0, memo: 'memo-0', decision: 'opened', signature: 'open-0', mint: 'mint-0' },
+          { packIndex: 1, memo: 'memo-1', decision: 'opened', signature: 'open-1', mint: 'mint-1' },
+          { packIndex: 2, memo: 'memo-2', decision: 'opened', signature: 'open-2', mint: 'mint-2' },
+        ] } },
+        { stage: 'epic-gate', evidence: { packs: [
+          { packIndex: 0, memo: 'memo-0', decision: 'sell', mint: 'mint-0', rarity: 'common' },
+          { packIndex: 1, memo: 'memo-1', decision: 'sell', mint: 'mint-1', rarity: 'rare' },
+          { packIndex: 2, memo: 'memo-2', decision: 'sell', mint: 'mint-2', rarity: 'epic' },
+        ] } },
+        { stage: 'buyback', evidence: { soldCount: 3, packs: [
+          { packIndex: 0, memo: 'memo-0', decision: 'sold', mint: 'mint-0', signature: 'sale-0', proceeds: { chainId: 'solana', assetId: 'stablecoin', decimals: 6, amountAtomic: '10' } },
+          { packIndex: 1, memo: 'memo-1', decision: 'sold', mint: 'mint-1', signature: 'sale-1', proceeds: { chainId: 'solana', assetId: 'stablecoin', decimals: 6, amountAtomic: '20' } },
+          { packIndex: 2, memo: 'memo-2', decision: 'sold', mint: 'mint-2', signature: 'sale-2', proceeds: { chainId: 'solana', assetId: 'stablecoin', decimals: 6, amountAtomic: '30' } },
+        ] } },
+      ],
+      packBatchRequests: [{ stage: 'purchase', packs: [
+        { packIndex: 0, memo: 'memo-0', expectedCardCount: 1, packType: 'pack-a' },
+        { packIndex: 1, memo: 'memo-1', expectedCardCount: 1, packType: 'pack-b' },
+        { packIndex: 2, memo: 'memo-2', expectedCardCount: 1, packType: 'pack-c' },
+      ] }],
+    },
+  });
+  const first = await server.get('/operator/api/cards?limit=2', {
+    'x-hookemon-proxy-credential': DASHBOARD_CREDENTIAL,
+  });
+  assert.equal(first.status, 200);
+  assert.equal(first.body.cards.length, 2);
+  assert.equal(first.body.historyComplete, false);
+  assert.ok(first.body.nextCursor);
+  const second = await server.get(`/operator/api/cards?limit=2&cursor=${encodeURIComponent(first.body.nextCursor)}`, {
+    'x-hookemon-proxy-credential': DASHBOARD_CREDENTIAL,
+  });
+  assert.equal(second.status, 200);
+  assert.equal(second.body.cards.length, 1);
+  assert.equal(second.body.cards[0].productId, 'pack-a');
+  assert.equal(second.body.cards[0].observedAt, new Date(1_000).toISOString());
 });
 
 // --- WP-36: the full eight-stage liveMode true cycle ---------------------------------------------

@@ -3,7 +3,7 @@
 import NativeAccounting from "../NativeAccounting";
 import { nativeValidationSkeleton, requireNativeRound } from "../../lib/native-accounting.mjs";
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import {
   decodeCycleStartProjectPool,
@@ -16,10 +16,26 @@ import {
   germanStatus,
   parseGermanUsd,
   formatGermanUsd,
-  formatGermanEth,
   assertNativeOperatorConfiguration,
+  operatorHistoryLabel,
 } from "./operator-locale";
-import type { ActiveCycle, DashboardCard } from "./operator-types";
+import { formatNativeAmount } from "../../lib/native-accounting.mjs";
+import type { ActiveCycle, DashboardCard, HeldPosition, ManualApproval } from "./operator-types";
+import {
+  buildCommandEnvelope,
+  classifyDecisionOutcome,
+  MAX_RECOVERY_ATTEMPTS,
+  reservePendingCommand,
+  nextRecoveryDelayMs,
+  parsePendingCommand,
+  PENDING_COMMAND_STORAGE_KEY,
+  serializePendingCommand,
+} from "./command-lifecycle.mjs";
+import {
+  describeRevisionConflict,
+  mergeAuditEntries,
+  reconcileConfigurationForm,
+} from "./refresh-state.mjs";
 import styles from "./operator.module.css";
 
 type Role = "viewer" | "operator";
@@ -50,8 +66,9 @@ type OperatorState = {
 type Pack = {
   id: string;
   name: string;
-  priceMicroUsdc: string;
-  available: number;
+  priceMicroStablecoin: string;
+  priceMicroUsdc?: string;
+  available: number | null;
 };
 
 type Bootstrap = {
@@ -71,7 +88,7 @@ type Bootstrap = {
 type DashboardRoundAccounting = PublicRoundAccounting;
 
 type Dashboard = {
-  schemaVersion: 4 | 7;
+  schemaVersion: 4 | 7 | 8;
   historyComplete: boolean;
   cardHistoryComplete: boolean;
   generatedAt: string;
@@ -82,33 +99,49 @@ type Dashboard = {
   latestCompletedAllocationCycleId: string | null;
   metrics: {
     cycleStartProjectPoolMicroUsdg: string | null;
-    totalCycleFundingMicroUsdg: string;
-    totalCollectorSpendMicroUsdg: string;
-    totalBuybacksReturnedMicroUsdg: string;
-    totalBridgedBackMicroUsdg: string;
-    totalRewardsPaidMicroUsdg: string;
-    totalRewardsDeferredMicroUsdg: string;
-    totalQuotedOperatingCostsMicroUsdg: string;
-    latestRetainedReserveMicroUsdg: string;
-    latestCycleReserveTargetMicroUsdg: string;
+    totalCycleFundingMicroUsdg: string | null;
+    totalCollectorSpendMicroUsdg: string | null;
+    totalBuybacksReturnedMicroUsdg: string | null;
+    totalBridgedBackMicroUsdg: string | null;
+    totalRewardsPaidMicroUsdg: string | null;
+    totalRewardsDeferredMicroUsdg: string | null;
+    totalQuotedOperatingCostsMicroUsdg: string | null;
+    latestRetainedReserveMicroUsdg: string | null;
+    latestCycleReserveTargetMicroUsdg: string | null;
+    cycleStartProjectPoolWei: string | null;
+    totalCycleFundingWei: string | null;
+    totalBridgedBackWei: string | null;
+    totalRewardsPaidWei: string | null;
+    totalRewardsDeferredWei: string | null;
+    totalCollectorSpendMicroUsd: string | null;
+    totalBuybacksReturnedMicroUsd: string | null;
+    totalQuotedOperatingCostsMicroUsd: string | null;
+    latestRetainedReserveWei: string | null;
+    latestCycleReserveTargetWei: string | null;
     completedCycles: number;
-    skippedCycles: number;
-    openedPacks: number;
+    skippedCycles: number | null;
+    openedPacks: number | null;
   };
   latestCycleTopAllocations: Array<{
     rank: number;
     address: string;
-    allocatedMicroUsdg: string;
+    allocatedMicroUsdg?: string;
+    allocatedWei?: string;
   }>;
   cards: DashboardCard[];
   activeCycle: ActiveCycle | null;
+  activeCycleId: string | null;
+  pendingReason: string | null;
+  heldPositions: HeldPosition[] | null;
+  manualApprovals: ManualApproval[] | null;
   latestCycle: {
     cycleId: string;
     status: string;
     reason: string | null;
     updatedAt: string | null;
     paidMicroUsdg: string | null;
-    payoutRecipientCount: number;
+    paidWei: string | null;
+    payoutRecipientCount: number | null;
     roundAccounting: DashboardRoundAccounting | null;
     transactions: Array<{ chain: "evm" | "solana"; purpose: string; id: string }>;
   } | null;
@@ -176,6 +209,10 @@ type AuditResponse = {
 
 type DecisionResponse = {
   code?: string;
+  commandState?: string;
+  replayed?: boolean;
+  receipt?: unknown;
+  state?: { version?: number };
 };
 
 // Matches DECISION_TYPES in packages/dashboard/src/contracts/operator-contracts.mjs exactly.
@@ -185,6 +222,15 @@ type Command =
   | { type: "pause" }
   | { type: "run-cycle-now" }
   | { type: "reconcile" }
+  | { type: "restart-request" }
+  | {
+      type: "held-owner-decision";
+      positionId: string;
+      heldEvidenceDigest: string;
+      expectedPositionRevision: number;
+      choice: "sell" | "keep-holding";
+    }
+  | { type: "manual-approval"; cycleId: string; cycleDigest: string }
   | {
       type: "update-configuration";
       configuration: {
@@ -209,6 +255,20 @@ type FormState = {
   note: string;
 };
 
+type CommandEnvelope = {
+  requestId: string;
+  expectedVersion: number;
+  command: Command;
+  note?: string;
+};
+
+type CommandRun = {
+  requestId: string;
+  phase: "running" | "prepared" | "success" | "failure" | "uncertain";
+  code: string | null;
+  attempts: number;
+};
+
 // intervalMinutes 5..1440 and maxBoostersPerCycle's floor of 1 are the protocol-level bounds from
 // state-schema.mjs itself (not a per-deployment hard cap), so they are safe fixed defaults.
 const EMPTY_FORM: FormState = {
@@ -230,13 +290,28 @@ export default function OperatorControlPanel() {
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [pendingCommand, setPendingCommand] = useState<CommandEnvelope | null>(null);
   const [auditBusy, setAuditBusy] = useState(false);
   const [message, setMessage] = useState("Private Steuerung wird geladen…");
   const [error, setError] = useState<string | null>(null);
   const [dashboardError, setDashboardError] = useState<string | null>(null);
+  const [commandRun, setCommandRun] = useState<CommandRun | null>(null);
+  const [formBaseVersion, setFormBaseVersion] = useState<number | null>(null);
+  const [formBaseSnapshot, setFormBaseSnapshot] = useState<string | null>(null);
+  const [externalChange, setExternalChange] = useState<{ fromVersion: number; toVersion: number } | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
+  const formRef = useRef(form);
+  const formBaseSnapshotRef = useRef(formBaseSnapshot);
+  const formBaseVersionRef = useRef(formBaseVersion);
+  const busyRef = useRef(busy);
+  useEffect(() => {
+    formRef.current = form;
+    formBaseSnapshotRef.current = formBaseSnapshot;
+    formBaseVersionRef.current = formBaseVersion;
+    busyRef.current = busy;
+  }, [busy, form, formBaseSnapshot, formBaseVersion]);
 
-  const loadAudit = useCallback(async (cursor?: string) => {
+  const loadAudit = useCallback(async (cursor?: string, { merge = false } = {}) => {
     await Promise.resolve();
     setAuditBusy(true);
     try {
@@ -246,8 +321,10 @@ export default function OperatorControlPanel() {
       const response = await fetch(endpoint, { cache: "no-store" });
       const body = await readJson<AuditResponse>(response);
       if (!response.ok) throw new Error(stableMessage(body.code));
-      setDecisions((current) => (cursor ? [...current, ...body.decisions] : body.decisions));
-      setNextCursor(body.nextCursor ?? null);
+      setDecisions((current) => cursor || merge
+        ? (cursor ? [...current, ...body.decisions] : mergeAuditEntries(current, body.decisions))
+        : body.decisions);
+      if (!merge || cursor) setNextCursor(body.nextCursor ?? null);
     } catch (auditError) {
       setError(errorMessage(auditError));
     } finally {
@@ -255,7 +332,7 @@ export default function OperatorControlPanel() {
     }
   }, []);
 
-  const loadBootstrap = useCallback(async ({ replaceForm = true } = {}) => {
+  const loadBootstrap = useCallback(async ({ replaceForm = "always" }: { replaceForm?: "always" | "if-clean" | "never" } = {}) => {
     await Promise.resolve();
     setLoading(true);
     setError(null);
@@ -265,7 +342,27 @@ export default function OperatorControlPanel() {
       if (!response.ok) throw new Error(stableMessage(body.code));
       assertNativeOperatorConfiguration(body.state, body.hardCaps);
       setBootstrap(body);
-      if (replaceForm) setForm(formFromState(body.state));
+      const freshSnapshot = configurationSnapshotFromState(body.state);
+      if (replaceForm === "always") {
+        setForm(formFromState(body.state));
+        setFormBaseVersion(body.state.version);
+        setFormBaseSnapshot(freshSnapshot);
+        setExternalChange(null);
+      } else if (replaceForm === "if-clean") {
+        const reconciled = reconcileConfigurationForm({
+          form: formRef.current,
+          baseSnapshot: formBaseSnapshotRef.current ?? freshSnapshot,
+          freshState: body.state,
+          freshSnapshot,
+          formFromState,
+          baseVersion: formBaseVersionRef.current ?? body.state.version,
+          formSnapshot: configurationSnapshotFromForm(formRef.current),
+        });
+        setForm(reconciled.form);
+        setFormBaseVersion(reconciled.baseVersion);
+        setFormBaseSnapshot(reconciled.externalChange ? formBaseSnapshotRef.current : freshSnapshot);
+        setExternalChange(reconciled.externalChange);
+      }
       setMessage("Private Steuerung ist geladen.");
     } catch (bootstrapError) {
       setBootstrap(null);
@@ -289,68 +386,132 @@ export default function OperatorControlPanel() {
     }
   }, []);
 
+  const readOnly = bootstrap?.identity.role !== "operator";
+  const controlsDisabled = loading || busy || pendingCommand !== null || readOnly || !bootstrap;
+  const dashboardPlaceholder = dashboardError ? "Nicht verfügbar" : "Wird geladen…";
+  const hasUnsavedChanges = bootstrap
+    ? configurationSnapshotFromForm(form) !== (formBaseSnapshot ?? configurationSnapshotFromState(bootstrap.state))
+    : false;
+
+  const runCommandEnvelope = useCallback(async (envelope: CommandEnvelope, successMessage: string) => {
+    reservePendingCommand(window.sessionStorage, envelope);
+    setPendingCommand(envelope);
+    setBusy(true);
+    setError(null);
+    setMessage("Entscheidung wird protokolliert…");
+    setCommandRun({ requestId: envelope.requestId, phase: "running", code: null, attempts: 0 });
+    for (let attempt = 0; ; attempt += 1) {
+      let outcome;
+      let responseBody: DecisionResponse | null = null;
+      try {
+        const response = await fetch("/operator/api/decisions", {
+          method: "POST",
+          cache: "no-store",
+          headers: {
+            "content-type": "application/json",
+            "x-hookemon-request": "operator-control",
+          },
+          body: serializePendingCommand(envelope),
+        });
+        try { responseBody = await readJson<DecisionResponse>(response); } catch { /* classify the status */ }
+        outcome = classifyDecisionOutcome({ status: response.status, body: responseBody, requestId: envelope.requestId });
+      } catch {
+        outcome = classifyDecisionOutcome({ status: null, body: null, requestId: envelope.requestId });
+      }
+      setCommandRun({
+        requestId: envelope.requestId,
+        phase: outcome.phase,
+        code: outcome.code,
+        attempts: attempt + 1,
+      });
+      if (outcome.phase === "success") {
+        window.sessionStorage.removeItem(PENDING_COMMAND_STORAGE_KEY);
+        setPendingCommand(null);
+        await Promise.all([
+          loadBootstrap({ replaceForm: envelope.command.type === "update-configuration" ? "always" : "never" }),
+          loadAudit(),
+          loadDashboard(),
+        ]);
+        setMessage(outcome.replayed ? `${successMessage} (bereits angewendet)` : successMessage);
+        break;
+      }
+      if (outcome.phase === "failure") {
+        window.sessionStorage.removeItem(PENDING_COMMAND_STORAGE_KEY);
+        setPendingCommand(null);
+        await loadBootstrap({ replaceForm: "if-clean" });
+        const currentVersion = responseBody?.state?.version;
+        setError(outcome.code === "COMMAND_REJECTED"
+          && Number.isSafeInteger(currentVersion)
+          && currentVersion !== envelope.expectedVersion
+          ? describeRevisionConflict({
+            expectedVersion: envelope.expectedVersion,
+            currentVersion,
+          })
+          : stableMessage(outcome.code ?? undefined));
+        setMessage("Entscheidung wurde nicht angenommen.");
+        break;
+      }
+      if (attempt >= MAX_RECOVERY_ATTEMPTS) {
+        setCommandRun({
+          requestId: envelope.requestId,
+          phase: "uncertain",
+          code: outcome.code,
+          attempts: attempt + 1,
+        });
+        await Promise.all([loadBootstrap({ replaceForm: "if-clean" }), loadAudit(), loadDashboard()]);
+        setMessage(`Ergebnis unbestimmt – Zustand wurde neu geladen; Anfrage ${envelope.requestId} im Audit prüfen.`);
+        break;
+      }
+      setMessage(`Ergebnis noch unbestimmt – ursprüngliche Anfrage wird erneut geprüft… (${envelope.requestId})`);
+      await new Promise((resolve) => window.setTimeout(resolve, nextRecoveryDelayMs(attempt)));
+    }
+    setBusy(false);
+  }, [loadAudit, loadBootstrap, loadDashboard]);
+
   useEffect(() => {
     const initialLoad = window.setTimeout(() => {
-      void Promise.all([loadBootstrap(), loadAudit(), loadDashboard()]);
+      void Promise.all([loadBootstrap(), loadAudit(), loadDashboard()]).then(() => {
+        const pending = parsePendingCommand(window.sessionStorage.getItem(PENDING_COMMAND_STORAGE_KEY));
+        if (pending) void runCommandEnvelope(pending, "Wiederhergestellte Entscheidung wurde abgeschlossen.");
+      });
     }, 0);
     const clock = window.setInterval(() => setNowMs(Date.now()), 1_000);
-    const refresh = window.setInterval(() => void loadDashboard(), 10_000);
+    const refresh = window.setInterval(() => {
+      if (busyRef.current) return;
+      void Promise.all([
+        loadDashboard(),
+        loadBootstrap({ replaceForm: "if-clean" }),
+        loadAudit(undefined, { merge: true }),
+      ]);
+    }, 10_000);
     return () => {
       window.clearTimeout(initialLoad);
       window.clearInterval(clock);
       window.clearInterval(refresh);
     };
-  }, [loadAudit, loadBootstrap, loadDashboard]);
+  }, [loadAudit, loadBootstrap, loadDashboard, runCommandEnvelope]);
 
-  const readOnly = bootstrap?.identity.role !== "operator";
-  const controlsDisabled = loading || busy || readOnly || !bootstrap;
-  const dashboardPlaceholder = dashboardError ? "Nicht verfügbar" : "Wird geladen…";
-  const hasUnsavedChanges = bootstrap
-    ? configurationSnapshotFromForm(form) !== configurationSnapshotFromState(bootstrap.state)
-    : false;
-
-  async function submitCommand(command: Command, successMessage: string) {
+  function submitCommand(command: Command, successMessage: string, expectedVersion = bootstrap?.state.version) {
     if (!bootstrap || controlsDisabled) return;
-    setBusy(true);
-    setError(null);
-    setMessage("Entscheidung wird protokolliert…");
-    try {
-      const response = await fetch("/operator/api/decisions", {
-        method: "POST",
-        cache: "no-store",
-        headers: {
-          "content-type": "application/json",
-          "x-hookemon-request": "operator-control",
-        },
-        body: JSON.stringify({
-          requestId: crypto.randomUUID(),
-          expectedVersion: bootstrap.state.version,
-          command,
-          ...(form.note.trim() ? { note: form.note.trim() } : {}),
-        }),
-      });
-      const body = await readJson<DecisionResponse>(response);
-      if (!response.ok) throw new Error(stableMessage(body.code));
-      // The refresh below sets its own transient "wird geladen"/"ist geladen" status message;
-      // setting the command's own success message afterwards keeps it as the one the operator
-      // actually sees, instead of it flashing for a moment and then being overwritten.
-      await Promise.all([
-        loadBootstrap({ replaceForm: command.type === "update-configuration" }),
-        loadAudit(),
-        loadDashboard(),
-      ]);
-      setMessage(successMessage);
-    } catch (commandError) {
-      setError(errorMessage(commandError));
-      await loadBootstrap({ replaceForm: false });
-      setMessage("Entscheidung wurde nicht angenommen.");
-    } finally {
-      setBusy(false);
-    }
+    if (!Number.isSafeInteger(expectedVersion)) return;
+    const envelope = buildCommandEnvelope({
+      requestId: crypto.randomUUID(),
+      expectedVersion,
+      command,
+      note: form.note.trim() || undefined,
+    }) as CommandEnvelope;
+    try { reservePendingCommand(window.sessionStorage, envelope); }
+    catch { setError("Eine offene Anfrage muss zuerst wiederhergestellt werden."); return; }
+    setPendingCommand(envelope);
+    void runCommandEnvelope(envelope, successMessage);
   }
 
   function saveConfiguration(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (formBaseVersion === null) {
+      setError("Konfigurationsstand ist noch nicht geladen.");
+      return;
+    }
     let maxUnitPriceMicroUsd;
     let maxCycleBudgetMicroUsd;
     let max24HourBudgetMicroUsd;
@@ -381,6 +542,7 @@ export default function OperatorControlPanel() {
         },
       },
       "Konfiguration wurde gespeichert und protokolliert.",
+      formBaseVersion,
     );
   }
 
@@ -411,6 +573,28 @@ export default function OperatorControlPanel() {
     // itself trigger a fix or a new transaction (that happens automatically inside the scheduler
     // when needed). Say exactly that, not a fabricated "problem resolved" outcome.
     void submitCommand({ type: "reconcile" }, "Zustand wurde neu gelesen und protokolliert.");
+  }
+
+  function resumeCycle() {
+    void submitCommand({ type: "restart-request" }, "Der aktive Zyklus wurde zur Fortsetzung vorgemerkt.");
+  }
+
+  function decideHeld(position: HeldPosition, choice: "sell" | "keep-holding") {
+    void submitCommand({
+      type: "held-owner-decision",
+      positionId: position.positionId,
+      heldEvidenceDigest: position.evidenceDigest,
+      expectedPositionRevision: position.positionRevision,
+      choice,
+    }, choice === "sell" ? "Verkauf der gehaltenen Karte wurde protokolliert." : "Weiterhalten der Karte wurde protokolliert.");
+  }
+
+  function approveManual(approval: ManualApproval) {
+    void submitCommand({
+      type: "manual-approval",
+      cycleId: approval.cycleId,
+      cycleDigest: approval.cycleDigest,
+    }, "Manuelle Freigabe wurde protokolliert.");
   }
 
   function togglePackAllowed(packId: string) {
@@ -486,17 +670,47 @@ export default function OperatorControlPanel() {
           value={bootstrap?.identity.role === "operator" ? "Operator" : "Nur Lesen"}
           tone={bootstrap?.identity.role === "operator" ? "positive" : "neutral"}
         />
-        <StatusCard label="Konfigurationsstand" value={String(bootstrap?.state.version ?? "—")} tone="neutral" />
+        <StatusCard
+          label="Konfigurationsstand"
+          value={String(bootstrap?.state.version ?? "—")}
+          detail={formBaseVersion !== null && formBaseVersion !== bootstrap?.state.version
+            ? `Formular basiert auf Stand ${formBaseVersion}`
+            : undefined}
+          tone="neutral"
+        />
       </div>
 
       <div className={styles.feedback} aria-live="polite">
         <span>{busy ? "Wird verarbeitet…" : message}</span>
+        {pendingCommand ? (
+          <button className={styles.secondaryButton} type="button" disabled={busy || readOnly}
+            onClick={() => void runCommandEnvelope(pendingCommand, "Ursprüngliche Entscheidung wurde abgeschlossen.")}>
+            Ursprüngliche Anfrage erneut prüfen
+          </button>
+        ) : null}
+        {commandRun ? (
+          <span>
+            Befehlsstatus: {commandPhaseLabel(commandRun.phase)} · Anfrage {commandRun.requestId}
+            {commandRun.code ? ` · ${commandRun.code}` : ""}
+          </span>
+        ) : null}
         {error ? (
           <span className={styles.error} role="alert">
             {error} <button type="button" onClick={() => void loadBootstrap()}>Erneut versuchen</button>
           </span>
         ) : null}
       </div>
+      {externalChange ? (
+        <div className={styles.feedback} role="status">
+          <span>
+            Konfiguration wurde extern geändert (Stand {externalChange.fromVersion} → {externalChange.toVersion}).
+            Ungespeicherte Änderungen bleiben erhalten.
+          </span>
+          <button type="button" onClick={() => void loadBootstrap({ replaceForm: "always" })}>
+            Externe Änderungen übernehmen
+          </button>
+        </div>
+      ) : null}
 
       <section className={`${styles.panel} ${styles.currentCyclePanel}`} aria-label="Laufender Zyklus">
         <div className={styles.panelHeading}>
@@ -529,9 +743,9 @@ export default function OperatorControlPanel() {
                 value={String(dashboard.activeCycle.requestedOrders)}
               />
               <CurrentValue label="Maximale Booster" value={nullableInteger(dashboard.activeCycle.maxBoostersPerCycle)} />
-              <CurrentValue label="Maximaler Packpreis" value={dashboard.schemaVersion === 7 ? nullableUsd((dashboard.activeCycle as unknown as Record<string, string | null>).maxUnitPriceMicroUsd) : nullableMoney(dashboard.activeCycle.maxUnitPriceMicroUsdg)} />
-              <CurrentValue label="Zyklusbudget" value={dashboard.schemaVersion === 7 ? nullableUsd((dashboard.activeCycle as unknown as Record<string, string | null>).maxCycleBudgetMicroUsd) : nullableMoney(dashboard.activeCycle.maxCycleBudgetMicroUsdg)} />
-              <CurrentValue label="24-Stunden-Budget" value={dashboard.schemaVersion === 7 ? nullableUsd((dashboard.activeCycle as unknown as Record<string, string | null>).max24HourBudgetMicroUsd) : nullableMoney(dashboard.activeCycle.max24HourBudgetMicroUsdg)} />
+              <CurrentValue label="Maximaler Packpreis" value={Object.hasOwn(dashboard.activeCycle, "maxUnitPriceMicroUsd") ? nullableUsd((dashboard.activeCycle as unknown as Record<string, string | null>).maxUnitPriceMicroUsd) : nullableMoney(dashboard.activeCycle.maxUnitPriceMicroUsdg)} />
+              <CurrentValue label="Zyklusbudget" value={Object.hasOwn(dashboard.activeCycle, "maxUnitPriceMicroUsd") ? nullableUsd((dashboard.activeCycle as unknown as Record<string, string | null>).maxCycleBudgetMicroUsd) : nullableMoney(dashboard.activeCycle.maxCycleBudgetMicroUsdg)} />
+              <CurrentValue label="24-Stunden-Budget" value={Object.hasOwn(dashboard.activeCycle, "maxUnitPriceMicroUsd") ? nullableUsd((dashboard.activeCycle as unknown as Record<string, string | null>).max24HourBudgetMicroUsd) : nullableMoney(dashboard.activeCycle.max24HourBudgetMicroUsdg)} />
               <CurrentValue label="Bestätigte Karten" value={String(dashboard.activeCycle.revealedCards)} />
             </dl>
             <details className={styles.technicalDetails}>
@@ -576,12 +790,12 @@ export default function OperatorControlPanel() {
             label="Pool beim letzten Zyklusstart"
             value={dashboard ? formatCycleStartProjectPool(dashboard) : dashboardPlaceholder}
           />
-          <Metric label="Packkäufe" value={dashboard ? (dashboard.schemaVersion === 7 ? nativeOperatorAmount((dashboard.metrics as unknown as Record<string, unknown>).totalCollectorSpendMicroUsd, true) : historicalMicroUsdg(dashboard, dashboard.metrics.totalCollectorSpendMicroUsdg)) : dashboardPlaceholder} />
-          <Metric label="Bestätigte Buybacks" value={dashboard ? (dashboard.schemaVersion === 7 ? nativeOperatorAmount((dashboard.metrics as unknown as Record<string, unknown>).totalBuybacksReturnedMicroUsd, true) : historicalMicroUsdg(dashboard, dashboard.metrics.totalBuybacksReturnedMicroUsdg)) : dashboardPlaceholder} />
-          <Metric label="Zurück transferiert" value={dashboard ? (dashboard.schemaVersion === 7 ? nativeOperatorAmount((dashboard.metrics as unknown as Record<string, unknown>).totalBridgedBackWei, false) : historicalMicroUsdg(dashboard, dashboard.metrics.totalBridgedBackMicroUsdg)) : dashboardPlaceholder} />
+          <Metric label="Packkäufe" value={dashboard ? dashboardNativeMetric(dashboard, "totalCollectorSpendMicroUsd", "totalCollectorSpendMicroUsdg", true) : dashboardPlaceholder} />
+          <Metric label="Bestätigte Buybacks" value={dashboard ? dashboardNativeMetric(dashboard, "totalBuybacksReturnedMicroUsd", "totalBuybacksReturnedMicroUsdg", true) : dashboardPlaceholder} />
+          <Metric label="Zurück transferiert" value={dashboard ? dashboardNativeMetric(dashboard, "totalBridgedBackWei", "totalBridgedBackMicroUsdg") : dashboardPlaceholder} />
           <Metric label="Letzte tatsächliche Ausschüttung" value={dashboard ? latestActuallyPaid(dashboard) : dashboardPlaceholder} />
           <Metric label="Nächste Gebührenreserve (50 %)" value={dashboard ? latestReserveTarget(dashboard) : dashboardPlaceholder} />
-          <Metric label="Angebotene Betriebskosten" value={dashboard ? (dashboard.schemaVersion === 7 ? nativeOperatorAmount((dashboard.metrics as unknown as Record<string, unknown>).totalQuotedOperatingCostsMicroUsd, true) : historicalMicroUsdg(dashboard, dashboard.metrics.totalQuotedOperatingCostsMicroUsdg)) : dashboardPlaceholder} />
+          <Metric label="Angebotene Betriebskosten" value={dashboard ? dashboardNativeMetric(dashboard, "totalQuotedOperatingCostsMicroUsd", "totalQuotedOperatingCostsMicroUsdg", true) : dashboardPlaceholder} />
           <Metric label="Abgeschlossene Zyklen" value={dashboard ? historicalCount(dashboard, dashboard.metrics.completedCycles) : dashboardPlaceholder} />
           <Metric label="Geöffnete Packs" value={dashboard ? historicalCount(dashboard, dashboard.metrics.openedPacks) : dashboardPlaceholder} />
         </div>
@@ -684,7 +898,8 @@ export default function OperatorControlPanel() {
                     <span>
                       <strong>{pack.name}</strong>
                       <small>
-                        {formatMicroStablecoin(pack.priceMicroUsdc)} (Collector Crypt, Solana stablecoin) · {pack.available} verfügbar
+                        {formatMicroStablecoin(pack.priceMicroStablecoin ?? pack.priceMicroUsdc)} (Collector Crypt, Solana stablecoin)
+                        {pack.available === null ? "" : ` · ${pack.available} verfügbar`}
                       </small>
                     </span>
                   </label>
@@ -853,6 +1068,89 @@ export default function OperatorControlPanel() {
         </aside>
       </div>
 
+      <section className={styles.activityGrid}>
+        <div className={styles.panel}>
+          <div className={styles.panelHeading}>
+            <div>
+              <span className={styles.sectionNumber}>SICHERHEIT</span>
+              <h2>Gehaltene Karten</h2>
+            </div>
+            {dashboard?.activeCycleId ? <span>Aktiver Zyklus vorhanden</span> : null}
+          </div>
+          {dashboard?.heldPositions === null || !dashboard ? (
+            <p className={styles.empty}>Nicht verfügbar</p>
+          ) : dashboard.heldPositions.length === 0 ? (
+            <p className={styles.empty}>Keine gehaltenen Karten.</p>
+          ) : (
+            <div className={styles.payoutList}>
+              {dashboard.heldPositions.map((position) => (
+                <article key={position.positionId} className={styles.payoutList}>
+                  <div>
+                    <strong>{position.cycleId}</strong>
+                    <small>{position.reason} · {position.terminalState}</small>
+                  </div>
+                  <div>
+                    <span>Kosten: {formatGermanUsd(position.costMicroUsd)}</span>
+                    <span>Geöffnet: {formatGermanDate(position.openedAt)}</span>
+                    <span>Revision: {position.positionRevision}</span>
+                    <code>{position.evidenceDigest.slice(0, 19)}…</code>
+                  </div>
+                  <div>
+                    <span>{position.ownerDecision ? `Entscheidung: ${germanStatus(position.ownerDecision.choice)}` : "Keine Entscheidung"}</span>
+                    {!readOnly ? (
+                      <div className={styles.actionStack}>
+                        <button className={styles.secondaryButton} type="button" disabled={controlsDisabled} onClick={() => decideHeld(position, "sell")}>
+                          Verkaufen
+                        </button>
+                        <button className={styles.secondaryButton} type="button" disabled={controlsDisabled} onClick={() => decideHeld(position, "keep-holding")}>
+                          Weiter halten
+                        </button>
+                      </div>
+                    ) : null}
+                  </div>
+                </article>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className={styles.panel}>
+          <div className={styles.panelHeading}>
+            <div>
+              <span className={styles.sectionNumber}>FREIGABEN</span>
+              <h2>Manuelle Freigaben</h2>
+            </div>
+          </div>
+          {dashboard?.manualApprovals === null || !dashboard ? (
+            <p className={styles.empty}>Nicht verfügbar</p>
+          ) : dashboard.manualApprovals.length === 0 ? (
+            <p className={styles.empty}>Keine manuellen Freigaben.</p>
+          ) : (
+            <ol className={styles.payoutList}>
+              {dashboard.manualApprovals.map((approval) => (
+                <li key={approval.cycleDigest}>
+                  <span>{approval.cycleId} · {approval.mode}</span>
+                  <strong>{approval.approved ? "Erledigt" : "Ausstehend"}</strong>
+                  {!approval.approved && !readOnly ? (
+                    <button className={styles.secondaryButton} type="button" disabled={controlsDisabled} onClick={() => approveManual(approval)}>
+                      Freigeben
+                    </button>
+                  ) : null}
+                </li>
+              ))}
+            </ol>
+          )}
+          <button
+            className={styles.primaryButton}
+            type="button"
+            disabled={controlsDisabled || dashboard?.activeCycleId === null || !dashboard?.activeCycleId}
+            onClick={resumeCycle}
+          >
+            Zyklus fortsetzen
+          </button>
+        </div>
+      </section>
+
       <OperatorCardHistory
         liveCards={dashboard?.cards ?? []}
         activeCycleId={dashboard?.activeCycle?.cycleId ?? null}
@@ -879,7 +1177,7 @@ export default function OperatorControlPanel() {
                 <li key={entry.address}>
                   <span>#{entry.rank}</span>
                   <code>{shortAddress(entry.address)}</code>
-                  <strong>{formatMicroUsdg(entry.allocatedMicroUsdg)}</strong>
+                  <strong>{isNativeDashboard(dashboard) ? nativeOperatorAmount(entry.allocatedWei) : formatMicroUsdg(entry.allocatedMicroUsdg ?? null)}</strong>
                 </li>
               ))}
             </ol>
@@ -937,13 +1235,34 @@ export default function OperatorControlPanel() {
   );
 }
 
-function StatusCard({ label, value, tone }: { label: string; value: string; tone: "positive" | "warning" | "neutral" }) {
+function StatusCard({
+  label,
+  value,
+  detail,
+  tone,
+}: {
+  label: string;
+  value: string;
+  detail?: string;
+  tone: "positive" | "warning" | "neutral";
+}) {
   return (
     <div className={styles.statusCard} data-tone={tone}>
       <span>{label}</span>
       <strong>{value}</strong>
+      {detail ? <small>{detail}</small> : null}
     </div>
   );
+}
+
+function commandPhaseLabel(phase: CommandRun["phase"]) {
+  return {
+    running: "Läuft",
+    prepared: "Vorbereitet",
+    success: "Erfolgreich",
+    failure: "Abgelehnt",
+    uncertain: "Unbestimmt",
+  }[phase];
 }
 
 function CurrentValue({ label, value }: { label: string; value: string }) {
@@ -1164,12 +1483,12 @@ function formatOptionalMicroUsdg(value: string | undefined) {
   return value === undefined ? "Noch nicht bestätigt" : formatMicroUsdg(value);
 }
 
-function historicalMicroUsdg(dashboard: Dashboard | null, value: string | undefined) {
+function historicalMicroUsdg(dashboard: Dashboard | null, value: string | null | undefined) {
   if (!dashboard) return "Wird geladen…";
   return dashboard.historyComplete ? formatOptionalMicroUsdg(value) : "Historie unvollständig";
 }
 
-function historicalCount(dashboard: Dashboard | null, value: number | undefined) {
+function historicalCount(dashboard: Dashboard | null, value: number | null | undefined) {
   if (!dashboard) return "Wird geladen…";
   return dashboard.historyComplete && value !== undefined ? formatNumber(value) : "Historie unvollständig";
 }
@@ -1178,7 +1497,7 @@ function latestActuallyPaid(dashboard: Dashboard | null) {
   if (!dashboard) return "Wird geladen…";
   if (!dashboard.latestCycle) return "Noch keine abgeschlossene Runde";
   const accounting = dashboard.latestCycle.roundAccounting;
-  if (dashboard.schemaVersion === 7) return nativeOperatorAmount((accounting as unknown as Record<string, unknown> | null)?.paidHolderRewardsWei);
+  if (isNativeDashboard(dashboard)) return nativeOperatorAmount((accounting as unknown as Record<string, unknown> | null)?.paidHolderRewardsWei);
   if (accounting) {
     return pendingMicroUsdg(
       accounting.paidHolderRewardsMicroUsdg,
@@ -1192,7 +1511,7 @@ function latestReserveTarget(dashboard: Dashboard | null) {
   if (!dashboard) return "Wird geladen…";
   if (!dashboard.latestCycle) return "Noch keine abgeschlossene Runde";
   const accounting = dashboard.latestCycle.roundAccounting;
-  if (dashboard.schemaVersion === 7) return nativeOperatorAmount((accounting as unknown as Record<string, unknown> | null)?.feeReserveTargetWei);
+  if (isNativeDashboard(dashboard)) return nativeOperatorAmount(dashboard.metrics.latestCycleReserveTargetWei);
   return accounting
     ? pendingMicroUsdg(
       accounting.feeReserveTargetMicroUsdg,
@@ -1305,7 +1624,7 @@ function downloadCommunityCard(dashboard: Dashboard) {
   context.fillStyle = "#f5d94c";
   context.font = "700 28px monospace";
   context.fillText(
-    dashboard.historyComplete ? "GESAMTHISTORIE VOLLSTÄNDIG" : "GESAMTHISTORIE VORLÄUFIG",
+    operatorHistoryLabel(dashboard.historyComplete),
     72,
     1010,
   );
@@ -1334,13 +1653,49 @@ function decodeDashboard(value: unknown): Dashboard {
     decodeDashboard(skeleton);
     return structuredClone(raw) as unknown as Dashboard;
   }
+  const nativeLatest = raw.schemaVersion === 8
+    && (raw.latestCycle as Record<string, unknown> | null)?.roundAccounting
+    && ((raw.latestCycle as Record<string, unknown>).roundAccounting as Record<string, unknown>).schema
+      === "hookemon.native-round-accounting.v1";
+  if (nativeLatest) {
+    const latest = raw.latestCycle as Record<string, unknown>;
+    requireNativeRound(latest.roundAccounting);
+    const skeleton = nativeValidationSkeleton(raw) as Record<string, unknown>;
+    skeleton.schemaVersion = 8;
+    (skeleton.latestCycle as Record<string, unknown>).roundAccounting = null;
+    const decoded = decodeDashboard(skeleton);
+    const nativeMetrics = dashboardRecord(raw.metrics);
+    return {
+      ...decoded,
+      schemaVersion: 8,
+      activeCycle: raw.activeCycle === null ? null : decodeActiveCycle(raw.activeCycle),
+      metrics: { ...decoded.metrics, ...nativeMetrics } as Dashboard["metrics"],
+      latestCycle: decoded.latestCycle
+        ? {
+          ...decoded.latestCycle,
+          paidMicroUsdg: null,
+          paidWei: dashboardOptionalMoney(latest.paidWei),
+          roundAccounting: latest.roundAccounting as DashboardRoundAccounting,
+        }
+        : null,
+      latestCycleTopAllocations: dashboardArray(raw.latestCycleTopAllocations, 200).map((entry) => {
+        const allocation = dashboardRecord(entry);
+        return {
+          rank: dashboardInteger(allocation.rank, 1, 200),
+          address: dashboardText(allocation.address),
+          allocatedWei: dashboardMoney(allocation.allocatedWei),
+        };
+      }),
+    };
+  }
   if (
     raw.schemaVersion !== 1 &&
     raw.schemaVersion !== 2 &&
     raw.schemaVersion !== 3 &&
     raw.schemaVersion !== 4 &&
     raw.schemaVersion !== 5 &&
-    raw.schemaVersion !== 6
+    raw.schemaVersion !== 6 &&
+    raw.schemaVersion !== 8
   ) {
     throw new Error(DASHBOARD_RESPONSE_UNSUPPORTED);
   }
@@ -1356,7 +1711,10 @@ function decodeDashboard(value: unknown): Dashboard {
       ? metrics.cycleStartProjectPoolMicroUsdg ?? metrics.currentProjectPoolMicroUsdg
       : metrics.cycleStartProjectPoolMicroUsdg;
   const decodedMetrics = Object.fromEntries(
-    DASHBOARD_MONEY_FIELDS.map((field) => [field, dashboardMoney(metrics[field])]),
+    DASHBOARD_MONEY_FIELDS.map((field) => [
+      field,
+      raw.schemaVersion === 8 ? dashboardOptionalMoney(metrics[field]) : dashboardMoney(metrics[field]),
+    ]),
   ) as Pick<Dashboard["metrics"], (typeof DASHBOARD_MONEY_FIELDS)[number]>;
   const allocationSource = schemaVersion === 1
     ? raw.top200 ?? raw.latestCycleTopAllocations
@@ -1377,7 +1735,7 @@ function decodeDashboard(value: unknown): Dashboard {
   const pool = decodeCycleStartProjectPool(poolValue, observedAt);
 
   return {
-    schemaVersion: 4,
+    schemaVersion: raw.schemaVersion === 8 ? 8 : 4,
     historyComplete,
     cardHistoryComplete,
     generatedAt: dashboardTimestamp(raw.generatedAt),
@@ -1393,8 +1751,8 @@ function decodeDashboard(value: unknown): Dashboard {
       cycleStartProjectPoolMicroUsdg: pool.cycleStartProjectPoolMicroUsdg,
       ...decodedMetrics,
       completedCycles: dashboardInteger(metrics.completedCycles, 0),
-      skippedCycles: dashboardInteger(metrics.skippedCycles, 0),
-      openedPacks: dashboardInteger(metrics.openedPacks, 0),
+      skippedCycles: raw.schemaVersion === 8 && metrics.skippedCycles === null ? null : dashboardInteger(metrics.skippedCycles, 0),
+      openedPacks: raw.schemaVersion === 8 && metrics.openedPacks === null ? null : dashboardInteger(metrics.openedPacks, 0),
     },
     latestCycleTopAllocations: dashboardArray(allocationSource, 200).map((entry) => {
       const allocation = dashboardRecord(entry);
@@ -1404,6 +1762,7 @@ function decodeDashboard(value: unknown): Dashboard {
         rank: dashboardInteger(allocation.rank, 1, 200),
         address,
         allocatedMicroUsdg: dashboardMoney(allocation.allocatedMicroUsdg),
+        allocatedWei: null,
       };
     }),
     cards: dashboardArray(raw.cards, 60).map((card) =>
@@ -1412,12 +1771,87 @@ function decodeDashboard(value: unknown): Dashboard {
       ? null
       : decodeActiveCycle(raw.activeCycle),
     latestCycle: decodeLatestCycle(raw.latestCycle, schemaVersion),
+    activeCycleId: raw.schemaVersion === 8 ? dashboardNullableText(raw.activeCycleId) : null,
+    pendingReason: raw.schemaVersion === 8 ? dashboardNullableText(raw.pendingReason) : null,
+    heldPositions: raw.schemaVersion === 8
+      ? (raw.heldPositions === null ? null : dashboardArray(raw.heldPositions, 10_000).map(decodeHeldPosition))
+      : null,
+    manualApprovals: raw.schemaVersion === 8
+      ? (raw.manualApprovals === null ? null : dashboardArray(raw.manualApprovals, 10_000).map(decodeManualApproval))
+      : null,
+  };
+}
+
+function decodeHeldPosition(value: unknown): HeldPosition {
+  const raw = dashboardRecord(value);
+  dashboardExactKeys(raw, new Set([
+    "positionId", "cycleId", "costMicroUsd", "insuredValue", "reason", "terminalState",
+    "evidenceDigest", "openedAt", "positionRevision", "ownerDecision",
+  ]));
+  const insuredValue = raw.insuredValue === null ? null : dashboardRecord(raw.insuredValue);
+  if (insuredValue !== null) {
+    dashboardExactKeys(insuredValue, new Set(["chainId", "assetId", "units", "decimals"]));
+    dashboardText(insuredValue.chainId);
+    dashboardText(insuredValue.assetId);
+    dashboardMoney(insuredValue.units);
+    dashboardInteger(insuredValue.decimals, 0, 255);
+  }
+  let ownerDecision: HeldPosition["ownerDecision"] = null;
+  if (raw.ownerDecision !== null) {
+    const decision = dashboardRecord(raw.ownerDecision);
+    dashboardExactKeys(decision, new Set([
+      "positionId", "heldEvidenceDigest", "requestId", "expectedRevision", "choice",
+    ]));
+    ownerDecision = {
+      positionId: dashboardText(decision.positionId),
+      heldEvidenceDigest: dashboardText(decision.heldEvidenceDigest),
+      requestId: dashboardText(decision.requestId),
+      expectedRevision: dashboardInteger(decision.expectedRevision, 0),
+      choice: decision.choice === "sell" || decision.choice === "keep-holding"
+        ? decision.choice
+        : (() => { throw new Error(DASHBOARD_RESPONSE_INVALID); })(),
+    };
+  }
+  return {
+    positionId: dashboardText(raw.positionId),
+    cycleId: dashboardText(raw.cycleId),
+    costMicroUsd: dashboardMoney(raw.costMicroUsd),
+    insuredValue: insuredValue as HeldPosition["insuredValue"],
+    reason: dashboardText(raw.reason),
+    terminalState: dashboardText(raw.terminalState),
+    evidenceDigest: dashboardText(raw.evidenceDigest),
+    openedAt: dashboardTimestamp(raw.openedAt),
+    positionRevision: dashboardInteger(raw.positionRevision, 0),
+    ownerDecision,
+  };
+}
+
+function decodeManualApproval(value: unknown): ManualApproval {
+  const raw = dashboardRecord(value);
+  dashboardExactKeys(raw, new Set([
+    "cycleId", "cycleDigest", "mode", "ordinal", "releaseCostMicroUsd",
+    "openedAt", "approved", "approvedAt",
+  ]));
+  if (raw.mode !== "production" && raw.mode !== "rehearsal") throw new Error(DASHBOARD_RESPONSE_INVALID);
+  return {
+    cycleId: dashboardText(raw.cycleId),
+    cycleDigest: dashboardText(raw.cycleDigest),
+    mode: raw.mode,
+    ordinal: dashboardInteger(raw.ordinal, 1),
+    releaseCostMicroUsd: dashboardMoney(raw.releaseCostMicroUsd),
+    openedAt: dashboardTimestamp(raw.openedAt),
+    approved: dashboardBoolean(raw.approved),
+    approvedAt: raw.approvedAt === null ? null : dashboardTimestamp(raw.approvedAt),
   };
 }
 
 function decodeActiveCycle(value: unknown): ActiveCycle {
   const raw = dashboardRecord(value);
-  dashboardExactKeys(raw, ACTIVE_CYCLE_KEYS);
+  const native = Object.hasOwn(raw, "maxUnitPriceMicroUsd");
+  const keys = native
+    ? new Set([...ACTIVE_CYCLE_KEYS].map(key => key.endsWith("MicroUsdg") ? key.slice(0, -1) : key))
+    : ACTIVE_CYCLE_KEYS;
+  dashboardExactKeys(raw, keys);
   const allowedPackIds = dashboardArray(raw.allowedPackIds, 10_000).map(dashboardText);
   const allowed = new Set(allowedPackIds);
   if (allowed.size !== allowedPackIds.length) throw new Error(DASHBOARD_RESPONSE_INVALID);
@@ -1439,17 +1873,22 @@ function decodeActiveCycle(value: unknown): ActiveCycle {
     allowedPackIds,
     requestedOrders,
     maxBoostersPerCycle,
-    maxUnitPriceMicroUsdg: dashboardOptionalMoney(raw.maxUnitPriceMicroUsdg),
-    maxCycleBudgetMicroUsdg: dashboardOptionalMoney(raw.maxCycleBudgetMicroUsdg),
-    max24HourBudgetMicroUsdg: dashboardOptionalMoney(raw.max24HourBudgetMicroUsdg),
-    revealedCards: dashboardInteger(raw.revealedCards, 0, 10_000),
+    maxUnitPriceMicroUsdg: native ? null : dashboardOptionalMoney(raw.maxUnitPriceMicroUsdg),
+    maxCycleBudgetMicroUsdg: native ? null : dashboardOptionalMoney(raw.maxCycleBudgetMicroUsdg),
+    max24HourBudgetMicroUsdg: native ? null : dashboardOptionalMoney(raw.max24HourBudgetMicroUsdg),
+    ...(native ? {
+      maxUnitPriceMicroUsd: dashboardOptionalMoney(raw.maxUnitPriceMicroUsd),
+      maxCycleBudgetMicroUsd: dashboardOptionalMoney(raw.maxCycleBudgetMicroUsd),
+      max24HourBudgetMicroUsd: dashboardOptionalMoney(raw.max24HourBudgetMicroUsd),
+    } : {}),
+    revealedCards: raw.revealedCards === null ? null : dashboardInteger(raw.revealedCards, 0, 10_000),
     rewardRecipientLimit: raw.rewardRecipientLimit === undefined
       ? undefined
       : raw.rewardRecipientLimit === null ? null : dashboardInteger(raw.rewardRecipientLimit, 50, 1_000),
   };
 }
 
-function decodeDashboardCard(value: unknown, schemaVersion: 1 | 2 | 3 | 4): DashboardCard {
+function decodeDashboardCard(value: unknown, schemaVersion: 1 | 2 | 3 | 4 | 8): DashboardCard {
   const raw = dashboardRecord(value);
   if (schemaVersion === 4) dashboardExactKeys(raw, DASHBOARD_CARD_KEYS);
   const card: DashboardCard = {
@@ -1476,7 +1915,7 @@ function decodeDashboardCard(value: unknown, schemaVersion: 1 | 2 | 3 | 4): Dash
   return card;
 }
 
-function decodeLatestCycle(value: unknown, schemaVersion: 1 | 2 | 3 | 4): Dashboard["latestCycle"] {
+function decodeLatestCycle(value: unknown, schemaVersion: 1 | 2 | 3 | 4 | 8): Dashboard["latestCycle"] {
   if (value === null) return null;
   const raw = dashboardRecord(value);
   return {
@@ -1485,8 +1924,11 @@ function decodeLatestCycle(value: unknown, schemaVersion: 1 | 2 | 3 | 4): Dashbo
     reason: dashboardNullableText(raw.reason),
     updatedAt: dashboardNullableTimestamp(raw.updatedAt),
     paidMicroUsdg: schemaVersion >= 3 ? dashboardOptionalMoney(raw.paidMicroUsdg) : null,
+    paidWei: null,
     payoutRecipientCount: schemaVersion >= 3
-      ? dashboardInteger(raw.payoutRecipientCount, 0)
+      ? (schemaVersion === 8 && raw.payoutRecipientCount === null
+        ? null
+        : dashboardInteger(raw.payoutRecipientCount, 0))
       : 0,
     roundAccounting: schemaVersion === 3 || schemaVersion === 4
       ? decodeRoundAccounting(raw.roundAccounting, schemaVersion, raw.paidMicroUsdg)
@@ -1499,7 +1941,7 @@ function decodeLatestCycle(value: unknown, schemaVersion: 1 | 2 | 3 | 4): Dashbo
 
 function decodeRoundAccounting(
   value: unknown,
-  schemaVersion: 3 | 4,
+  schemaVersion: 3 | 4 | 8,
   paidMicroUsdg: unknown,
 ): DashboardRoundAccounting | null {
   if (value === null) return null;
@@ -1727,5 +2169,21 @@ function nullableUsd(value: string | null) {
 
 function nativeOperatorAmount(value: unknown, usd = false) {
   if (typeof value !== "string") return "Noch nicht bestätigt";
-  return usd ? formatGermanUsd(value) : formatGermanEth(value);
+  return usd ? formatGermanUsd(value) : formatNativeAmount(value, 18, "ETH");
+}
+
+function isNativeDashboard(dashboard: Dashboard) {
+  return dashboard.schemaVersion === 7
+    || dashboard.latestCycle?.roundAccounting?.schema === "hookemon.native-round-accounting.v1";
+}
+
+function dashboardNativeMetric(
+  dashboard: Dashboard,
+  nativeKey: keyof Dashboard["metrics"],
+  historicalKey: keyof Dashboard["metrics"],
+  usd = false,
+) {
+  return isNativeDashboard(dashboard)
+    ? nativeOperatorAmount(dashboard.metrics[nativeKey], usd)
+    : historicalMicroUsdg(dashboard, dashboard.metrics[historicalKey]);
 }

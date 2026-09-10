@@ -8,6 +8,7 @@ import {
   ContractValidationError,
   readDecisionRequest,
 } from '../contracts/operator-contracts.mjs';
+import { decodeCardCursor } from '../storage/sqlite-projection.mjs';
 import { buildBootstrap, buildDashboardReadModel } from '../projections/operator-projection.mjs';
 import { applyDecision, OperatorControlUnavailable } from '../projections/decision-application.mjs';
 import { proxyCredentialMatches } from '../auth/proxy-credential.mjs';
@@ -15,6 +16,7 @@ import {
   AuditRequestConflict,
   AuditedCommandEffectError,
   executeAuditedCommand,
+  readVerifiedAuditEntries,
   readAllAuditEntries,
 } from '../auth/audit-log.mjs';
 import { sendJson } from './public.mjs';
@@ -84,6 +86,18 @@ async function projectDurableAuditReceipt(ctx, receipt) {
   }
 }
 
+async function syncAuditProjection(ctx) {
+  if (!ctx.auditLogPath || typeof ctx.sqliteProjection?.rebuildAuditProjection !== 'function') return;
+  try {
+    // One verified snapshot replaces the projection atomically. Sequence counts alone cannot
+    // distinguish an append from a replacement with the same or a longer prefix.
+    const durable = await readVerifiedAuditEntries(ctx.auditLogPath);
+    ctx.sqliteProjection.rebuildAuditProjection(durable);
+  } catch (error) {
+    ctx.onError?.('operator-audit-sync', error);
+  }
+}
+
 function unavailable(res, error) {
   if (error instanceof OperatorControlUnavailable) {
     sendJson(res, 503, { code: error.code });
@@ -94,6 +108,8 @@ function unavailable(res, error) {
 
 function receiptResultCode(command, authorityStatus) {
   if (command.type === 'run-cycle-now') return 'TICK_TRIGGERED';
+  if (command.type === 'held-owner-decision') return 'HELD_OWNER_DECISION_RECORDED';
+  if (command.type === 'manual-approval') return 'MANUAL_APPROVAL_RECORDED';
   if (command.type === 'resume-cycle') {
     return authorityStatus.activeCycleId === null ? 'RECOVERY_NO_ACTIVE_CYCLE' : 'RECOVERY_DISPATCHED';
   }
@@ -111,6 +127,7 @@ function auditCommandHttpStatus(commandState) {
 function isDeterministicAuthorityRejection(error) {
   if (!error || typeof error.message !== 'string') return false;
   return error.message === 'stale operator state revision'
+    || error.message === 'cycle-repository recordHeldOwnerDecision: stale position revision'
     || /^operator configuration (maxBoostersPerCycle|maxUnitPriceMicroUsdg?|maxCycleBudgetMicroUsdg?|max24HourBudgetMicroUsdg?) exceeds the fixed hard cap$/.test(error.message);
 }
 
@@ -121,11 +138,25 @@ export function createBootstrapHandler(ctx) {
     if (req.method !== 'GET') return sendJson(res, 405, { code: 'METHOD_NOT_ALLOWED' });
     try {
       const authorityStatus = await loadAuthorityStatus(ctx);
+      const catalog = typeof ctx.readCatalog === 'function'
+        ? await ctx.readCatalog()
+        : (ctx.catalog ?? null);
+      let readiness;
+      try {
+        readiness = typeof ctx.readReadiness === 'function'
+          ? await ctx.readReadiness()
+          : (ctx.readiness ?? { ready: false, reasons: ['catalog-not-loaded'] });
+      } catch (error) {
+        ctx.onError?.('operator-bootstrap-readiness', error);
+        readiness = { ready: false, reasons: ['start-readiness: unavailable'] };
+      }
       const body = buildBootstrap({
         authorityStatus,
         identity: identityFor(identity.email),
-        catalog: ctx.catalog ?? null,
-        readiness: ctx.readiness ?? { ready: false, reasons: ['catalog-not-loaded'] },
+        catalog,
+        readiness,
+        now: ctx.now,
+        lastTick: ctx.lastTick ? ctx.lastTick() : null,
       });
       sendJson(res, 200, assertBootstrap(body));
     } catch (error) {
@@ -143,10 +174,47 @@ export function createDashboardHandler(ctx) {
     if (req.method !== 'GET') return sendJson(res, 405, { code: 'METHOD_NOT_ALLOWED' });
     try {
       const authorityStatus = await loadAuthorityStatus(ctx);
+      let lifetimeTotals = null;
+      if (typeof ctx.readLifetimeTotals === 'function') {
+        try {
+          lifetimeTotals = await ctx.readLifetimeTotals();
+        } catch (error) {
+          ctx.onError?.('operator-lifetime-totals', error);
+        }
+      }
+      let cardHistory = null;
+      if (typeof ctx.cardHistory === 'function') {
+        try {
+          cardHistory = await ctx.cardHistory({ limit: 60 });
+        } catch (error) {
+          ctx.onError?.('operator-card-history', error);
+        }
+      }
+      const latestCycle = lifetimeTotals?.latestCycle;
+      let latestCycleAllocations = null;
+      if (latestCycle && typeof ctx.readCycleAllocations === 'function') {
+        try {
+          latestCycleAllocations = await ctx.readCycleAllocations(latestCycle.cycleId);
+        } catch (error) {
+          ctx.onError?.('operator-cycle-allocations', error);
+        }
+      }
+      let schedulerView = null;
+      if (typeof ctx.getSchedulerView === 'function') {
+        try {
+          schedulerView = ctx.getSchedulerView();
+        } catch (error) {
+          ctx.onError?.('operator-scheduler-view', error);
+        }
+      }
       const body = buildDashboardReadModel({
         authorityStatus,
         now: ctx.now,
         lastTick: ctx.lastTick ? ctx.lastTick() : null,
+        lifetimeTotals,
+        cardHistory,
+        latestCycleAllocations,
+        schedulerView,
       });
       sendJson(res, 200, assertDashboardResponse(body));
     } catch (error) {
@@ -213,8 +281,11 @@ export function createCardsHandler(ctx) {
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 50) return sendJson(res, 400, { code: 'CARDS_QUERY_INVALID' });
     const sort = url.searchParams.get('sort') ?? 'recent';
     if (!['recent', 'buyback-desc', 'buyback-asc'].includes(sort)) return sendJson(res, 400, { code: 'CARDS_QUERY_INVALID' });
+    const cursor = url.searchParams.get('cursor');
+    if (cursor !== null && decodeCardCursor(cursor, sort) === null) return sendJson(res, 400, { code: 'CARDS_QUERY_INVALID' });
     try {
       const { cards, nextCursor } = ctx.sqliteProjection.listCards({
+        cycleId: url.searchParams.get('cycleId'),
         productId: url.searchParams.get('productId'),
         rarity: url.searchParams.get('rarity'),
         from: url.searchParams.get('from'),
@@ -222,11 +293,15 @@ export function createCardsHandler(ctx) {
         minBuybackMicroUsdg: url.searchParams.get('minBuybackMicroUsdg'),
         maxBuybackMicroUsdg: url.searchParams.get('maxBuybackMicroUsdg'),
         sort,
-        cursor: url.searchParams.get('cursor'),
+        cursor,
         limit,
       });
       const total = ctx.sqliteProjection.countCards();
-      sendJson(res, 200, assertCardsResponse({ cards, nextCursor, historyComplete: total === cards.length && nextCursor === null }));
+      sendJson(res, 200, assertCardsResponse({
+        cards,
+        nextCursor,
+        historyComplete: cursor === null && total === cards.length && nextCursor === null,
+      }));
     } catch (error) {
       ctx.onError?.('operator-cards', error);
       sendJson(res, 503, { code: 'OPERATOR_CARDS_UNAVAILABLE' });
@@ -239,6 +314,7 @@ export function createAuditHandler(ctx) {
     const identity = await authenticate(req, res, ctx);
     if (!identity) return;
     if (req.method !== 'GET') return sendJson(res, 405, { code: 'METHOD_NOT_ALLOWED' });
+    await syncAuditProjection(ctx);
     const url = parsedUrl(req);
     const cursorText = url.searchParams.get('cursor');
     if (cursorText !== null && !/^[1-9]\d*$/.test(cursorText)) return sendJson(res, 400, { code: 'AUDIT_QUERY_INVALID' });

@@ -242,6 +242,15 @@ export class AuditedCommandEffectError extends Error {
   }
 }
 
+export class AuditChainInvalid extends Error {
+  constructor(brokenAtSequence, reason) {
+    super(`audit chain invalid at sequence ${brokenAtSequence}: ${reason}`);
+    this.code = 'AUDIT_CHAIN_INVALID';
+    this.brokenAtSequence = brokenAtSequence;
+    this.reason = reason;
+  }
+}
+
 export function commandDigest({ expectedVersion, command, note }) {
   return digest({
     domain: 'hookemon.dashboard-command.v1',
@@ -401,27 +410,46 @@ export async function readAllAuditEntries(path) {
   }
 }
 
+function verifyAuditEntry(entry, expectedPrevHash) {
+  if (entry.prevHash !== expectedPrevHash) return 'prevHash mismatch';
+  const { hash, ...unhashed } = entry;
+  const expectedHash = digest({ domain: 'hookemon.dashboard-audit-entry.v1', entry: unhashed });
+  if (hash !== expectedHash) return 'hash mismatch';
+  return null;
+}
+
+/** Read one complete snapshot and verify every entry before it can be projected. */
+export async function readVerifiedAuditEntries(path) {
+  const entries = await readAllAuditEntries(path);
+  const result = verifyAuditEntries(entries);
+  if (!result.valid) throw new AuditChainInvalid(result.brokenAtSequence, result.reason);
+  return entries;
+}
+
+/** Verify the whole snapshot before selecting a tail; the prefix is never an unchecked anchor. */
+export async function readAuditEntriesAfter(path, sequence) {
+  if (!Number.isSafeInteger(sequence) || sequence < 0) throw new Error('audit sequence must be a non-negative integer');
+  return (await readVerifiedAuditEntries(path)).slice(sequence);
+}
+
 /** Verify the full hash chain at `path`: sequence numbers are contiguous from 1, every entry's
  * `prevHash` matches the previous entry's `hash` (or `GENESIS_HASH` for the first entry), and every
  * entry's own `hash` recomputes correctly from its fields. Returns `{ valid: true, count }` or
  * `{ valid: false, brokenAtSequence, reason }`. */
 export async function verifyAuditChain(path) {
-  const entries = await readAllAuditEntries(path);
+  return verifyAuditEntries(await readAllAuditEntries(path));
+}
+
+function verifyAuditEntries(entries) {
   let expectedPrevHash = GENESIS_HASH;
   for (let index = 0; index < entries.length; index += 1) {
     const entry = entries[index];
     if (entry.sequence !== index + 1) {
       return { valid: false, brokenAtSequence: entry.sequence, reason: 'sequence gap' };
     }
-    if (entry.prevHash !== expectedPrevHash) {
-      return { valid: false, brokenAtSequence: entry.sequence, reason: 'prevHash mismatch' };
-    }
-    const { hash, ...unhashed } = entry;
-    const expectedHash = digest({ domain: 'hookemon.dashboard-audit-entry.v1', entry: unhashed });
-    if (hash !== expectedHash) {
-      return { valid: false, brokenAtSequence: entry.sequence, reason: 'hash mismatch' };
-    }
-    expectedPrevHash = hash;
+    const reason = verifyAuditEntry(entry, expectedPrevHash);
+    if (reason !== null) return { valid: false, brokenAtSequence: entry.sequence, reason };
+    expectedPrevHash = entry.hash;
   }
   return { valid: true, count: entries.length };
 }
