@@ -16,6 +16,7 @@ import {
   AuditRequestConflict,
   AuditedCommandEffectError,
   executeAuditedCommand,
+  readVerifiedAuditEntries,
   readAllAuditEntries,
 } from '../auth/audit-log.mjs';
 import { sendJson } from './public.mjs';
@@ -82,6 +83,18 @@ async function projectDurableAuditReceipt(ctx, receipt) {
     // The sqlite database is an optional, rebuildable read projection. Its failure cannot decide
     // whether a command reaches the already-audited runner authority.
     ctx.onError?.('operator-audit-projection', error);
+  }
+}
+
+async function syncAuditProjection(ctx) {
+  if (!ctx.auditLogPath || typeof ctx.sqliteProjection?.rebuildAuditProjection !== 'function') return;
+  try {
+    // One verified snapshot replaces the projection atomically. Sequence counts alone cannot
+    // distinguish an append from a replacement with the same or a longer prefix.
+    const durable = await readVerifiedAuditEntries(ctx.auditLogPath);
+    ctx.sqliteProjection.rebuildAuditProjection(durable);
+  } catch (error) {
+    ctx.onError?.('operator-audit-sync', error);
   }
 }
 
@@ -301,6 +314,7 @@ export function createAuditHandler(ctx) {
     const identity = await authenticate(req, res, ctx);
     if (!identity) return;
     if (req.method !== 'GET') return sendJson(res, 405, { code: 'METHOD_NOT_ALLOWED' });
+    await syncAuditProjection(ctx);
     const url = parsedUrl(req);
     const cursorText = url.searchParams.get('cursor');
     if (cursorText !== null && !/^[1-9]\d*$/.test(cursorText)) return sendJson(res, 400, { code: 'AUDIT_QUERY_INVALID' });

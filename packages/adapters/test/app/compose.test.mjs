@@ -18,11 +18,12 @@ import { PublicKey, Transaction } from '@solana/web3.js';
 import { acquireLease } from '../../../runner/src/automation/exclusive-lease.mjs';
 import { createEmptyOperatorState, mutateOperatorState, readOperatorState } from '../../../runner/src/operator/state-file.mjs';
 import { applyOperatorConfiguration } from '../../../runner/src/config/state-schema.mjs';
-import { digest } from '../../../runner/src/cycle/journal.mjs';
+import { canonicalJson, digest } from '../../../runner/src/cycle/journal.mjs';
 import { createRelayClient, createQuoteUsdValuation, relayQuoteDigest } from '../../src/relay-client.mjs';
 import { createRequestListener } from '../../../dashboard/src/server.mjs';
 import { normalizePublicCommunitySnapshot } from '../../../dashboard/src/contracts/public-community-snapshot.mjs';
 import { appendAuditEntry, readAllAuditEntries } from '../../../dashboard/src/auth/audit-log.mjs';
+import { runOperatorCli } from '../../../runner/src/operator/cli.mjs';
 import { buildQuoteRefreshPlanner, compose as composeRoot, createTrustedSolanaBlockhashContextResolver } from '../../src/app/compose.mjs';
 import {
   CYCLE_REPOSITORY_CLIENT_INTERFACE,
@@ -2720,6 +2721,58 @@ test('dashboard composed in-process: run-cycle-now over HTTP actually drives the
   const dashboardBody = await server.get('/operator/api/dashboard', { 'x-hookemon-proxy-credential': DASHBOARD_CREDENTIAL });
   assert.equal(dashboardBody.status, 200);
   assert.notEqual(dashboardBody.body.nextCycleAt, null);
+});
+
+test('dashboard ingests a CLI configuration writer and preserves CAS conflicts', async t => {
+  const stateDir = await tempStateDir(t);
+  const statePath = join(stateDir, 'operator-state.json');
+  const server = await buildComposedDashboard(t, { statePath, stateDir });
+  const inputPath = join(stateDir, 'configuration.json');
+  await writeFile(inputPath, `${canonicalJson({
+    allowedPackIds: ['base-pack'],
+    intervalMinutes: 30,
+    max24HourBudgetMicroUsd: '100',
+    maxBoostersPerCycle: 1,
+    maxCycleBudgetMicroUsd: '100',
+    maxUnitPriceMicroUsd: '100',
+    requestedOrders: 1,
+  })}\n`, 'utf8');
+
+  await runOperatorCli([
+    'update-configuration',
+    '--expected-revision', '0',
+    '--request-id', 'cli-config-1',
+    '--input', inputPath,
+  ], {
+    operatorControl: server.composition.operatorControl,
+    executeAudited: server.composition.executeAudited,
+  });
+
+  const headers = { 'x-hookemon-proxy-credential': DASHBOARD_CREDENTIAL };
+  const bootstrap = await server.get('/operator/api/bootstrap', headers);
+  assert.equal(bootstrap.status, 200);
+  assert.equal(bootstrap.body.state.version, 1);
+  assert.equal(bootstrap.body.state.intervalMinutes, 30);
+  const audit = await server.get('/operator/api/audit', headers);
+  assert.equal(audit.status, 200);
+  assert.equal(audit.body.decisions.some(entry => entry.requestId === 'cli-config-1'), true);
+
+  const stale = await server.post('/operator/api/decisions', {
+    requestId: 'dashboard-stale-config',
+    expectedVersion: 0,
+    command: {
+      type: 'update-configuration',
+      configuration: {
+        allowedPackIds: ['base-pack'],
+        intervalMinutes: 40,
+        maxBoostersPerCycle: 1,
+        requestedOrders: 1,
+      },
+    },
+  }, headers);
+  assert.equal(stale.status, 409);
+  assert.equal(stale.body.code, 'COMMAND_REJECTED');
+  assert.equal(stale.body.state.version, 1);
 });
 
 test('dashboard composed in-process: public and private routes share the real lifetime projection', async t => {

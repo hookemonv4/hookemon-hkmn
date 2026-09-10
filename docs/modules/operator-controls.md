@@ -72,6 +72,15 @@ creates a local cycle store, signer, or provider effect.
 
 - Configuration commands use the operator-state revision as their compare-and-swap value.
 - Pause, resume, kill, and configuration updates persist the next configuration before returning.
+
+The dashboard refreshes the audit projection from the durable shared audit log, so
+commands issued by the CLI become visible in the next audit response. The browser
+stores the revision from which a configuration form was loaded and sends that
+revision on save. Polling never rebases dirty edits; when another writer advances
+the revision, the dashboard displays the external revision and offers an explicit
+“Externe Änderungen übernehmen” action. A stale save is reported as a
+`Revisionskonflikt` with the expected and current revisions. Operators should review
+the preserved edits before adopting external configuration or resubmitting.
 - Manual approval persists through the policy engine. A held-owner decision persists through the
   repository. The accepted command shapes are:
 

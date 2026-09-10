@@ -104,6 +104,7 @@ export function openSqliteProjection(path) {
     LIMIT :limit
   `);
   const deleteAllAudit = db.prepare('DELETE FROM audit_entries');
+  const maxAudit = db.prepare('SELECT COALESCE(MAX(sequence), 0) AS sequence FROM audit_entries');
 
   const upsertCardStmt = db.prepare(`
     INSERT INTO cards (cycle_id, pack_index, product_id, rarity, nft_address, card_name, set_name, card_number, image_url, pack_price_micro_usdg, buyback_micro_usdg, observed_at)
@@ -181,6 +182,27 @@ export function openSqliteProjection(path) {
         entry.action, entry.outcome, entry.resultCode, entry.observedVersion, entry.note,
         entry.requestId ?? null, entry.commandDigest ?? null,
       );
+    },
+
+    maxAuditSequence() {
+      return maxAudit.get().sequence;
+    },
+
+    appendAuditEntries(entries) {
+      db.exec('BEGIN');
+      try {
+        for (const entry of entries) {
+          insertAudit.run(
+            entry.sequence, entry.eventId, entry.occurredAt, entry.actor.email, entry.actorRole,
+            entry.action, entry.outcome, entry.resultCode, entry.observedVersion, entry.note,
+            entry.requestId ?? null, entry.commandDigest ?? null,
+          );
+        }
+        db.exec('COMMIT');
+      } catch (error) {
+        db.exec('ROLLBACK');
+        throw error;
+      }
     },
 
     /** Page through audit entries, most recent first. `cursor` (a sequence number) returns entries

@@ -242,6 +242,23 @@ change resets it, and a failed initial load is retried once on the next successf
 
 Bootstrap publishes the runner's canonical recipient options and the saved future-cycle limit.
 The authenticated configuration command accepts only numeric integers 100–1000 in steps of 100.
+
+### Concurrent operator audit and configuration refresh
+
+The private audit projection ingests the shared hash-chained audit log before each
+`/operator/api/audit` response. This makes CLI-originated entries visible without a
+dashboard restart. Every refresh verifies the full durable snapshot, then replaces
+the projection in one SQLite transaction using that exact snapshot. Valid shorter,
+equal-length and longer replacement logs cannot mix with the prior projection. An
+invalid prefix or tail is reported through the dashboard error seam and leaves the
+last verified projection available.
+
+The operator browser keeps the configuration form's base revision separately from
+the live bootstrap revision. Polling adopts fresh configuration only while the form
+is clean; dirty edits and their compare-and-swap base are preserved. External changes
+are shown with both revisions and require an explicit adoption action. A stale save
+returns a revision conflict rather than silently rebasing the form, so the operator
+can inspect the edits and retry deliberately.
 The owner page separates the editable choice, confirmed saved value and active-cycle frozen value.
 A successful command requires an authoritative matching bootstrap readback before the page reports
 success. Stale, uncertain, failed or unreadable outcomes remain visibly unconfirmed; reload restores

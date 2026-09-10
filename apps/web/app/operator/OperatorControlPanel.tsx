@@ -3,7 +3,7 @@
 import NativeAccounting from "../NativeAccounting";
 import { nativeValidationSkeleton, requireNativeRound } from "../../lib/native-accounting.mjs";
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import {
   decodeCycleStartProjectPool,
@@ -31,6 +31,11 @@ import {
   PENDING_COMMAND_STORAGE_KEY,
   serializePendingCommand,
 } from "./command-lifecycle.mjs";
+import {
+  describeRevisionConflict,
+  mergeAuditEntries,
+  reconcileConfigurationForm,
+} from "./refresh-state.mjs";
 import styles from "./operator.module.css";
 
 type Role = "viewer" | "operator";
@@ -207,6 +212,7 @@ type DecisionResponse = {
   commandState?: string;
   replayed?: boolean;
   receipt?: unknown;
+  state?: { version?: number };
 };
 
 // Matches DECISION_TYPES in packages/dashboard/src/contracts/operator-contracts.mjs exactly.
@@ -290,9 +296,22 @@ export default function OperatorControlPanel() {
   const [error, setError] = useState<string | null>(null);
   const [dashboardError, setDashboardError] = useState<string | null>(null);
   const [commandRun, setCommandRun] = useState<CommandRun | null>(null);
+  const [formBaseVersion, setFormBaseVersion] = useState<number | null>(null);
+  const [formBaseSnapshot, setFormBaseSnapshot] = useState<string | null>(null);
+  const [externalChange, setExternalChange] = useState<{ fromVersion: number; toVersion: number } | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
+  const formRef = useRef(form);
+  const formBaseSnapshotRef = useRef(formBaseSnapshot);
+  const formBaseVersionRef = useRef(formBaseVersion);
+  const busyRef = useRef(busy);
+  useEffect(() => {
+    formRef.current = form;
+    formBaseSnapshotRef.current = formBaseSnapshot;
+    formBaseVersionRef.current = formBaseVersion;
+    busyRef.current = busy;
+  }, [busy, form, formBaseSnapshot, formBaseVersion]);
 
-  const loadAudit = useCallback(async (cursor?: string) => {
+  const loadAudit = useCallback(async (cursor?: string, { merge = false } = {}) => {
     await Promise.resolve();
     setAuditBusy(true);
     try {
@@ -302,8 +321,10 @@ export default function OperatorControlPanel() {
       const response = await fetch(endpoint, { cache: "no-store" });
       const body = await readJson<AuditResponse>(response);
       if (!response.ok) throw new Error(stableMessage(body.code));
-      setDecisions((current) => (cursor ? [...current, ...body.decisions] : body.decisions));
-      setNextCursor(body.nextCursor ?? null);
+      setDecisions((current) => cursor || merge
+        ? (cursor ? [...current, ...body.decisions] : mergeAuditEntries(current, body.decisions))
+        : body.decisions);
+      if (!merge || cursor) setNextCursor(body.nextCursor ?? null);
     } catch (auditError) {
       setError(errorMessage(auditError));
     } finally {
@@ -311,7 +332,7 @@ export default function OperatorControlPanel() {
     }
   }, []);
 
-  const loadBootstrap = useCallback(async ({ replaceForm = true } = {}) => {
+  const loadBootstrap = useCallback(async ({ replaceForm = "always" }: { replaceForm?: "always" | "if-clean" | "never" } = {}) => {
     await Promise.resolve();
     setLoading(true);
     setError(null);
@@ -321,7 +342,27 @@ export default function OperatorControlPanel() {
       if (!response.ok) throw new Error(stableMessage(body.code));
       assertNativeOperatorConfiguration(body.state, body.hardCaps);
       setBootstrap(body);
-      if (replaceForm) setForm(formFromState(body.state));
+      const freshSnapshot = configurationSnapshotFromState(body.state);
+      if (replaceForm === "always") {
+        setForm(formFromState(body.state));
+        setFormBaseVersion(body.state.version);
+        setFormBaseSnapshot(freshSnapshot);
+        setExternalChange(null);
+      } else if (replaceForm === "if-clean") {
+        const reconciled = reconcileConfigurationForm({
+          form: formRef.current,
+          baseSnapshot: formBaseSnapshotRef.current ?? freshSnapshot,
+          freshState: body.state,
+          freshSnapshot,
+          formFromState,
+          baseVersion: formBaseVersionRef.current ?? body.state.version,
+          formSnapshot: configurationSnapshotFromForm(formRef.current),
+        });
+        setForm(reconciled.form);
+        setFormBaseVersion(reconciled.baseVersion);
+        setFormBaseSnapshot(reconciled.externalChange ? formBaseSnapshotRef.current : freshSnapshot);
+        setExternalChange(reconciled.externalChange);
+      }
       setMessage("Private Steuerung ist geladen.");
     } catch (bootstrapError) {
       setBootstrap(null);
@@ -349,7 +390,7 @@ export default function OperatorControlPanel() {
   const controlsDisabled = loading || busy || pendingCommand !== null || readOnly || !bootstrap;
   const dashboardPlaceholder = dashboardError ? "Nicht verfügbar" : "Wird geladen…";
   const hasUnsavedChanges = bootstrap
-    ? configurationSnapshotFromForm(form) !== configurationSnapshotFromState(bootstrap.state)
+    ? configurationSnapshotFromForm(form) !== (formBaseSnapshot ?? configurationSnapshotFromState(bootstrap.state))
     : false;
 
   const runCommandEnvelope = useCallback(async (envelope: CommandEnvelope, successMessage: string) => {
@@ -361,6 +402,7 @@ export default function OperatorControlPanel() {
     setCommandRun({ requestId: envelope.requestId, phase: "running", code: null, attempts: 0 });
     for (let attempt = 0; ; attempt += 1) {
       let outcome;
+      let responseBody: DecisionResponse | null = null;
       try {
         const response = await fetch("/operator/api/decisions", {
           method: "POST",
@@ -371,9 +413,8 @@ export default function OperatorControlPanel() {
           },
           body: serializePendingCommand(envelope),
         });
-        let body: DecisionResponse | null = null;
-        try { body = await readJson<DecisionResponse>(response); } catch { /* classify the status */ }
-        outcome = classifyDecisionOutcome({ status: response.status, body, requestId: envelope.requestId });
+        try { responseBody = await readJson<DecisionResponse>(response); } catch { /* classify the status */ }
+        outcome = classifyDecisionOutcome({ status: response.status, body: responseBody, requestId: envelope.requestId });
       } catch {
         outcome = classifyDecisionOutcome({ status: null, body: null, requestId: envelope.requestId });
       }
@@ -387,7 +428,7 @@ export default function OperatorControlPanel() {
         window.sessionStorage.removeItem(PENDING_COMMAND_STORAGE_KEY);
         setPendingCommand(null);
         await Promise.all([
-          loadBootstrap({ replaceForm: envelope.command.type === "update-configuration" }),
+          loadBootstrap({ replaceForm: envelope.command.type === "update-configuration" ? "always" : "never" }),
           loadAudit(),
           loadDashboard(),
         ]);
@@ -397,8 +438,16 @@ export default function OperatorControlPanel() {
       if (outcome.phase === "failure") {
         window.sessionStorage.removeItem(PENDING_COMMAND_STORAGE_KEY);
         setPendingCommand(null);
-        await loadBootstrap({ replaceForm: false });
-        setError(stableMessage(outcome.code ?? undefined));
+        await loadBootstrap({ replaceForm: "if-clean" });
+        const currentVersion = responseBody?.state?.version;
+        setError(outcome.code === "COMMAND_REJECTED"
+          && Number.isSafeInteger(currentVersion)
+          && currentVersion !== envelope.expectedVersion
+          ? describeRevisionConflict({
+            expectedVersion: envelope.expectedVersion,
+            currentVersion,
+          })
+          : stableMessage(outcome.code ?? undefined));
         setMessage("Entscheidung wurde nicht angenommen.");
         break;
       }
@@ -409,7 +458,7 @@ export default function OperatorControlPanel() {
           code: outcome.code,
           attempts: attempt + 1,
         });
-        await Promise.all([loadBootstrap({ replaceForm: false }), loadAudit(), loadDashboard()]);
+        await Promise.all([loadBootstrap({ replaceForm: "if-clean" }), loadAudit(), loadDashboard()]);
         setMessage(`Ergebnis unbestimmt – Zustand wurde neu geladen; Anfrage ${envelope.requestId} im Audit prüfen.`);
         break;
       }
@@ -427,7 +476,14 @@ export default function OperatorControlPanel() {
       });
     }, 0);
     const clock = window.setInterval(() => setNowMs(Date.now()), 1_000);
-    const refresh = window.setInterval(() => void loadDashboard(), 10_000);
+    const refresh = window.setInterval(() => {
+      if (busyRef.current) return;
+      void Promise.all([
+        loadDashboard(),
+        loadBootstrap({ replaceForm: "if-clean" }),
+        loadAudit(undefined, { merge: true }),
+      ]);
+    }, 10_000);
     return () => {
       window.clearTimeout(initialLoad);
       window.clearInterval(clock);
@@ -435,11 +491,12 @@ export default function OperatorControlPanel() {
     };
   }, [loadAudit, loadBootstrap, loadDashboard, runCommandEnvelope]);
 
-  function submitCommand(command: Command, successMessage: string) {
+  function submitCommand(command: Command, successMessage: string, expectedVersion = bootstrap?.state.version) {
     if (!bootstrap || controlsDisabled) return;
+    if (!Number.isSafeInteger(expectedVersion)) return;
     const envelope = buildCommandEnvelope({
       requestId: crypto.randomUUID(),
-      expectedVersion: bootstrap.state.version,
+      expectedVersion,
       command,
       note: form.note.trim() || undefined,
     }) as CommandEnvelope;
@@ -451,6 +508,10 @@ export default function OperatorControlPanel() {
 
   function saveConfiguration(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (formBaseVersion === null) {
+      setError("Konfigurationsstand ist noch nicht geladen.");
+      return;
+    }
     let maxUnitPriceMicroUsd;
     let maxCycleBudgetMicroUsd;
     let max24HourBudgetMicroUsd;
@@ -481,6 +542,7 @@ export default function OperatorControlPanel() {
         },
       },
       "Konfiguration wurde gespeichert und protokolliert.",
+      formBaseVersion,
     );
   }
 
@@ -608,7 +670,14 @@ export default function OperatorControlPanel() {
           value={bootstrap?.identity.role === "operator" ? "Operator" : "Nur Lesen"}
           tone={bootstrap?.identity.role === "operator" ? "positive" : "neutral"}
         />
-        <StatusCard label="Konfigurationsstand" value={String(bootstrap?.state.version ?? "—")} tone="neutral" />
+        <StatusCard
+          label="Konfigurationsstand"
+          value={String(bootstrap?.state.version ?? "—")}
+          detail={formBaseVersion !== null && formBaseVersion !== bootstrap?.state.version
+            ? `Formular basiert auf Stand ${formBaseVersion}`
+            : undefined}
+          tone="neutral"
+        />
       </div>
 
       <div className={styles.feedback} aria-live="polite">
@@ -631,6 +700,17 @@ export default function OperatorControlPanel() {
           </span>
         ) : null}
       </div>
+      {externalChange ? (
+        <div className={styles.feedback} role="status">
+          <span>
+            Konfiguration wurde extern geändert (Stand {externalChange.fromVersion} → {externalChange.toVersion}).
+            Ungespeicherte Änderungen bleiben erhalten.
+          </span>
+          <button type="button" onClick={() => void loadBootstrap({ replaceForm: "always" })}>
+            Externe Änderungen übernehmen
+          </button>
+        </div>
+      ) : null}
 
       <section className={`${styles.panel} ${styles.currentCyclePanel}`} aria-label="Laufender Zyklus">
         <div className={styles.panelHeading}>
@@ -1155,11 +1235,22 @@ export default function OperatorControlPanel() {
   );
 }
 
-function StatusCard({ label, value, tone }: { label: string; value: string; tone: "positive" | "warning" | "neutral" }) {
+function StatusCard({
+  label,
+  value,
+  detail,
+  tone,
+}: {
+  label: string;
+  value: string;
+  detail?: string;
+  tone: "positive" | "warning" | "neutral";
+}) {
   return (
     <div className={styles.statusCard} data-tone={tone}>
       <span>{label}</span>
       <strong>{value}</strong>
+      {detail ? <small>{detail}</small> : null}
     </div>
   );
 }

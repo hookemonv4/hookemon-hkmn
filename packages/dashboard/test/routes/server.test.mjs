@@ -5,7 +5,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
 
-import { appendAuditEntry, readAllAuditEntries } from '../../src/auth/audit-log.mjs';
+import {
+  appendAuditEntry,
+  executeAuditedCommand,
+  readAllAuditEntries,
+  readAuditEntriesAfter,
+} from '../../src/auth/audit-log.mjs';
 import { normalizePublicCycleStatus } from '../../src/contracts/public-cycle-status.mjs';
 import { normalizePublicCommunitySnapshot } from '../../src/contracts/public-community-snapshot.mjs';
 import { buildContext, createRequestListener, readEnvironmentConfig } from '../../src/server.mjs';
@@ -230,6 +235,37 @@ test('authority mutations appear in the next bootstrap view and its durable audi
   const bootstrap = await server.get('/operator/api/bootstrap', AUTH);
   assert.equal(bootstrap.body.state.cycleIntervalMinutes, 30);
   assert.deepEqual(bootstrap.body.state.manualPackOrders, [{ productId: 'base-pack', quantity: 2 }]);
+});
+
+test('audit requests ingest concurrent writers, isolate tampered tails, and rebuild replacements', async t => {
+  const server = await buildTestServer(t);
+  await executeAuditedCommand({
+    path: server.ctx.auditLogPath,
+    requestId: 'cli-audit-1',
+    command: { type: 'pause' },
+    actor: { email: 'cli' },
+    actorRole: 'operator',
+    expectedVersion: 0,
+    observedVersion: 0,
+    effect: async () => ({ action: 'pause' }),
+  });
+  const synced = await server.get('/operator/api/audit', AUTH);
+  assert.equal(synced.status, 200);
+  assert.equal(synced.body.decisions[0].requestId, 'cli-audit-1');
+  const validEntries = await readAllAuditEntries(server.ctx.auditLogPath);
+  const lines = (await readFile(server.ctx.auditLogPath, 'utf8')).trim().split('\n');
+  await writeFile(server.ctx.auditLogPath, `${lines[0]}\n${JSON.stringify({ ...JSON.parse(lines.at(-1)), hash: 'sha256:forged' })}\n`, 'utf8');
+
+  const tampered = await server.get('/operator/api/audit', AUTH);
+  assert.equal(tampered.status, 200);
+  assert.equal(tampered.body.decisions[0].requestId, 'cli-audit-1');
+  assert.equal(server.calls.errors.at(-1).operation, 'operator-audit-sync');
+
+  await writeFile(server.ctx.auditLogPath, `${JSON.stringify(validEntries[0])}\n`, 'utf8');
+  const rebuilt = await server.get('/operator/api/audit', AUTH);
+  assert.equal(rebuilt.status, 200);
+  assert.equal(rebuilt.body.decisions.length, 1);
+  assert.equal(rebuilt.body.decisions[0].requestId, 'cli-audit-1');
 });
 
 test('run-cycle-now invokes the authority once and retains its precomputed receipt code', async (t) => {
@@ -838,3 +874,46 @@ test('authenticated recipient decisions accept all options and reject malformed 
   }
   assert.equal(server.calls.execute.length, count);
 });
+
+test('audit refresh rejects a corrupt prefix even when a valid tail is available', async t => {
+  const server = await buildTestServer(t);
+  const record = async requestId => executeAuditedCommand({
+    path: server.ctx.auditLogPath, requestId, command: { type: 'pause' },
+    actor: { email: 'cli' }, actorRole: 'operator', expectedVersion: 0, observedVersion: 0,
+    effect: async () => ({ action: 'pause' }),
+  });
+  await record('prefix-command');
+  const before = await server.get('/operator/api/audit', AUTH);
+  await record('tail-command');
+  const entries = await readAllAuditEntries(server.ctx.auditLogPath);
+  entries[0].action = 'tampered-prefix';
+  await writeFile(server.ctx.auditLogPath, entries.map(JSON.stringify).join('\n') + '\n');
+  const after = await server.get('/operator/api/audit', AUTH);
+  assert.equal(after.status, 200);
+  assert.deepEqual(after.body.decisions, before.body.decisions);
+  assert.equal(server.calls.errors.at(-1).operation, 'operator-audit-sync');
+  await assert.rejects(readAuditEntriesAfter(server.ctx.auditLogPath, 2), /hash mismatch/);
+});
+
+for (const replacementCount of [1, 2]) {
+  test(`audit refresh atomically replaces a valid ${replacementCount === 1 ? 'equal-length' : 'longer'} log`, async t => {
+    const server = await buildTestServer(t);
+    const record = async (path, requestId) => executeAuditedCommand({
+      path, requestId, command: { type: 'pause' },
+      actor: { email: 'cli' }, actorRole: 'operator', expectedVersion: 0, observedVersion: 0,
+      effect: async () => ({ action: 'pause' }),
+    });
+    await record(server.ctx.auditLogPath, 'old-command');
+    await server.get('/operator/api/audit', AUTH);
+    const replacementPath = `${server.ctx.auditLogPath}.replacement`;
+    for (let index = 0; index < replacementCount; index += 1) {
+      await record(replacementPath, `replacement-${index}`);
+    }
+    await writeFile(server.ctx.auditLogPath, await readFile(replacementPath));
+    const response = await server.get('/operator/api/audit', AUTH);
+    assert.equal(response.status, 200);
+    assert.equal(response.body.decisions.length, replacementCount * 2);
+    assert.ok(response.body.decisions.every(entry => entry.requestId.startsWith('replacement-')));
+    assert.equal(server.calls.errors.length, 0);
+  });
+}

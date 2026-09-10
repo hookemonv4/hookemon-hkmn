@@ -9,7 +9,7 @@ test("keeps German configuration controls separate from canonical decision paylo
   assert.match(source, /parseGermanUsd\(form\.maxUnitPriceMicroUsd\)/);
   assert.match(source, /allowedPackIds:\s*\[\.\.\.form\.allowedPackIds\]\.sort\(\)/);
   assert.match(source, /requestedOrders:\s*Number\(form\.requestedOrders\)/);
-  assert.match(source, /configurationSnapshotFromState\(bootstrap\.state\)/);
+  assert.match(source, /formBaseSnapshot/);
   assert.match(source, /Ungespeicherte Änderungen werden für diesen Befehl nicht verwendet/);
   assert.match(source, /command\.type === "update-configuration"/);
   assert.doesNotMatch(source, /abort-active-cycle|cancel-active-cycle/);
@@ -20,7 +20,7 @@ test("keeps German configuration controls separate from canonical decision paylo
   );
   const runCommandBody = source.slice(
     source.indexOf("const runCommandEnvelope"),
-    source.indexOf("useEffect(() =>"),
+    source.indexOf("const initialLoad"),
   );
   assert.match(
     runCommandBody,
@@ -28,9 +28,24 @@ test("keeps German configuration controls separate from canonical decision paylo
   );
   assert.match(
     runCommandBody,
-    /await loadBootstrap\(\{ replaceForm: false \}\);[\s\S]*?setMessage\("Entscheidung wurde nicht angenommen\."\);/,
+    /await loadBootstrap\(\{ replaceForm: "if-clean" \}\);[\s\S]*?setMessage\("Entscheidung wurde nicht angenommen\."\);/,
   );
   assert.match(submitCommandBody, /reservePendingCommand\(window\.sessionStorage, envelope\)/);
+  assert.match(source, /formBaseVersion,\s*$/m);
+  assert.match(source, /loadBootstrap\(\{ replaceForm: "if-clean" \}\)/);
+  assert.match(source, /mergeAuditEntries\(current, body\.decisions\)/);
+  assert.match(source, /describeRevisionConflict/);
+  const bootstrapCallback = source.slice(
+    source.indexOf("const loadBootstrap"),
+    source.indexOf("const loadDashboard"),
+  );
+  assert.match(bootstrapCallback, /}, \[\]\);/);
+  const mountEffect = source.slice(
+    source.lastIndexOf("useEffect(() => {", source.indexOf("const initialLoad")),
+    source.indexOf("function submitCommand"),
+  );
+  assert.doesNotMatch(mountEffect, /}, \[busy/);
+  assert.doesNotMatch(mountEffect, /\bform\b/);
 });
 
 test("uses the authenticated operator proxy instead of a browser-side control service", async () => {
