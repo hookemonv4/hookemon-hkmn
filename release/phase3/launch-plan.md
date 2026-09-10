@@ -32,7 +32,7 @@ The unchanged curve uses $2,509.82 ETH/USD as a dated calculation reference, not
 Select the production targets by both source path and contract name:
 
 - `src/launch/HKMNToken.sol:HKMNToken`: constructor `(address issuanceAuthority_, address expectedQuoteCurrency_, uint8 decimals_, uint160 launchSqrtPriceX96_)`. Use native quote address zero, decimals 18 and the fixed price above. The supplied issuanceAuthority must equal the deployment caller. Another HKMNToken in the source closure is not this target.
-- `src/bindings/RobinhoodBindings.sol:PermanentPositionCustody`: constructor `(address manager, uint256 tokenId)`. Platform mapping supplies the verified PositionManager and initial token-ID binding. The contract records its deployment caller as deployer.
+- `src/bindings/RobinhoodBindings.sol:PermanentPositionCustody`: constructor `(address manager, uint256 tokenId)`. Platform mapping supplies the verified PositionManager; constructor tokenId is fixed at 0 for unbound custody before minting. The minted position ID is bound on position receipt. The contract records its deployment caller as deployer.
 - `src/HookemonHook.sol:HookemonHook`: constructor `(ConstructorConfig config)`, one tuple containing the following 18 fields in ABI order. Preserve hook permission mask `0x20cc`.
 
 | Hook field | Configuration source |
