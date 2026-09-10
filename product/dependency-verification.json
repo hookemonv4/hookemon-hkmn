@@ -114,8 +114,8 @@
   },
   "forkProof": {
     "path": ".github/workflows/fork-proof.yml",
-    "expectedSha256": "e971b50c65f7a78b8b24b48236b5b6b8e780cca47f9f5546a6d1763357d14ae8",
-    "actualSha256": "e971b50c65f7a78b8b24b48236b5b6b8e780cca47f9f5546a6d1763357d14ae8"
+    "expectedSha256": "eb4a7a85fa7ceac0624b71108e07e901041c0024fd35ab64c54461c3107e569b",
+    "actualSha256": "eb4a7a85fa7ceac0624b71108e07e901041c0024fd35ab64c54461c3107e569b"
   },
   "forkPinCanary": {
     "path": ".github/workflows/fork-pin-canary.yml",
@@ -188,13 +188,13 @@
     },
     "controlDependencyVerifier": {
       "path": "scripts/verify-control-dependencies.mjs",
-      "expectedSha256": "0357feccf25cafa24ba1470f5e268745e7cc459d11b4c733953ccc375cc03ce2",
-      "actualSha256": "0357feccf25cafa24ba1470f5e268745e7cc459d11b4c733953ccc375cc03ce2",
+      "expectedSha256": "8dd8a2fd97c6e8adede24abe6c068257049b4927aefc9700d121c2d766963f9c",
+      "actualSha256": "8dd8a2fd97c6e8adede24abe6c068257049b4927aefc9700d121c2d766963f9c",
       "closure": [
         {
           "path": "scripts/verify-control-dependencies.mjs",
-          "sha256": "0357feccf25cafa24ba1470f5e268745e7cc459d11b4c733953ccc375cc03ce2",
-          "actualSha256": "0357feccf25cafa24ba1470f5e268745e7cc459d11b4c733953ccc375cc03ce2"
+          "sha256": "8dd8a2fd97c6e8adede24abe6c068257049b4927aefc9700d121c2d766963f9c",
+          "actualSha256": "8dd8a2fd97c6e8adede24abe6c068257049b4927aefc9700d121c2d766963f9c"
         },
         {
           "path": "scripts/lib/util.mjs",
@@ -212,8 +212,8 @@
   "controlInputs": {
     "archiveForkProofTest": {
       "path": "packages/contracts/test/integration/RobinhoodV4ArchiveFork.t.sol",
-      "expectedSha256": "8fa65b1674bb4bc7d241934fcf731ba7174aa255e79a6359311a461f38e4c3e7",
-      "actualSha256": "8fa65b1674bb4bc7d241934fcf731ba7174aa255e79a6359311a461f38e4c3e7"
+      "expectedSha256": "64303ee5323f72c4b77f29283cdf237cfe299d99398f75ae8a1c8908cb6fc1ad",
+      "actualSha256": "64303ee5323f72c4b77f29283cdf237cfe299d99398f75ae8a1c8908cb6fc1ad"
     }
   },
   "workflowPolicy": {
@@ -273,7 +273,7 @@
     "schema": "hookemon.control-gate-pin-bump.v2",
     "approvalToken": "OWNER APPROVED",
     "basePinsSha256": "484bfda7519b3814e6fb61ba52936478de6e89154e60973dfd500cbf1d3befe3",
-    "candidatePinsSha256": "750c827d5c6292ca27b774f91376eb718a80a0ceaf6901198da6b4a00571b9b5",
+    "candidatePinsSha256": "7fdf431591e414c0fc1fed2e734edff1c59ffb41b762dd5912832ec3f9cc445e",
     "baseChecker": {
       "path": "scripts/verify-control-dependencies.mjs",
       "blobId": "d5ae88e0f36cce3d3efa185c940236fd8e7ad94f"
@@ -282,17 +282,17 @@
       {
         "path": ".github/workflows/fork-proof.yml",
         "previousSha256": "8bf73db693c8d154383809e8d08948b93cb41ba711db750921af31638b6ef9c5",
-        "sha256": "e971b50c65f7a78b8b24b48236b5b6b8e780cca47f9f5546a6d1763357d14ae8"
+        "sha256": "eb4a7a85fa7ceac0624b71108e07e901041c0024fd35ab64c54461c3107e569b"
       },
       {
         "path": "packages/contracts/test/integration/RobinhoodV4ArchiveFork.t.sol",
         "previousSha256": "471f698428a87ca02e218c67feb620e9fbbb3de0decf784f0a881da84fd9a0f8",
-        "sha256": "8fa65b1674bb4bc7d241934fcf731ba7174aa255e79a6359311a461f38e4c3e7"
+        "sha256": "64303ee5323f72c4b77f29283cdf237cfe299d99398f75ae8a1c8908cb6fc1ad"
       },
       {
         "path": "scripts/verify-control-dependencies.mjs",
         "previousSha256": "fbb53af1521686b8fb35dcdec587f311e6195156cb28d857ae4dd5a49dc086ed",
-        "sha256": "0357feccf25cafa24ba1470f5e268745e7cc459d11b4c733953ccc375cc03ce2"
+        "sha256": "8dd8a2fd97c6e8adede24abe6c068257049b4927aefc9700d121c2d766963f9c"
       }
     ]
   }

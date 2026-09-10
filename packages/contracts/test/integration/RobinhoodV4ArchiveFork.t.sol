@@ -298,11 +298,11 @@ contract RobinhoodV4ArchiveForkTest is Test {
     bytes32 private constant PROVIDER_GAS_TOKEN_RUNTIME_CODEHASH =
         0x9a382167c9d16ee53d22783791a11451bc24efd8333559f8041fa874e3c15293;
     bytes32 private constant PROVIDER_GAS_CUSTODY_RUNTIME_CODEHASH =
-        0xc1a729f40a3616958820dc337e1f2eba676c7fcdaf86b143e23e61dc1e761cc7;
+        0xbcb76c463b917551467cad9b62d0c9d9dc8fb29b979dd99238429fa51e42cd98;
     bytes32 private constant PROVIDER_GAS_HOOK_RUNTIME_CODEHASH =
-        0x9138fa9da73b8c0f138771778f360fadcfb0bfc86bc5051ba94f022cb3a4f220;
+        0x5ad20c4e7d8efe9413e81926b184b3061e563bcd35efd65361207af1e18dab5e;
     bytes32 private constant PROVIDER_GAS_GRAPH_DEPLOYMENT_HASH =
-        0xec66384ba378b4eeb5d4bd59e1124af3d5c68d50270ed187981561bdaf364cc6;
+        0xf4708339b938a04302460d35ffb8e2e681ecebfc3c77f6702602908eb4027e21;
     bytes32 private constant PROVIDER_GAS_ROUTE_NAMESPACE =
         keccak256("phase-three-provider-gas-namespace-v1");
     bytes32 private constant PROVIDER_GAS_ROUTE_NONCE =
