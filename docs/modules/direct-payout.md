@@ -10,7 +10,8 @@ Distribute finalized native ETH returned to Operations among the frozen pre-clai
 
 Definitively refused native recipients remain quarantined until a later authenticated payment is
 observed. The payout state keeps retry records under the original recipient attempt and accepts
-one unresolved retry at a time. `retryRefusedPayoutRecipient` advances one durable retry step per
+one unresolved retry at a time. New recipient records include an empty `retries` list and null
+`settlement`; legacy records normalize missing fields to those same defaults. `retryRefusedPayoutRecipient` advances one durable retry step per
 invocation: it reconciles the original refusal before requesting a retry, persists prepared,
 signed, broadcast, finality, and refusal transitions, settles repository liability before marking
 a retry paid, and removes the recipient from `state.quarantine` only after settlement. An
