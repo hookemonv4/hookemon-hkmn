@@ -75,6 +75,7 @@ import {
   isLiveCollectorOnlyRehearsal,
   requireCollectorOnlyMutationAuthority,
 } from '../../rehearsal/collector-only-authorization.mjs';
+import { requestDigest } from './stages/request-digest.mjs';
 
 export { LiveModeIntegrationPendingError };
 
@@ -363,18 +364,6 @@ async function canResumePlanPurchase(cycleRepository, context, current) {
     generated++;
   }
   return generated > 0 && generated < cycle.admission.orders.length;
-}
-
-function requestDigest(context, request) {
-  if (!context || typeof context.cycleId !== 'string' || typeof context.stage !== 'string') {
-    throw new Error('stage-driver context must include cycleId and stage');
-  }
-  return digest({
-    schema: 'hookemon.operational-stage-request.v1',
-    cycleId: context.cycleId,
-    stage: context.stage,
-    request,
-  });
 }
 
 function freezeRequest(value) {
@@ -1463,6 +1452,10 @@ export function createStageDriver({
       }
 
       const current = await cycleRepository.readOperationalStageAttempt(context.cycleId, context.stage);
+      if (current?.attempt.state === 'RECONCILED') {
+        const stage = await cycleRepository.readStage(context.cycleId, context.stage);
+        if (stage?.status === 'COMPLETE') return;
+      }
       const resumePlanPurchase = !chainJournal && await canResumePlanPurchase(cycleRepository, context, current);
       if (current && !chainJournal && current.attempt.state !== 'NOT_SENT' && !resumePlanPurchase) {
         throw new Error(`stage-driver: "${context.stage}" already has a prepared or sent attempt and requires reconciliation`);

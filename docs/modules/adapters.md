@@ -82,7 +82,13 @@ infrastructure.
   narrower collector-only rehearsal profile, their `prepareRequest` receives its own dedicated
   frozen input carrying `liveMode`, a lease-fenced read-only Collector machine-catalog reader
   (purchase only), a lease-fenced read-only `cycleRepository` facade, `config`, and `context` --
-  never a signer, a writable repository, or any other adapter. Each reaches its own real refusal
+  never a signer, a writable repository, or any other adapter. Epic-gate recovery rebuilds a
+  PREPARED or SENT_UNKNOWN request from durable open-stage evidence, verifies its request digest,
+  and re-evaluates only through read-only Collector calls. Before either initial gating or
+  recorded-sell re-verification, epic-gate checks durable held positions by memo and treats an
+  existing held record as final; it returns that position without consulting the Collector.
+  This preserves a hold written before a crash even if a later provider response would say `sell`.
+  Each reaches its own real refusal
   (missing durable predecessor-stage evidence, the Collector policy evidence-only gate, or a
   downstream configuration or mutation-authority refusal) rather than the frozen
   `LiveModeIntegrationPendingError`, which the driver keeps defined only as inert historical

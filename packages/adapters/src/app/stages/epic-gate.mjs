@@ -1,6 +1,7 @@
 import { assertTypedAmount } from '../../../../runner/src/cycle/money-schemas.mjs';
 import { COLLECTOR_CRYPT_SETTLEMENT_ASSET } from '../../collector-crypt.mjs';
-import { heldPackIdForMemo } from './held-pack.mjs';
+import { existingHeldPackOutcome, heldPackIdForMemo } from './held-pack.mjs';
+import { requestDigest } from './request-digest.mjs';
 
 const DOCUMENTED_PRIZE_TIER_RARITIES = Object.freeze({
   1: 'epic',
@@ -156,6 +157,13 @@ function optionalTypedAmount(value) {
 }
 
 async function recordHeldEpicPosition({ cycleRepository, config, context, packIndex, memo, mint, terminalState, reason, insuredValue = null, evidence }) {
+  const existing = await existingHeldPackOutcome({
+    cycleRepository,
+    cycleId: context.cycleId,
+    memo,
+    packIndex,
+  });
+  if (existing !== null) return existing;
   if (typeof cycleRepository?.recordHeldPosition !== 'function') {
     throw new Error('epic gate requires cycleRepository.recordHeldPosition');
   }
@@ -357,6 +365,13 @@ export async function probeEpicGate({ cycleRepository, context }) {
 /** Evaluates one already-opened card; a pass-through held pack requires no new evaluation. */
 async function gatePack({ adapters, config, cycleRepository, context, pack }) {
   if (pack.decision === 'held') return pack;
+  const existing = await existingHeldPackOutcome({
+    cycleRepository,
+    cycleId: context.cycleId,
+    memo: pack.memo,
+    packIndex: pack.packIndex,
+  });
+  if (existing !== null) return existing;
   try {
     const result = await evaluateLiveGate({ adapters, config, memo: pack.memo, mint: pack.mint });
     if (result.held) {
@@ -402,6 +417,13 @@ export async function mutateEpicGate({ liveMode, adapters, config, cycleReposito
 /** Re-verifies a recorded sell decision; a held pack (pass-through or newly carved) is final. */
 async function reconcilePack({ adapters, config, cycleRepository, context, recorded }) {
   if (recorded.decision === 'held') return recorded;
+  const existing = await existingHeldPackOutcome({
+    cycleRepository,
+    cycleId: context.cycleId,
+    memo: recorded.memo,
+    packIndex: recorded.packIndex,
+  });
+  if (existing !== null) return existing;
   if (recorded.decision === 'hold') {
     return recordHeldEpicPosition({
       cycleRepository, config, context,
@@ -466,8 +488,18 @@ async function reconcilePack({ adapters, config, cycleRepository, context, recor
 export async function reconcileLiveEpicGate({ adapters, config, cycleRepository, context }) {
   const record = await cycleRepository.readOperationalStageAttempt(context.cycleId, 'epic-gate');
   const evidence = record?.responseEvidence;
-  if (!plainObject(evidence) || !Array.isArray(evidence.packs)) return null;
+  if (plainObject(evidence) && Array.isArray(evidence.packs)) {
+    const outcomes = [];
+    for (const recorded of evidence.packs) outcomes.push(await reconcilePack({ adapters, config, cycleRepository, context, recorded }));
+    return { packs: outcomes };
+  }
+  const attemptState = record?.attempt?.state;
+  if (!['PREPARED', 'SENT_UNKNOWN'].includes(attemptState)) return null;
+  const request = await prepareEpicGateRequest({ cycleRepository, context });
+  if (requestDigest(context, request) !== record.attempt.requestDigest) {
+    throw new Error('epic-gate durable request no longer matches the prepared attempt; operator review required');
+  }
   const outcomes = [];
-  for (const recorded of evidence.packs) outcomes.push(await reconcilePack({ adapters, config, cycleRepository, context, recorded }));
-  return { packs: outcomes };
+  for (const pack of request.packs) outcomes.push(await gatePack({ adapters, config, cycleRepository, context, pack }));
+  return { packs: outcomes, recovered: { fromAttemptState: attemptState } };
 }
