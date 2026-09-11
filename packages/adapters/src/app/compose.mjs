@@ -19,6 +19,7 @@ import { collectRehearsalEvidence, ensureRehearsalEvidence } from '../../../runn
 import { MAXIMUM_PACK_BATCH_SIZE } from '../../../runner/src/cycle/money-schemas.mjs';
 import { createOperatorControl } from '../../../runner/src/operator/control.mjs';
 import { inspectCycleRecovery } from '../../../runner/src/operator/cli.mjs';
+import { createManualCycleControl, MANUAL_TEST_PLAN } from '../../../runner/src/operator/manual-cycle.mjs';
 import { createScheduler } from '../../../runner/src/scheduler/scheduler.mjs';
 import { mutateOperatorState, readOperatorState } from '../../../runner/src/operator/state-file.mjs';
 import { createRequestListener } from '../../../dashboard/src/server.mjs';
@@ -258,6 +259,7 @@ async function composeDashboard({
   listRecentWinners,
   readCatalog,
   readReadiness,
+  manualCycleControl,
   now,
 }) {
   const auditVerification = await verifyAuditChain(dashboardConfig.auditLogPath);
@@ -282,6 +284,7 @@ async function composeDashboard({
     proxyCredential: dashboardConfig.proxyCredential,
     cycleRepository,
     operatorControl,
+    manualCycleControl,
     sqliteProjection,
     auditLogPath: dashboardConfig.auditLogPath,
     accessJwtVerifier,
@@ -1892,8 +1895,8 @@ export async function compose(config) {
     policyEngine,
     now,
     readCustody,
-    triggerTick: () => scheduler.triggerTick(),
-    async resumeActiveCycle() {
+    triggerTick: resolved.manualStart === true ? undefined : () => scheduler.triggerTick(),
+    resumeActiveCycle: resolved.manualStart === true ? undefined : async () => {
       const active = await cycleRepository.readActiveCycle();
       if (active === null) {
         return buildConfiguredRecoveryService().recoverActiveCycle({});
@@ -2020,6 +2023,39 @@ export async function compose(config) {
     },
   });
 
+  const manualCycleControl = resolved.manualStart === true ? createManualCycleControl({
+    path: join(resolved.stateDir, 'manual-cycle-request.json'),
+    cycleRepository,
+    buildWorker: () => buildAutomatedCycleService(true, 'production'),
+    now,
+    async readReadiness({ recovery = false, cycleId = null } = {}) {
+      const reasons = [];
+      if (resolved.execution.profile !== 'production' || resolved.execution.providerMode !== 'live'
+        || resolved.execution.dryRun) reasons.push('LIVE_PRODUCTION_REQUIRED');
+      const state = await operatorControl.status();
+      const configuration = state.configuration;
+      if (!configuration?.liveMode) reasons.push('LIVE_POLICY_REQUIRED');
+      if (configuration?.paused || configuration?.executionPaused) reasons.push('EXECUTION_PAUSED');
+      if (configuration?.killSwitch) reasons.push('KILL_SWITCH_ACTIVE');
+      const orders = configuration?.packPlan?.orders;
+      if (!Array.isArray(orders) || orders.length !== 1 || orders[0].pack !== 'pokemon_25'
+        || orders[0].quantity !== 1) reasons.push('EXACT_SINGLE_25_DOLLAR_PACK_REQUIRED');
+      if (configuration?.rewardRecipientLimit !== 100) reasons.push('TOP_100_RECIPIENT_LIMIT_REQUIRED');
+      if (state.activeCycleId !== null && (!recovery || state.activeCycleId !== cycleId)) reasons.push('ACTIVE_CYCLE_REQUIRES_RECONCILIATION');
+      if (!Array.isArray(state.heldPositions) || state.heldPositions.length > 0) reasons.push('HELD_CUSTODY_NOT_CLEAR');
+      // The live runner binds reward evidence to HKMN and funding to a process claim. A display
+      // address or wallet balance cannot replace either authenticated admission binding.
+      reasons.push('DIRECT_WALLET_FUNDING_NOT_IMPLEMENTED', 'EXTERNAL_TOKEN_RECIPIENT_BINDING_UNAVAILABLE');
+      try {
+        await assertStartReadiness({ liveMode: true, mode: 'production',
+          requirePolicyConfiguration: true, requireCanaryPreflight: true });
+      } catch { reasons.push('PRODUCTION_PREFLIGHT_NOT_READY'); }
+      return { ready: reasons.length === 0, reasons, revision: state.revision,
+        configurationRevision: configuration?.configurationRevision ?? null,
+        plan: { ...MANUAL_TEST_PLAN } };
+    },
+  }) : null;
+
   dashboard = dashboardConfig
     ? await composeDashboard({
       dashboardConfig,
@@ -2035,6 +2071,7 @@ export async function compose(config) {
       now,
       readCatalog: activationReadiness.readCatalog,
       readReadiness: activationReadiness.readReadiness,
+      manualCycleControl,
     })
     : null;
   if (dashboard !== null) {
@@ -2045,6 +2082,7 @@ export async function compose(config) {
 
   return {
     scheduler,
+    manualCycleControl,
     service,
     cycleRepository: cycleRepositoryClient,
     createCycleRunner,
@@ -2065,6 +2103,8 @@ export async function compose(config) {
     assertStartReadiness,
     async shutdown() {
       scheduler.stop();
+      manualCycleControl?.stop();
+      await manualCycleControl?.settled();
       await dashboard?.close();
       observability?.close();
     },

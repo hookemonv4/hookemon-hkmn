@@ -40,6 +40,10 @@
     .pack-group .grid { margin-top: 12px; }
     .pack-option { display: flex; align-items: center; gap: 12px; padding: 12px; border: 1px solid var(--border); border-radius: 6px; overflow-wrap: anywhere; }
     .pack-option input { width: 22px; min-height: 22px; flex-shrink: 0; }
+    .table-scroll { max-height: 480px; overflow: auto; overscroll-behavior: contain; }
+    table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    th { position: sticky; top: 0; background: var(--panel); }
+    th, td { padding: 6px 8px; text-align: left; border-bottom: 1px solid var(--border); overflow-wrap: anywhere; }
     .control-note { margin-top: 10px; font-size: 14px; }
     @media (min-width: 735px) { main { padding: 40px; } .two { grid-template-columns: repeat(2, minmax(0, 1fr)); } .controls { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
     @media (min-width: 1069px) { main { padding-inline: 56px; } .three { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
@@ -67,6 +71,18 @@
           <button id="killBtn" class="danger" type="button">Stop with kill switch</button>
         </div>
         <p class="control-note">Each button records one request and sends it to the operator authority.</p>
+      </section>
+
+      <section aria-labelledby="manualCycleHeading">
+        <h2 id="manualCycleHeading">One mainnet test cycle</h2>
+        <p>Use existing wallet funds, bridge ETH to Solana, buy and open one Starter Pokémon pack, sell the card, bridge proceeds back, then distribute proportionally by holdings to the top 100 holders of the selected token.</p>
+        <p id="manualCyclePlan" class="value">1 × pokemon_25 · $25 pack · Top 100 holders · Recipient token pending</p>
+        <p class="control-note">Bridge and network fees are additional. This request starts one cycle; it does not enable a repeating plan.</p>
+        <div class="grid two"><button id="startManualCycleBtn" class="approve" type="button" disabled>Start one cycle</button><button id="refreshManualCycleBtn" type="button">Check readiness and status</button></div>
+        <p id="manualCycleMessage" class="message" role="status">Load the dashboard to check mainnet readiness.</p>
+        <h3>Recipient holder snapshot</h3>
+        <p id="manualHolderMessage">Holder snapshot not available.</p>
+        <div id="manualHolderTable" class="table-scroll"></div>
       </section>
 
       <section aria-labelledby="packsHeading">
@@ -148,9 +164,140 @@
       if (!response.ok) {
         var error = new Error(body && body.code ? body.code : 'Request failed');
         error.responseBody = body;
+        error.status = response.status;
         throw error;
       }
       return body;
+    }
+
+    var manualCycleState = null, checkingManualCycle = false, startingManualCycle = false;
+    var manualCycleKey = 'manual-mainnet-cycle';
+    function manualCycleTerminal(request) { return request && ['completed', 'failed', 'rejected'].includes(String(request.status).toLowerCase()); }
+    function manualCyclePlanValid(state) {
+      var plan = state && state.plan;
+      return state && state.schemaVersion === 1 && state.executionMode === 'manual' && plan
+        && plan.packCode === 'pokemon_25' && plan.quantity === 1 && plan.packPriceMicroUsd === '25000000'
+        && plan.recipientLimit === 100 && plan.chainId === 4663 && plan.fundingSource === 'existing-wallet'
+        && typeof plan.recipientTokenAddress === 'string' && /^0x[0-9a-fA-F]{40}$/.test(plan.recipientTokenAddress)
+        && plan.recipientTokenAddress.toLowerCase() === '0xc60ba256b44334a0cd2c7242e98b88f031abb006';
+    }
+    function updateManualCycleButton() {
+      $('startManualCycleBtn').disabled = checkingManualCycle || startingManualCycle || loadingDashboard || savingPacks || savingReward
+        || !Number.isSafeInteger(revision) || !manualCyclePlanValid(manualCycleState) || manualCycleState.ready !== true || manualCycleState.reasons.length > 0
+        || Boolean(pendingRequests()[manualCycleKey]) || Boolean(manualCycleState.request);
+      $('refreshManualCycleBtn').disabled = checkingManualCycle || startingManualCycle || loadingDashboard;
+    }
+    function holderBalance(atomic, decimals) {
+      if (typeof atomic !== 'string' || !/^\d+$/.test(atomic)) return 'Not available';
+      var digits = atomic.replace(/^0+(?=\d)/, '');
+      if (decimals === 0) return digits;
+      digits = digits.padStart(decimals + 1, '0');
+      var fraction = digits.slice(-decimals).replace(/0+$/, '');
+      return digits.slice(0, -decimals) + (fraction ? '.' + fraction : '');
+    }
+    function renderManualHolders(snapshot, tokenAddress) {
+      var target = $('manualHolderTable'); target.replaceChildren();
+      if (!snapshot || snapshot.status === 'unavailable' || String(snapshot.tokenAddress).toLowerCase() !== String(tokenAddress).toLowerCase() || !Array.isArray(snapshot.recipients)) {
+        $('manualHolderMessage').textContent = 'Holder snapshot not available.';
+        return;
+      }
+      var verified = snapshot.status === 'verified' && snapshot.finalized === true && snapshot.blockNumber && snapshot.blockHash;
+      $('manualHolderMessage').textContent = (verified ? 'Verified finalized holder snapshot.' : 'Preview only. Holder eligibility and finality are not verified.')
+        + ' This is a holder list, not payout results.' + (snapshot.observedAt ? ' Observed: ' + snapshot.observedAt + '.' : '')
+        + (snapshot.blockNumber ? ' Block: ' + snapshot.blockNumber + '.' : '')
+        + (Array.isArray(snapshot.reasons) && snapshot.reasons.length ? ' ' + snapshot.reasons.join(' ') : '');
+      if (!snapshot.recipients.length) return;
+      var decimalBalance = Number.isInteger(snapshot.tokenDecimals) && snapshot.tokenDecimals >= 0 && snapshot.tokenDecimals <= 36;
+      var table = document.createElement('table');
+      var caption = document.createElement('caption'); caption.textContent = decimalBalance ? 'Top holders · exact V4 balances' : 'Top holders · balances in atomic token units'; table.appendChild(caption);
+      var head = document.createElement('thead'), header = document.createElement('tr');
+      ['Rank', 'Holder address', decimalBalance ? 'Balance (V4)' : 'Balance (atomic)', 'Share (%)'].forEach(function (label) { var cell = document.createElement('th'); cell.textContent = label; header.appendChild(cell); });
+      head.appendChild(header); table.appendChild(head);
+      var body = document.createElement('tbody');
+      snapshot.recipients.forEach(function (recipient) {
+        var row = document.createElement('tr');
+        var balance = decimalBalance ? holderBalance(recipient.balanceAtomic, snapshot.tokenDecimals) : recipient.balanceAtomic;
+        [recipient.rank, recipient.address, balance, recipient.sharePercent].forEach(function (value, index) {
+          var cell = document.createElement('td'); cell.textContent = value === null || value === undefined ? 'Not available' : String(value);
+          if (index === 2 && recipient.balanceAtomic !== undefined) cell.title = String(recipient.balanceAtomic) + ' atomic token units';
+          row.appendChild(cell);
+        });
+        body.appendChild(row);
+      });
+      table.appendChild(body); target.appendChild(table);
+    }
+    var manualCycleReasons = {
+      DIRECT_WALLET_FUNDING_NOT_IMPLEMENTED: 'Existing-wallet funding is not connected to this runner.',
+      EXTERNAL_TOKEN_RECIPIENT_BINDING_UNAVAILABLE: 'The Programmable holder snapshot is not connected to payouts.',
+      EXECUTION_UNAVAILABLE: 'The mainnet cycle execution service is unavailable.',
+      LIVE_PRODUCTION_REQUIRED: 'This runner is not connected to live production.',
+      LIVE_POLICY_REQUIRED: 'The live execution policy is not active.',
+      EXECUTION_PAUSED: 'Execution is paused.',
+      KILL_SWITCH_ACTIVE: 'The kill switch is active.',
+      EXACT_SINGLE_25_DOLLAR_PACK_REQUIRED: 'Save exactly one Starter Pokémon pack at $25 before starting.',
+      TOP_100_RECIPIENT_LIMIT_REQUIRED: 'Save a recipient limit of 100 before starting.',
+      ACTIVE_CYCLE_REQUIRES_RECONCILIATION: 'An existing cycle must be reconciled before a new test.',
+      HELD_CUSTODY_NOT_CLEAR: 'Held assets must be resolved before a new test.',
+      PRODUCTION_PREFLIGHT_NOT_READY: 'Production preflight has not confirmed execution readiness.',
+      MANUAL_RUNTIME_NOT_CONNECTED: 'The manual cycle runner is not connected.',
+      MANUAL_RECORD_UNREADABLE: 'The previous manual request cannot be read. Execution is unavailable.',
+      MANUAL_READINESS_UNAVAILABLE: 'The manual runner cannot confirm readiness.',
+      MANUAL_PLAN_MISMATCH: 'The runner plan does not match this one-pack test.',
+      MANUAL_TEST_ALREADY_REQUESTED: 'This one-time test has already been requested. Check its status below.',
+      MANUAL_NOT_READY: 'The mainnet cycle is not ready to start.',
+      STALE_REVISION: 'The saved configuration changed. Reload the dashboard before starting.',
+      READINESS_CHANGED: 'Readiness changed before execution. This request did not start a cycle.'
+    };
+    function manualCycleReason(reason) { return manualCycleReasons[reason] || reason; }
+    function renderManualCycle(state) {
+      if (!state || state.schemaVersion !== 1 || !Array.isArray(state.reasons)) throw new Error('Manual cycle readiness is unavailable.');
+      manualCycleState = state;
+      var plan = state.plan || {};
+      renderManualHolders(state.holderSnapshot, plan.recipientTokenAddress);
+      $('manualCyclePlan').textContent = (plan.quantity || '?') + ' × ' + (plan.packCode || 'Pack unavailable')
+        + ' · ' + (plan.packPriceMicroUsd === '25000000' ? '$25 pack' : 'Pack price unverified')
+        + ' · Top ' + (plan.recipientLimit || '?') + ' holders · Recipient token: '
+        + (plan.tokenName ? plan.tokenName + (plan.tokenSymbol ? ' (' + plan.tokenSymbol + ')' : '') + ' · ' : '')
+        + (plan.recipientTokenAddress || 'Pending owner selection');
+      var pending = pendingRequests()[manualCycleKey];
+      if (pending && state.request && pending.requestId === state.request.requestId && manualCycleTerminal(state.request)) clearRequest(manualCycleKey);
+      var details = state.reasons.map(manualCycleReason);
+      if (!manualCyclePlanValid(state)) details.push('The one-pack mainnet plan and recipient token are not verified.');
+      if (state.request) details.push('Request ' + state.request.requestId + ': ' + state.request.status
+        + (state.request.cycleId ? ' · Cycle ' + state.request.cycleId : '')
+        + (state.request.resultCode ? ' · ' + manualCycleReason(state.request.resultCode) : ''));
+      if (pendingRequests()[manualCycleKey]) details.push('A submitted request is unresolved. Check status before starting another cycle.');
+      if (state.request && !manualCycleTerminal(state.request)) details.push('Acceptance does not confirm the cycle or payouts are complete.');
+      $('manualCycleMessage').textContent = details.join(' ') || (state.ready === true ? 'Ready for one manual mainnet cycle.' : 'Mainnet execution is unavailable.');
+      updateManualCycleButton();
+    }
+    async function checkManualCycle() {
+      if (checkingManualCycle || startingManualCycle) return;
+      checkingManualCycle = true; manualCycleState = null; renderManualHolders(null); updateManualCycleButton();
+      $('manualCycleMessage').textContent = 'Checking mainnet readiness and request status…';
+      try { renderManualCycle(await api('/operator/api/manual-cycle')); }
+      catch (error) { manualCycleState = null; $('manualCycleMessage').textContent = 'Unavailable: ' + error.message + (pendingRequests()[manualCycleKey] ? ' The previous request is unresolved.' : ''); }
+      finally { checkingManualCycle = false; updateManualCycleButton(); }
+    }
+    async function startManualCycle() {
+      updateManualCycleButton();
+      if ($('startManualCycleBtn').disabled) return;
+      startingManualCycle = true; updateManualCycleButton();
+      try {
+        var requests = pendingRequests();
+        var intent = requests[manualCycleKey] || { requestId: requestId(), expectedRevision: revision };
+        requests[manualCycleKey] = intent; savePendingRequests(requests);
+        $('manualCycleMessage').textContent = 'Submitting one cycle. Waiting for authority confirmation…';
+        await api('/operator/api/manual-cycle', { method: 'POST', headers: { 'content-type': 'application/json', 'x-hookemon-proxy-credential': credential() }, body: JSON.stringify(intent) });
+        renderManualCycle(await api('/operator/api/manual-cycle'));
+      } catch (error) {
+        var refusal = error.responseBody;
+        var notAdmitted = error.status === 409 && refusal && refusal.request === null && ['MANUAL_NOT_READY', 'STALE_REVISION'].includes(refusal.code);
+        if (notAdmitted) clearRequest(manualCycleKey);
+        manualCycleState = null;
+        $('manualCycleMessage').textContent = notAdmitted ? 'Request not admitted: ' + error.message + '. Check readiness before trying again.'
+          : 'Submission not confirmed: ' + error.message + '. Check status to reconcile this request. Do not start another cycle.';
+      } finally { startingManualCycle = false; updateManualCycleButton(); }
     }
 
     function cycleStage(cycle) { return cycle.terminalState || (cycle.stages || []).filter(function (stage) { return stage.status !== 'COMPLETE'; }).map(function (stage) { return stage.stage; })[0] || 'Complete'; }
@@ -317,7 +464,7 @@
 
     async function load() {
       if (savingPacks || savingReward || loadingDashboard) return;
-      loadingDashboard = true; updatePackSelection(); updateRewardSelection();
+      loadingDashboard = true; manualCycleState = null; updateManualCycleButton(); updatePackSelection(); updateRewardSelection();
       try {
         var bootstrap = await api('/operator/api/bootstrap'); var dashboard = await api('/operator/api/dashboard'); var identities = await api('/operator/api/identities'); var network = await api('/operator/api/network');
         renderReward(bootstrap);
@@ -327,8 +474,9 @@
         $('dashboard').hidden = false; message('Dashboard loaded.');
         try { renderPacks(await api('/operator/api/packs'), bootstrap.state, bootstrap.state.version); }
         catch (error) { renderPacks(null, bootstrap.state, bootstrap.state.version); $('packMessage').textContent = error.message + '. Reload to try again.'; }
+        await checkManualCycle();
       } catch (error) { message(error.message); }
-      finally { loadingDashboard = false; updatePackSelection(); updateRewardSelection(); }
+      finally { loadingDashboard = false; updatePackSelection(); updateRewardSelection(); updateManualCycleButton(); }
     }
     async function dispatch(command) {
       var pending = requestFor(command);
@@ -342,6 +490,9 @@
         message(error.message);
       }
     }
+    $('startManualCycleBtn').disabled = true;
+    $('startManualCycleBtn').addEventListener('click', startManualCycle);
+    $('refreshManualCycleBtn').addEventListener('click', checkManualCycle);
     $('rewardRecipientLimit').addEventListener('change', updateRewardSelection);
     $('saveRewardBtn').addEventListener('click', saveReward);
     $('loadBtn').addEventListener('click', load);

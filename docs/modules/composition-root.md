@@ -391,3 +391,7 @@ The saved `packPlan` drives new live cycle admission. The planner captures the s
 Live production composition supplies `readCycleConfiguration` from the persisted operator authority together with the native admission planner to freeze pack and recipient settings in one read. The native eligibility stage receives the immutable cycle policy; direct and supplementary payout reconstruction preserve selection-bearing v3 plans while retaining legacy v2 plans.
 
 The planner requires native money configuration and both Operations accounts. A composition without that planner, such as the Collector-only rehearsal, opens its cycle from the configured `pack.code` and reaches its own durable-admission refusal at the money boundary; it does not report `WAITING_FOR_ADMISSION` on the empty saved selection. A production composition reports `WAITING_FOR_ADMISSION` when its saved plan is empty or its planner declines to admit.
+
+## Manual-only service
+
+`manualStart: true` composes the authenticated manual-cycle controller and disables legacy tick and resume mutation callbacks. The CLI `run --mode production --manual-start` serves the dashboard without starting the automatic scheduler. Startup retains the production preflight and signer readiness checks. The current composition explicitly refuses the requested existing-wallet/external-token profile; it never substitutes a Hookemon process claim. Recovery is restricted to the cycle ID in the durable manual request. See [manual mainnet test](manual-mainnet-test.md).

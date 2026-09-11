@@ -273,3 +273,9 @@ projecting repository data.
 The disconnected local selection wrapper uses `assertLocalSelectionCommand` to accept only pack-plan and reward-recipient updates while paused, execution-paused and non-live. Reward-only edits do not depend on catalog availability. Pack edits retain catalog membership and the existing allowlist protections. The wrapper grants no execution operation.
 
 Native active-cycle budget fields are validated independently from the latest completed round. The first running cycle remains visible before terminal accounting exists; the panel retains its USD budget fields and does not relabel them as historical settlement amounts.
+
+## Manual mainnet test
+
+`GET /operator/api/manual-cycle` returns authenticated readiness, the fixed one-pack test plan, a durable request state and an optional read-only holder preview. `POST` accepts only `requestId` and `expectedRevision`; it does not use the generic scheduler tick command. Proxy credentials and optional Access JWT checks protect both methods. A disconnected service reports unavailable and cannot submit a request. Holder previews never grant execution authority.
+
+The built-in page exposes one start button and a read-only refresh. It retains an uncertain request ID in session storage, prevents repeat submission, and distinguishes request acceptance from cycle completion. The selected test uses existing wallet funds, one `pokemon_25` pack, and the top 100 Programmable V4 holders. Missing direct-wallet funding and external-token admission keep the production button disabled. See [manual mainnet test](manual-mainnet-test.md).

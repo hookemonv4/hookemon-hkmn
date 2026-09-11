@@ -3677,3 +3677,26 @@ for (const scenario of ['default-fresh', 'default-stale', 'injected-fresh']) {
     assert.equal(status.cap.heldPositions.valueMicroUsd, '700000', 'held purchase cost is frozen separately from native principal');
   });
 }
+
+test('manual production control refuses direct-wallet funding and foreign-token payouts without bindings', async t => {
+  const stateDir = await tempStateDir(t), statePath = join(stateDir, 'operator-state.json');
+  await writeOperatorState(statePath, { liveMode: true });
+  const composition = await compose({ stateDir, statePath, manualStart: true, moneyConfiguration: productionMoneyConfiguration(),
+    execution: { profile: 'production', networkProfile: 'mainnet', providerMode: 'live', dryRun: false, enforceProfile: true },
+    adapters: throwingAdapters(), now: () => 1000 });
+  t.after(() => composition.shutdown());
+  const status = await composition.manualCycleControl.status();
+  assert.equal(status.ready, false);
+  assert.equal(status.plan.fundingSource, 'existing-wallet');
+  assert.equal(status.plan.recipientTokenAddress, '0xC60bA256B44334A0Cd2C7242E98B88f031abB006');
+  assert.ok(status.reasons.includes('DIRECT_WALLET_FUNDING_NOT_IMPLEMENTED'));
+  assert.ok(status.reasons.includes('EXTERNAL_TOKEN_RECIPIENT_BINDING_UNAVAILABLE'));
+  const result = await composition.manualCycleControl.request({ requestId: 'mainnet-manual-test', expectedRevision: status.revision });
+  assert.equal(result.httpStatus, 409);
+  assert.equal(result.body.request, null);
+  assert.equal(await composition.cycleRepository.readActiveCycle(), null);
+  for (const type of ['resume-cycle', 'run-cycle-now']) {
+    await assert.rejects(composition.operatorControl.execute({ command: { type },
+      expectedRevision: status.revision, requestId: `manual-denied-${type}` }), /authority is unavailable/);
+  }
+});

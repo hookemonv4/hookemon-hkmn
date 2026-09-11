@@ -45,6 +45,8 @@ import {
   createDecisionsHandler,
 } from './routes/operator.mjs';
 
+import { createManualCycleHandler } from './routes/manual-cycle.mjs';
+
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 /**
@@ -95,6 +97,7 @@ export function createRequestListener(ctx) {
     ['/operator/api/network', { GET: createNetworkHandler(full) }],
     ['/operator/api/cards', { GET: createCardsHandler(full) }],
     ['/operator/api/audit', { GET: createAuditHandler(full) }],
+    ['/operator/api/manual-cycle', { GET: createManualCycleHandler(full), POST: createManualCycleHandler(full) }],
     ['/operator/api/decisions', { POST: createDecisionsHandler(full) }],
   ]);
 

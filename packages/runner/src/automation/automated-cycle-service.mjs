@@ -206,12 +206,12 @@ export class AutomatedCycleService {
     this.#feeSettlementObserver = config.feeSettlementObserver;
   }
 
-  async runOnce({ signal } = {}) {
-    return this.#run({ signal, requireActive: false });
+  async runOnce({ signal, manualCycleId = null, manualPlan = null } = {}) {
+    return this.#run({ signal, requireActive: false, manualCycleId, manualPlan });
   }
 
-  async recoverActiveCycle({ signal } = {}) {
-    return this.#run({ signal, requireActive: true });
+  async recoverActiveCycle({ signal, manualCycleId = null } = {}) {
+    return this.#run({ signal, requireActive: true, manualCycleId });
   }
 
   async #runOneSupplementarySettlement({ signal, lease, assertLease }) {
@@ -337,7 +337,10 @@ export class AutomatedCycleService {
     return true;
   }
 
-  async #run({ signal, requireActive }) {
+  async #run({ signal, requireActive, manualCycleId = null, manualPlan = null }) {
+    if (manualCycleId !== null && (typeof manualCycleId !== 'string' || manualCycleId.length === 0)) {
+      throw new Error('manual cycle identifier is invalid');
+    }
     let lease;
     let heartbeatTimer;
     let heartbeatError;
@@ -381,10 +384,14 @@ export class AutomatedCycleService {
         heartbeatTimer.unref?.();
       };
       scheduleHeartbeat();
-      const supplementary = await this.#runOneSupplementarySettlement({ signal, lease, assertLease });
-      const payoutRetries = await this.#runPayoutRetries({ signal, lease, assertLease });
+      // A manual test owns exactly its reserved cycle; unrelated settlements are never dispatched.
+      const supplementary = manualCycleId === null ? await this.#runOneSupplementarySettlement({ signal, lease, assertLease }) : null;
+      const payoutRetries = manualCycleId === null ? await this.#runPayoutRetries({ signal, lease, assertLease }) : [];
       let cycle = await this.#cycleRepository.readActiveCycle();
       let createdCycle = false;
+      if (manualCycleId !== null && cycle !== null && cycle.cycleId !== manualCycleId) {
+        return { status: 'MANUAL_CYCLE_MISMATCH', cycleId: cycle.cycleId, stage: null };
+      }
       if (cycle === null) {
         if (requireActive) {
           if (supplementary !== null) {
@@ -447,8 +454,15 @@ export class AutomatedCycleService {
         const packPlan = cycleConfiguration !== undefined ? assertPackPlan(cycleConfiguration.packPlan)
           : this.#readPackPlan === null ? undefined : assertPackPlan(await this.#readPackPlan());
         if (packPlan !== undefined && packPlan.orders.length === 0) return { status: 'WAITING_FOR_ADMISSION', cycleId: null, stage: null, requiredProcessWei: '0' };
+        if (manualCycleId !== null && (!manualPlan || !cycleConfiguration
+          || cycleConfiguration.configurationRevision !== manualPlan.configurationRevision
+          || cycleConfiguration.rewardRecipientLimit !== manualPlan.recipientLimit
+          || packPlan.orders.length !== 1 || packPlan.orders[0].pack !== manualPlan.packCode
+          || packPlan.orders[0].quantity !== manualPlan.quantity)) {
+          return { status: 'MANUAL_CONFIGURATION_CHANGED', cycleId: null, stage: null };
+        }
         const selectedPackId = packPlan?.orders[0]?.pack ?? this.#packId;
-        const reservedCycleId = this.#admissionPlanner === null ? null : this.#cycleRepository.nextCycleId();
+        const reservedCycleId = manualCycleId ?? (this.#admissionPlanner === null ? null : this.#cycleRepository.nextCycleId());
         const admission = this.#admissionPlanner === null
           ? null
           : await this.#admissionPlanner.plan({
@@ -506,6 +520,7 @@ export class AutomatedCycleService {
             configurationRevision: cycleConfiguration.configurationRevision,
           }),
           releaseAmount: decision.releaseAmount,
+          ...(manualCycleId === null ? {} : { cycleId: manualCycleId }),
           ...(packPlan === undefined ? {} : { packPlan }),
           mode: this.#mode,
           ...(admission === null ? {} : { cycleId: reservedCycleId, admission, operations: this.#operationsAccounts ?? null }),
@@ -516,6 +531,7 @@ export class AutomatedCycleService {
         createdCycle = true;
         assertLeaseCurrent({ store: this.#leaseStore, lease, now: this.#now() });
       }
+      if (manualCycleId !== null && cycle?.cycleId !== manualCycleId) throw new Error('manual cycle identity changed during admission');
       if (!cycle || typeof cycle.cycleId !== 'string') throw new Error('active cycle record is invalid');
       if (cycle.mode !== 'production' && cycle.mode !== 'rehearsal') {
         return { status: 'CYCLE_MODE_UNRESOLVED', cycleId: cycle.cycleId, stage: null };

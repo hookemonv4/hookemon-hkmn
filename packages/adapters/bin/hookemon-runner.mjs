@@ -80,7 +80,7 @@ export { applySyntheticIsolatedChildSetup, chainBroadcastTransports, composition
 
 const USAGE = `Usage: hookemon-runner run --mode rehearsal --cycles <positive-integer> --cap-micro-usd <atomic-amount> (--collector-only|--relay-roundtrip) [--restart-inject]
    or: hookemon-runner preflight [--state <absolute-path-to-operator-state.json>]
-   or: hookemon-runner run --mode production [--state <absolute-path-to-operator-state.json>] [--no-dashboard]
+   or: hookemon-runner run --mode production [--state <absolute-path-to-operator-state.json>] [--no-dashboard | --manual-start]
    or: hookemon-runner dry-run [--mode inspection|production] [--state <absolute-path-to-operator-state.json>]
    or: hookemon-runner status [--cycle <cycle-id>] [--state <absolute-path-to-operator-state.json>]
    or: hookemon-runner resume <cycle-id> [--state <absolute-path-to-operator-state.json>]
@@ -112,9 +112,9 @@ function parseOperatorArgv(rest) {
 }
 
 const COMMANDS = new Set(['run', 'preflight', 'tick', 'dry-run', 'status', 'resume', 'abort-cycle', 'operator']);
-const BOOLEAN_FLAGS = new Set(['no-dashboard', 'collector-only', 'relay-roundtrip', 'restart-inject']);
+const BOOLEAN_FLAGS = new Set(['manual-start', 'no-dashboard', 'collector-only', 'relay-roundtrip', 'restart-inject']);
 const FLAG_ALLOWLIST = Object.freeze({
-  run: new Set(['state', 'no-dashboard', 'mode', 'cycles', 'cap-micro-usd', 'collector-only', 'relay-roundtrip', 'restart-inject']),
+  run: new Set(['manual-start', 'state', 'no-dashboard', 'mode', 'cycles', 'cap-micro-usd', 'collector-only', 'relay-roundtrip', 'restart-inject']),
   preflight: new Set(['state']),
   tick: new Set(['state']),
   'dry-run': new Set(['state', 'mode']),
@@ -179,6 +179,9 @@ function parseArgv(argv) {
     const mode = flags.mode ?? null;
     if (mode === null) throw usageError('run requires --mode production or rehearsal');
     if (mode !== 'production' && mode !== 'rehearsal') throw usageError('--mode must be production or rehearsal');
+    if (flags['manual-start'] && (mode !== 'production' || flags['no-dashboard'])) {
+      throw usageError('--manual-start requires production mode with the dashboard');
+    }
     if (mode === 'rehearsal') {
       if (!Object.hasOwn(flags, 'cycles') || !Object.hasOwn(flags, 'cap-micro-usd')) {
         throw usageError('rehearsal run requires --cycles and --cap-micro-usd');
@@ -200,6 +203,7 @@ function parseArgv(argv) {
       statePathOverride: flags.state ?? null,
       noDashboard: flags['no-dashboard'] === true,
       mode,
+      manualStart: flags['manual-start'] === true,
       cycles: mode === 'rehearsal' ? parsePositiveInteger(flags.cycles, '--cycles') : null,
       capMicroUsd: mode === 'rehearsal' ? flags['cap-micro-usd'] : null,
       collectorOnly: flags['collector-only'] === true,
@@ -457,6 +461,7 @@ async function buildComposition({
   constructSigner = true,
   dryRun = false,
   environmentConfig = null,
+  manualStart = false,
 } = {}) {
   if (typeof dryRun !== 'boolean') throw new Error('buildComposition dryRun must be a boolean');
   if (dryRun && profile !== 'production') throw new Error('buildComposition dryRun requires the production profile');
@@ -466,7 +471,7 @@ async function buildComposition({
   const { compose } = await import('../src/app/compose.mjs');
 
   if (profile === 'inspection' || dryRun) {
-    return compose(compositionInput({
+    return compose({ ...compositionInput({
       env,
       statePath,
       dashboard,
@@ -477,7 +482,7 @@ async function buildComposition({
       restartInjector,
       operatorAuditLogPath,
       logTicks,
-    }));
+    }), manualStart });
   }
 
   await assertRepositoryIntegrityAt(env.stateDir);
@@ -485,7 +490,7 @@ async function buildComposition({
   if (env.signer.backend === 'keychain') {
     readiness = await probeKeychainOperations(env, { exec: createProcessExec() });
   }
-  const readinessComposition = await compose(compositionInput({
+  const readinessComposition = await compose({ ...compositionInput({
     env,
     statePath,
     dashboard: null,
@@ -496,7 +501,7 @@ async function buildComposition({
     restartInjector,
     operatorAuditLogPath,
     logTicks: false,
-  }));
+  }), manualStart });
   try {
     await readinessComposition.assertStartReadiness({
       liveMode: env.execution.providerMode === 'live',
@@ -516,7 +521,7 @@ async function buildComposition({
       exec: createProcessExec(),
       broadcast: chainBroadcastTransports(env),
     });
-  return compose(compositionInput({
+  return compose({ ...compositionInput({
     env,
     statePath,
     dashboard,
@@ -527,14 +532,14 @@ async function buildComposition({
     restartInjector,
     operatorAuditLogPath,
     logTicks,
-  }));
+  }), manualStart });
 }
 
 function writeJson(value) {
   process.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
 }
 
-async function runRun(composition) {
+async function runRun(composition, { manualStart = false } = {}) {
   let dashboardServer = null;
   if (composition.dashboard) {
     dashboardServer = createHttpServer(composition.dashboard.listener);
@@ -559,7 +564,12 @@ async function runRun(composition) {
   };
   process.on('SIGINT', stop);
   process.on('SIGTERM', stop);
-  composition.scheduler.start();
+  if (manualStart) {
+    if (!composition.manualCycleControl) throw new Error('manual cycle control is unavailable');
+    await composition.manualCycleControl.recover();
+  } else {
+    composition.scheduler.start();
+  }
   // Keep the process alive: the scheduler's own timers are unref'd by design (never keep a process
   // alive on their own — see scheduler.mjs), so this command holds an explicit ref'd interval until a
   // shutdown signal arrives.
@@ -1054,12 +1064,13 @@ export async function runCli(argv, options = {}) {
     statePathOverride,
     withDashboard: command === 'run' && !noDashboard,
     logTicks: command === 'run',
+    ...(parsed.manualStart ? { manualStart: true } : {}),
     ...(command === 'operator' || command === 'status' ? {} : { profile }),
     ...(productionDryRun ? { dryRun: true } : {}),
     ...(operatorAuditLogPath === undefined ? {} : { operatorAuditLogPath }),
   });
   try {
-    if (command === 'run') await runRun(composition);
+    if (command === 'run') await runRun(composition, { manualStart: parsed.manualStart === true });
     else if (command === 'dry-run') await runDryRun(composition, emitJson);
     else if (command === 'operator') emitJson(await runOperator(composition, operatorArgv, runComposedOperatorCli));
     else await runComposedStatus(composition, emitJson);
