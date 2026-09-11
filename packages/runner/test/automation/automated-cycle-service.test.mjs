@@ -780,3 +780,26 @@ test('an explicit missing configuration cannot open an unbound new cycle', async
   assert.equal((await service.runOnce({})).status, 'WAITING_FOR_CONFIGURATION');
   assert.equal(cycles.created.length, 0);
 });
+
+
+test('manual cycle mismatch and absent recovery never dispatch unrelated payouts or new admission', async () => {
+  const { service, cycles, executions } = fixture();
+  cycles.active = { cycleId: 'different-cycle' };
+  assert.equal((await service.recoverActiveCycle({ manualCycleId: 'reserved-cycle' })).status, 'MANUAL_CYCLE_MISMATCH');
+  cycles.active = null;
+  assert.equal((await service.recoverActiveCycle({ manualCycleId: 'reserved-cycle' })).status, 'NO_ACTIVE_CYCLE');
+  assert.equal(cycles.created.length, 0);
+  assert.equal(executions.length, 0);
+});
+
+test('manual admission refuses a plan edited after the dashboard readiness check', async () => {
+  const { service, cycles, executions } = fixture({ readCycleConfiguration: async () => ({
+    configurationRevision: 8, rewardRecipientLimit: 100,
+    packPlan: { schema: 'hookemon.pack-plan.v1', revision: 1, orders: [{ pack: 'pokemon_50', quantity: 2 }] },
+  }) });
+  const result = await service.runOnce({ manualCycleId: 'reserved-cycle', manualPlan: {
+    configurationRevision: 7, recipientLimit: 100, packCode: 'pokemon_25', quantity: 1,
+  } });
+  assert.equal(result.status, 'MANUAL_CONFIGURATION_CHANGED');
+  assert.equal(cycles.created.length, 0); assert.equal(executions.length, 0);
+});
