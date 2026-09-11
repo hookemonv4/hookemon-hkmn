@@ -415,3 +415,5 @@ Plan-backed native cycles use admission v4 and provenance v2. The admission's ex
 New selected cycles atomically persist a cycle-bound `hookemon.reward-selection-snapshot.v1` in `cycle-opened`. The snapshot freezes the operator configuration revision and recipient limit. Creation, replay and eligibility-stage completion validate the policy and its matching v2 manifest. Historical events without selection retain all-holder behavior and unchanged journal bytes. Read APIs expose the frozen policy; no setter can replace it. Large eligibility evidence uses the existing paged store and is validated after resolution.
 
 The managed claim path uses the durable [Process USD budget](process-usd-budget.md). `processClaimLimit6hMicroUsd` defaults to USD25,000, accepts zero, and is owner-adjustable up to USD50,000; it does not replace the other spend controls.
+
+The immutable state-directory recovery hold exposes cycle version `0` to operator projections. This version describes the hold, not the unavailable journal. Dashboard reads retain `HELD_DATA_UNVERIFIED` and unavailable safety telemetry; execution stays refused until the existing recovery procedure is satisfied.
