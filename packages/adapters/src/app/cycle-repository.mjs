@@ -476,6 +476,8 @@ function createStateDirectoryRecoveryRepository(hold) {
     async describeCycle(cycleId) {
       assertCycle(cycleId);
       return {
+        // The persisted recovery hold is immutable and has no mutable cycle journal.
+        version: 0,
         cycleId: recovery.cycleId,
         releaseAmount: '0',
         mode: null,
@@ -532,6 +534,11 @@ function createStateDirectoryRecoveryRepository(hold) {
     async readHeldPosition() { return null; },
     async readHeldPositionEvidence() { return null; },
     async listHeldPositions() { return []; },
+    async listPayoutObligations(cycleId) {
+      assertCycle(cycleId);
+      // The synthetic hold has no payout records; the missing journal remains unverified.
+      return [];
+    },
     async readSupplementarySettlement() { return null; },
     async readSupplementarySettlementEvidence() { return null; },
     async listKnownCycleIds() {

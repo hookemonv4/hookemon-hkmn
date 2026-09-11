@@ -27,6 +27,7 @@ import { canonicalJson, CycleJournal, digest } from '../../../runner/src/cycle/j
 import { CUSTODY_LEDGER_BUCKETS, MAXIMUM_PACK_BATCH_SIZE, OPERATIONAL_CYCLE_STAGES } from '../../../runner/src/cycle/money-schemas.mjs';
 import { createTestProfileMutationAuthority } from '../../../runner/src/cycle/preflight.mjs';
 import { createDefaultOperatorConfiguration } from '../../../runner/src/config/state-schema.mjs';
+import { createOperatorControl } from '../../../runner/src/operator/control.mjs';
 import { deriveCyclePolicyDigest } from '../../../runner/src/automation/policy-engine.mjs';
 
 const SETTLEMENT_SOURCE_ASSET = '0x5fc5360d0400a0fd4f2af552add042d716f1d168';
@@ -1179,6 +1180,18 @@ test('state-directory loss persists an owner-decision recovery hold instead of o
   await mkdir(directory);
   const reopened = await CycleRepository.open(directory);
   assert.deepEqual(await reopened.readActiveCycle(), active);
+  const control = createOperatorControl({
+    statePath: join(parent, 'operator-state.json'),
+    cycleRepository: reopened,
+    policyEngine: { async recordManualApproval() { throw new Error('Execution unavailable'); } },
+  });
+  const status = await control.status();
+  assert.equal(status.activeCycleId, active.cycleId);
+  assert.equal(status.cycles[0].version, 0);
+  assert.equal(status.cycles[0].terminalState, 'HELD_DATA_UNVERIFIED');
+  assert.equal(status.alertSources.safetyTelemetry, false);
+  assert.equal(status.cap.outstandingCustody, null);
+
   await assert.rejects(
     () => reopened.createCycle({ releaseAmount: '1', mode: 'production' }),
     /state-directory loss/,
