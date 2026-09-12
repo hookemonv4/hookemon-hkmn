@@ -660,4 +660,11 @@ export function startDashboard(doc = document) {
   return () => { stopped = true; visibilityChanged(); doc.removeEventListener('visibilitychange', visibilityChanged); };
 }
 
-if (typeof document !== 'undefined' && !document.body?.hasAttribute('data-information-page')) startDashboard();
+// The recorded-cycles feed (simple-cycles.mjs) takes the page when it is present; the live feed is
+// the fallback, unchanged.
+if (typeof document !== 'undefined' && !document.body?.hasAttribute('data-information-page')) {
+  import('./simple-cycles.mjs')
+    .then((module) => module.startSimpleCycles(document))
+    .catch(() => false)
+    .then((handled) => { if (!handled) startDashboard(); });
+}

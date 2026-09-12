@@ -94,6 +94,12 @@ export function installCycleRecords(doc = document, request = fetch) {
 }
 
 if (typeof document !== 'undefined' && document.body?.dataset.informationPage === 'cycles') {
-  const stop = installCycleRecords();
-  window.addEventListener('pagehide', stop, { once: true });
+  import('./simple-cycles.mjs')
+    .then((module) => module.startSimpleCycleRecord(document))
+    .catch(() => false)
+    .then((handled) => {
+      if (handled) return;
+      const stop = installCycleRecords();
+      window.addEventListener('pagehide', stop, { once: true });
+    });
 }

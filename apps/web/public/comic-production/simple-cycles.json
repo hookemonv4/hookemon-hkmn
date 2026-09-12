@@ -1,0 +1,70 @@
+{
+  "schema": "hookemon-simple-cycles/1",
+  "generatedAt": "2026-09-12T13:39:58.010Z",
+  "wallet": {
+    "observedAt": "2026-09-12T13:39:59.199Z",
+    "usdcSolana": 129.711608,
+    "ethRobinhood": 0.01936942472345713
+  },
+  "cycles": [
+    {
+      "cycleId": "mtyenuiz",
+      "startedAt": "2026-09-12T13:12:55.115Z",
+      "purchasedAt": "2026-09-12T13:24:12.329Z",
+      "completedAt": "2026-09-12T13:25:49.029Z",
+      "packType": "pokemon_25",
+      "packPriceUsdc": 25,
+      "cards": [
+        {
+          "mint": "6y9RbkCEpdn4KfHjZcoUdx5Sw55SjDyitqbE4BQnBefZ",
+          "name": "2015 #155 Full Art/Gardevoir EX",
+          "image": "https://arweave.net/en24WPkfvw3xBootUZt6cRWV68QFbSlA-j1o6RLzKq8"
+        }
+      ],
+      "saleUsdc": 79.9,
+      "receivedEth": 0.03136634664445922,
+      "holdersSnapshot": 100,
+      "holdersPaid": 100,
+      "holdersReverted": 0,
+      "paidEth": 0.03136634664445917,
+      "averagePayoutEth": 0.0003136634664445917,
+      "purchaseSignature": "5BD4ZYTEwerBmgCMrsRHnNNUyQSeK7KwK5V5NwMX8gsc7Ba2PFupHzjkFRe6KJ3piHhGsita3hzBABPnbADKJvgr",
+      "saleSignature": "5L9qwHrdnraiTNYpqjkrX4mRweS4XPWyMd76jhRUnhoK2Xxvei26nRaT2SpdeUMQnhFYKsjaVWvMyaho8xWcbotY",
+      "returnTxHash": "0xde3a0d88d7aa663bd8e0b0d6df733d90e8d53f30a1db43038bd21cfc8e8bef77"
+    },
+    {
+      "cycleId": "mtyefesm",
+      "startedAt": "2026-09-12T13:06:21.479Z",
+      "purchasedAt": "2026-09-12T13:08:45.143Z",
+      "completedAt": "2026-09-12T13:12:31.538Z",
+      "packType": "pokemon_25",
+      "packPriceUsdc": 25,
+      "cards": [
+        {
+          "mint": "6vmfstTJ2AFZcEvoyJwu7qVH2seW9Hz2Q37D4rfmUCGX",
+          "name": "2026 #30 Mega Charizard Y Ex CGC",
+          "image": "https://arweave.net/PUYP1ct_dtHM8DP5n4zZnozi2wNG41fp8cZrDj6E5nk"
+        }
+      ],
+      "saleUsdc": 29.75,
+      "receivedEth": 0.011669367642358524,
+      "holdersSnapshot": 100,
+      "holdersPaid": 48,
+      "holdersReverted": 28,
+      "paidEth": 0.00719865882194158,
+      "averagePayoutEth": 0.0001499720587904496,
+      "purchaseSignature": "Maun26dpKZPZD3Gu6rdYdzGoC1FNXDQzkduXUmRkcggwrQXvU98ACNngUCYUsiMUiD7PoqBh2YpdRdkdgx2X8KP",
+      "saleSignature": "2n5YrxBUf14G1JP18bp7nFWVtDFsXYm9KPhUDBtCyejmYujVt2fPPAGjsKWFVVvYFUTYLiWyGzbwZGB69kCeHfKr",
+      "returnTxHash": "0x93b3112fd94a068af70572b2fa029a77ef0c45b5c76e6b8a2c00ceff67b198cc"
+    }
+  ],
+  "totals": {
+    "cycles": 2,
+    "packsBought": 2,
+    "spentUsdc": 50,
+    "salesUsdc": 109.65,
+    "paidEth": 0.03856500546640075,
+    "payouts": 148,
+    "averagePayoutEth": 0.0002605743612594645
+  }
+}
